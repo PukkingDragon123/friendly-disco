@@ -69,6 +69,46 @@ switch (which) {
     scene.enter({ run, won: process.env.WON === '1', onDone: () => {} }, app);
     break;
   }
+  case 'deck': {
+    // The 2.5D deck on its own — needs only physics + table + animals, so it can be
+    // reviewed before the data layer is finished.
+    const PH = await import('../src/game/physics.js');
+    const T = await import('../src/render/table.js');
+    const { ANIMAL_BY_ID, STARTER_DECK } = await import('../src/data/animals.js');
+    const { createSeascape } = await import('../src/render/seascape.js');
+    const { makeRng } = await import('../src/core/rng.js');
+    const { createParticles } = await import('../src/core/particles.js');
+    const rng = makeRng(process.env.SEED || 'deck');
+    const world = PH.createWorld({});
+    const assignment = { tl: 'savanna', tm: 'arctic', tr: 'jungle', bl: 'ocean', bm: 'desert', br: 'farm' };
+    const deck = T.createDeck({ seed: 1337, assignment });
+    PH.setGates(world, T.buildGates(assignment, {}));
+    PH.rack(world, STARTER_DECK.slice(0, 10), rng, process.env.RACK || 'triangle');
+    const sea2 = createSeascape('deckdemo', {});
+    const ps = createParticles({ limit: 300, seed: 'd' });
+    if (process.env.BREAK === '1') {
+      // put a striker behind the rack and drive it into the pack, like a real break
+      const cueBall = PH.addBall(world, { animalId: STARTER_DECK[0], x: PH.TABLE_W * 0.2, y: PH.TABLE_H * 0.5 });
+      const pack = world.balls[0];
+      PH.strike(world, cueBall, Math.atan2(pack.y - cueBall.y, pack.x - cueBall.x), 1, 0.15);
+      for (let i = 0; i < Number(process.env.BREAKFRAMES || 90); i++) PH.step(world, 1 / 60);
+    }
+    const sel = world.balls.find((b) => !b.sunk);
+    const aim = sel ? PH.predict(world, sel, Number(process.env.AIM || -0.5), 0.8, 46) : null;
+    scene = {
+      update(dt) { sea2.update(dt); deck.update(dt); ps.update(dt); },
+      draw() {
+        sea2.draw(g, { x: 0, y: 0, w: 640, h: 360, horizonY: 96, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
+        deck.drawBase(g);
+        deck.drawGates(g, { highlight: 'farm' });
+        if (aim) deck.drawAim(g, aim, { r: sel.r });
+        deck.drawAnimals(g, world, { lookup: (id) => ANIMAL_BY_ID[id], selected: sel });
+        deck.drawLight(g);
+        ps.draw(g);
+      },
+    };
+    break;
+  }
   case 'sprites': {
     const { ANIMALS } = await import('../src/data/animals.js');
     const { drawAnimal } = await import('../src/render/sprites.js');

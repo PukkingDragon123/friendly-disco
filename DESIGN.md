@@ -443,7 +443,7 @@ FOREST    fox(predator,canine,small) rabbit(prey,small) deer(prey,herbivore,herd
           brownbear(bear,big,omnivore) wolf(predator,canine,pack) boar(omnivore,armored)
 ```
 
-72 animals. Rarity spread target: ~34 common, ~22 uncommon, ~12 rare, ~4 legendary
+74 animals. Rarity spread target: ~34 common, ~22 uncommon, ~12 rare, ~4 legendary
 (legendary suggestions: whale, narwhal, snowleopard, chameleon).
 `chips` scales with rarity roughly: common 20-45, uncommon 40-70, rare 65-110,
 legendary 100-160. `mult` 1-2 common, 2-3 uncommon, 3-4 rare, 4-6 legendary.

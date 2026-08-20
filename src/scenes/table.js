@@ -30,7 +30,7 @@ import {
 } from '../game/run.js';
 import { BLIND_KINDS } from '../data/blinds.js';
 
-const HUD_W = 152;
+const HUD_W = 150;
 const CTRL_Y = 274;
 const READOUT_Y = 18;
 

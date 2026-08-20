@@ -27,7 +27,9 @@ const num = (v) => typeof v === 'number' && Number.isFinite(v);
 /* ------------------------------------------------------------------ load */
 
 const M = {};
-if (section('load')) {
+{
+  // Modules always load, whatever --only selects — every section needs them.
+  const quiet = !section('load');
   const list = [
     ['palette', '../src/core/palette.js'], ['pixel', '../src/core/pixel.js'],
     ['rng', '../src/core/rng.js'], ['font', '../src/render/font.js'],
@@ -40,13 +42,13 @@ if (section('load')) {
     ['table', '../src/render/table.js'], ['scoring', '../src/game/scoring.js'],
     ['run', '../src/game/run.js'],
   ];
+  const broken = [];
   for (const [k, p] of list) {
-    try { M[k] = await import(p); ok(true, k); } catch (e) { ok(false, `import ${k}`, e.message); }
+    try { M[k] = await import(p); if (!quiet) ok(true, k); }
+    catch (e) { broken.push(k); if (!quiet) ok(false, `import ${k}`, e.message); }
   }
-  console.log(`  loaded ${Object.keys(M).length}/${list.length} modules`);
-}
-for (const k of ['palette', 'animals', 'habitats']) {
-  if (!M[k]) { try { M[k] = await import(`../src/${k === 'palette' ? 'core' : 'data'}/${k}.js`); } catch {} }
+  if (!quiet) console.log(`  loaded ${Object.keys(M).length}/${list.length} modules`);
+  else if (broken.length) console.log(`  (note: ${broken.length} module(s) unavailable: ${broken.join(', ')})`);
 }
 
 /* ------------------------------------------------------------- ROSTER spec */

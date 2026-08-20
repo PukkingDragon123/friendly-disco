@@ -77,7 +77,7 @@ serve.mjs             zero-dep static server
 DESIGN.md             the full design + module contract
 src/core/             palette, pixel primitives, rng, input, loop, juice, audio, particles
 src/render/           bitmap fonts, sprite factory, ui kit, seascape, the 2.5D deck
-src/data/             habitats, 72 animals, interactions, relics, blinds, cargo
+src/data/             habitats, 74 animals, interactions, relics, blinds, cargo
 src/game/             physics, scoring pipeline, run state
 src/scenes/           menu, table, dock, summary
 tests/                headless node tests (node tests/run.mjs)

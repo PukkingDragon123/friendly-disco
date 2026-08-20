@@ -22,17 +22,24 @@ export function createGame(canvas) {
   let fpsI = 0;
 
   function fit() {
-    const pad = 0;
-    const s = Math.max(1, Math.floor(Math.min(
-      (window.innerWidth - pad) / W,
-      (window.innerHeight - pad) / H,
-    )));
-    scale = s;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const raw = Math.min(vw / W, vh / H);
+    // Desktop snaps to an integer scale so every game pixel is a clean square. Phones
+    // rarely offer an integer fit, and letterboxing a 640x360 game down to 1x on a
+    // 390pt screen wastes most of the display, so below 2x we take the fractional scale
+    // and let `image-rendering: pixelated` keep the edges hard.
+    scale = raw >= 2 ? Math.floor(raw) : Math.max(0.5, raw);
     canvas.width = W;
     canvas.height = H;
-    canvas.style.width = W * s + 'px';
-    canvas.style.height = H * s + 'px';
+    canvas.style.width = Math.round(W * scale) + 'px';
+    canvas.style.height = Math.round(H * scale) + 'px';
     g.imageSmoothingEnabled = false;
+    api.portrait = vh > vw;
+    api.touch = ('ontouchstart' in window) || (navigator && navigator.maxTouchPoints > 0);
+    if (document.body && document.body.classList) {
+      document.body.classList.toggle('portrait', api.portrait && api.touch);
+    }
   }
 
   const api = {
@@ -44,6 +51,24 @@ export function createGame(canvas) {
     get fps() { return Math.round(1000 / (fpsRing.reduce((a, b) => a + b, 0) / fpsRing.length)); },
     time: 0,
     frame: 0,
+    portrait: false,
+    touch: false,
+
+    /** Fullscreen is the difference between a playable phone game and a toy. */
+    async fullscreen(on) {
+      const el = document.documentElement;
+      try {
+        if (on === false || document.fullscreenElement) {
+          if (document.exitFullscreen) await document.exitFullscreen();
+        } else if (el.requestFullscreen) {
+          await el.requestFullscreen({ navigationUI: 'hide' });
+        }
+      } catch (e) { /* refused; the game is still playable windowed */ }
+      if (screen && screen.orientation && screen.orientation.lock) {
+        try { await screen.orientation.lock('landscape'); } catch (e) { /* not supported */ }
+      }
+      fit();
+    },
 
     push(scene, args) {
       const prev = api.scene;
@@ -117,10 +142,13 @@ export function createGame(canvas) {
     if (top && top.drawUI) top.drawUI(g, api);
     Juice.drawOverlay(g);
 
-    Input.consume();
+    Input.consume(dt);
   }
 
   window.addEventListener('resize', fit);
+  window.addEventListener('orientationchange', () => setTimeout(fit, 120));
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+  document.addEventListener('fullscreenchange', () => setTimeout(fit, 60));
   fit();
   Input.attach(canvas, () => scale);
 

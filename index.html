@@ -2,16 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0a0d16">
+<meta name="description" content="Pocket Ark — a 2.5D pixel-art habitat pool roguelike. Sink every animal into the biome it calls home before the flood takes the deck.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27 shape-rendering=%27crispEdges%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%2312 3a2c%27/%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%23123a2c%27/%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 fill=%27%231f6b52%27/%3E%3Crect x=%272%27 y=%272%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%2712%27 y=%272%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%272%27 y=%2712%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%2712%27 y=%2712%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%276%27 y=%275%27 width=%274%27 height=%276%27 fill=%27%23ffcb52%27/%3E%3Crect x=%275%27 y=%276%27 width=%276%27 height=%274%27 fill=%27%23ffcb52%27/%3E%3Crect x=%276%27 y=%276%27 width=%272%27 height=%272%27 fill=%27%23f7f4e8%27/%3E%3C/svg%3E">
 <title>Pocket Ark — a 2.5D habitat pool roguelike</title>
 <style>
   :root { color-scheme: dark; }
   html, body {
-    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    margin: 0; padding: 0; overflow: hidden;
+    height: 100%; height: 100dvh;
     background: #0a0d16;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color: #d9d2b8;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    touch-action: none;
+    user-select: none; -webkit-user-select: none;
   }
   /* the harbour glow behind the cabinet */
   body::before {
@@ -23,6 +34,8 @@
   #wrap {
     position: fixed; inset: 0;
     display: flex; align-items: center; justify-content: center;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-sizing: border-box;
   }
   #game {
     display: block;
@@ -46,6 +59,33 @@
     background: repeating-linear-gradient(to bottom, rgba(0,0,0,.55) 0 1px, transparent 1px 3px);
     mix-blend-mode: multiply;
   }
+  /* On a phone every pixel of screen matters, so the cabinet frame and the scanlines
+     both go away and the canvas fills the display. */
+  @media (max-width: 900px), (pointer: coarse) {
+    #game { box-shadow: none; border-radius: 0; cursor: default; }
+    #scan { display: none; }
+  }
+  /* Landscape is not optional: the deck is 16:9 and a portrait phone would render it
+     about a centimetre tall. */
+  #rotate {
+    position: fixed; inset: 0; z-index: 40; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+    background: #0a0d16; text-align: center; padding: 24px;
+  }
+  body.portrait #rotate { display: flex; }
+  #rotate .phone {
+    width: 54px; height: 92px; border: 4px solid #8a5a34; border-radius: 8px;
+    animation: tip 1.9s ease-in-out infinite;
+  }
+  @keyframes tip { 0%, 45% { transform: rotate(0) } 70%, 100% { transform: rotate(-90deg) } }
+  #fsbtn {
+    position: fixed; z-index: 30; right: calc(6px + env(safe-area-inset-right)); top: calc(6px + env(safe-area-inset-top));
+    width: 34px; height: 34px; display: none; align-items: center; justify-content: center;
+    background: rgba(10,13,22,.6); border: 2px solid #8a5a34; border-radius: 4px;
+    color: #ffcb52; font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  @media (pointer: coarse) { #fsbtn { display: flex; } }
+  body.fs #fsbtn { opacity: .35; }
   #boot, #gate {
     position: fixed; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 14px;
@@ -66,6 +106,12 @@
 <body>
 <div id="wrap"><canvas id="game" width="640" height="360"></canvas></div>
 <div id="scan"></div>
+<button id="fsbtn" title="fullscreen" aria-label="fullscreen">⛶</button>
+<div id="rotate">
+  <div class="phone"></div>
+  <div class="title" style="font-size:19px">TURN YOUR DEVICE</div>
+  <div class="sub">the deck needs landscape</div>
+</div>
 
 <div id="boot">
   <div class="title">POCKET ARK</div>
@@ -75,10 +121,11 @@
 <div id="gate" hidden>
   <div class="title">POCKET ARK</div>
   <div class="sub">A 2.5D HABITAT POOL ROGUELIKE</div>
-  <div class="hint pulse">CLICK TO BOARD</div>
+  <div class="hint pulse">TAP TO BOARD</div>
   <div class="keys">
-    click an animal to take it as your cue &nbsp;·&nbsp; hold to charge &nbsp;·&nbsp; release to break<br>
-    A / D or mouse wheel = english &nbsp;·&nbsp; R = re-rack &nbsp;·&nbsp; 1 / 2 = feed &nbsp;·&nbsp; M = mute &nbsp;·&nbsp; F = fullscreen
+    <b>mouse</b> — click an animal to take it as your cue, hold to charge, release to break<br>
+    <b>touch</b> — tap an animal to pick it, drag away to aim and load, lift to break<br>
+    A / D or wheel = english &nbsp;·&nbsp; R = re-rack &nbsp;·&nbsp; 1 / 2 = feed &nbsp;·&nbsp; M = mute &nbsp;·&nbsp; F = fullscreen
   </div>
 </div>
 
@@ -104,9 +151,35 @@
   gate.hidden = false;
   boot.hidden = true;
 
-  gate.addEventListener('click', async () => {
+  const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+  async function goFullscreen() {
+    const el = document.documentElement;
+    try {
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        await el.requestFullscreen({ navigationUI: 'hide' });
+      }
+    } catch (e) { /* refused — still playable windowed */ }
+    try {
+      if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+    } catch (e) { /* unsupported on iOS */ }
+  }
+
+  document.getElementById('fsbtn').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (document.fullscreenElement) { if (document.exitFullscreen) document.exitFullscreen(); }
+    else await goFullscreen();
+  });
+  document.addEventListener('fullscreenchange', () => {
+    document.body.classList.toggle('fs', !!document.fullscreenElement);
+  });
+
+  async function board() {
     if (started) return;
     started = true;
+    // The boarding tap is the one user gesture we are guaranteed, so it has to do
+    // double duty: unlock WebAudio and enter fullscreen on a phone.
+    if (coarse) await goFullscreen();
     gate.remove();
     boot.hidden = false;
     try {
@@ -115,7 +188,9 @@
       started = false;
       fail(e);
     }
-  }, { once: true });
+  }
+  gate.addEventListener('click', board, { once: true });
+  gate.addEventListener('touchend', (e) => { e.preventDefault(); board(); }, { once: true, passive: false });
 </script>
 </body>
 </html>

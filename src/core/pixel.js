@@ -9,7 +9,7 @@
 // helpers (rect/disc/ellipse/line/text) are cheap enough for per-frame use.
 
 import { col, mix, alpha as pAlpha } from './palette.js';
-import { FONT5, FONT3 } from '../render/font.js';
+import { FONT5, FONT3, FONT7 } from '../render/font.js';
 
 export const W = 640;
 export const H = 360;
@@ -305,10 +305,14 @@ function squeeze(rows, fromW, toW, fromH, toH) {
 function glyphFor(font, ch) {
   const direct = glyphIn(font, ch);
   if (direct) return direct;
-  const other = font === FONT3 ? FONT5 : FONT3;
-  const alt = glyphIn(other, ch);
-  if (!alt) return null;
-  return squeeze(alt, other.w, font.w, other.h, font.h);
+  // Borrow from whichever other face has the glyph, rescaled into this one's box.
+  // Better a squeezed or stretched letter than a solid placeholder box.
+  for (const other of [FONT5, FONT7, FONT3]) {
+    if (other === font) continue;
+    const alt = glyphIn(other, ch);
+    if (alt) return squeeze(alt, other.w, font.w, other.h, font.h);
+  }
+  return null;
 }
 
 export function charW(ch, font) {
@@ -326,7 +330,7 @@ export function charW(ch, font) {
   return used || Math.max(2, Math.floor(font.w / 2));
 }
 
-function pickFont(f) { return f === 3 ? FONT3 : FONT5; }
+function pickFont(f) { return f === 3 ? FONT3 : f === 7 ? FONT7 : FONT5; }
 
 export function textW(str, o = {}) {
   const font = pickFont(o.font);

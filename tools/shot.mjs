@@ -182,7 +182,7 @@ switch (which) {
   }
   case 'font': {
     const { text, rect } = await import('../src/core/pixel.js');
-    const { FONT5, FONT3 } = await import('../src/render/font.js');
+    const { FONT5, FONT3, FONT7 } = await import('../src/render/font.js');
     scene = {
       update() {},
       draw() {
@@ -197,9 +197,12 @@ switch (which) {
           'over 13 lazy dogs! $27 ×3',
           'ANTE 4/8  BOSS BLIND  50K',
         ];
-        rows.forEach((r, i) => text(g, r, 10, 12 + i * 14, 'white'));
-        rows.forEach((r, i) => text(g, r.toUpperCase(), 10, 140 + i * 10, 'gold', { font: 3 }));
-        text(g, `FONT5 ${Object.keys(FONT5.glyphs).length} glyphs h=${FONT5.h}   FONT3 ${Object.keys(FONT3.glyphs).length} glyphs h=${FONT3.h}`, 10, 240, 'teal', { font: 3 });
+        rows.slice(0, 5).forEach((r, i) => text(g, r, 8, 6 + i * 12, 'white', { font: 7 }));
+        rows.forEach((r, i) => text(g, r, 8, 74 + i * 10, 'bone'));
+        rows.forEach((r, i) => text(g, r.toUpperCase(), 8, 164 + i * 8, 'gold', { font: 3 }));
+        text(g, `FONT7 ${Object.keys(FONT7.glyphs).length} · FONT5 ${Object.keys(FONT5.glyphs).length} · FONT3 ${Object.keys(FONT3.glyphs).length} glyphs`, 8, 232, 'teal', { font: 3 });
+        text(g, 'ANTE 4/8   BOSS BLIND   50K', 8, 244, 'gold', { font: 7, shadow: 'ink' });
+        text(g, 'The Deluge rises', 8, 262, 'ice', { font: 7 });
         text(g, 'shadowed', 10, 256, 'white', { shadow: 'ink' });
         text(g, 'outlined', 90, 256, 'gold', { outline: 'ink' });
         text(g, 'centered', 320, 274, 'sky', { center: true });

@@ -44,6 +44,7 @@ export function makeTableScene() {
   let selected = null;
   let hoverBall = null;
   let charge = 0, charging = false;
+  let touchSelect = null;
   let angle = 0;
   let spin = 0;
   let aimPath = null;
@@ -383,13 +384,46 @@ export function makeTableScene() {
         if (d < bestD) { bestD = d; hoverBall = b; }
       }
 
-      if (m.pressed && hoverBall && hoverBall !== selected) {
-        selected = hoverBall;
-        Audio.sfx('click');
-        parts.emit('ring', toScreen(selected.x, selected.y).x, toScreen(selected.x, selected.y).y, { count: 1, color: 'white' });
-      } else if (m.pressed && m.y < CTRL_Y - 4 && m.x > HUD_W) {
-        charging = true; charge = 0;
-        Audio.sfx('chalk');
+      const onFelt = m.y < CTRL_Y - 4 && m.x > HUD_W;
+
+      if (Input.touch) {
+        // --- touchscreen: one gesture does everything. Pull away from the animal to
+        // load power, swing your thumb to aim, lift to break. A short still tap
+        // instead just selects, so the two never fight.
+        if (m.pressed && hoverBall) touchSelect = hoverBall;
+        if (m.down && selected && !selected.sunk && onFelt) {
+          const s = toScreen(selected.x, selected.y);
+          const d = Math.hypot(m.x - s.x, m.y - s.y);
+          charge = clamp((d - 12) / 140, 0.12, 1);
+          charging = m.holdT > 0.1 && d > 16;
+        }
+        if (m.released) {
+          if (m.tapped && touchSelect) {
+            selected = touchSelect;
+            Audio.sfx('click');
+            const s = toScreen(selected.x, selected.y);
+            parts.emit('ring', s.x, s.y, { count: 1, color: 'white' });
+          } else if (charging) {
+            fire();
+          }
+          touchSelect = null;
+          if (phase === 'aim') { charging = false; charge = 0; }
+        }
+      } else {
+        if (m.pressed && hoverBall && hoverBall !== selected) {
+          selected = hoverBall;
+          Audio.sfx('click');
+          const s = toScreen(selected.x, selected.y);
+          parts.emit('ring', s.x, s.y, { count: 1, color: 'white' });
+        } else if (m.pressed && onFelt) {
+          charging = true; charge = 0;
+          Audio.sfx('chalk');
+        }
+        if (charging) {
+          charge = Math.min(1, charge + dt / 0.85);
+          if (m.released) fire();
+          if (m.rightPressed) { charging = false; charge = 0; Audio.sfx('back'); }
+        }
       }
 
       if (selected && !selected.sunk) {
@@ -402,12 +436,6 @@ export function makeTableScene() {
 
         aimPath = PH.predict(world, selected, angle, Math.max(0.35, charge || 0.6), Math.round(run.guideLen));
         aimPreview = previewFor(aimPath);
-      }
-
-      if (charging) {
-        charge = Math.min(1, charge + dt / 0.85);
-        if (m.released) fire();
-        if (m.rightPressed) { charging = false; charge = 0; Audio.sfx('back'); }
       }
 
       // rerack
@@ -855,9 +883,11 @@ export function makeTableScene() {
     }
 
     // hint line
-    const hint = phase === 'aim'
-      ? 'CLICK an animal to select · HOLD to charge · A/D or wheel = english · R = re-rack'
-      : phase === 'roll' ? 'rolling…' : phase === 'score' ? 'scoring…' : '';
+    const hint = phase !== 'aim'
+      ? (phase === 'roll' ? 'rolling…' : phase === 'score' ? 'scoring…' : '')
+      : Input.touch
+        ? 'TAP an animal to pick it · DRAG away to aim and load · LIFT to break'
+        : 'CLICK an animal to select · HOLD to charge · A/D or wheel = english · R = re-rack';
     text(g, hint, x + 8, y + h - 11, 'wood3', { font: 3 });
   }
 

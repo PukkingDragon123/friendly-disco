@@ -4,7 +4,14 @@
 // current scale. `getScale` is a callback because the scale changes on resize.
 
 export const Input = {
-  mouse: { x: 320, y: 180, px: 320, py: 180, dx: 0, dy: 0, down: false, pressed: false, released: false, rightDown: false, rightPressed: false, wheel: 0, inside: false, downX: 0, downY: 0, dragDist: 0 },
+  mouse: {
+    x: 320, y: 180, px: 320, py: 180, dx: 0, dy: 0,
+    down: false, pressed: false, released: false,
+    rightDown: false, rightPressed: false, wheel: 0, inside: false,
+    downX: 0, downY: 0, dragDist: 0,
+    holdT: 0,          // seconds the pointer has been held down
+    tapped: false,     // released after a short, still press — a deliberate tap
+  },
   keys: Object.create(null),
   _pressed: Object.create(null),
   _released: Object.create(null),
@@ -55,16 +62,28 @@ export const Input = {
     canvas.addEventListener('touchstart', (e) => {
       this.touch = true; tmap(e);
       const m = this.mouse;
-      m.down = true; m.pressed = true; m.inside = true; m.downX = m.x; m.downY = m.y; m.dragDist = 0;
+      m.down = true; m.pressed = true; m.inside = true;
+      m.downX = m.x; m.downY = m.y; m.dragDist = 0; m.holdT = 0; m.px = m.x; m.py = m.y;
+      if (this.onFirstTouch) { const f = this.onFirstTouch; this.onFirstTouch = null; f(); }
       e.preventDefault();
     }, { passive: false });
     canvas.addEventListener('touchmove', (e) => { tmap(e); e.preventDefault(); }, { passive: false });
     canvas.addEventListener('touchend', (e) => {
       tmap(e);
       const m = this.mouse;
-      if (m.down) { m.down = false; m.released = true; }
+      if (m.down) {
+        m.down = false;
+        m.released = true;
+        // A short, still press is a TAP (select / press a button). Anything longer or
+        // draggier is an aim gesture, so the two never fight on a touchscreen.
+        m.tapped = m.holdT < 0.22 && m.dragDist < 10;
+      }
       e.preventDefault();
     }, { passive: false });
+    canvas.addEventListener('touchcancel', () => {
+      const m = this.mouse;
+      m.down = false; m.released = true; m.tapped = false;
+    });
 
     window.addEventListener('keydown', (e) => {
       if (!this.keys[e.code]) this._pressed[e.code] = true;
@@ -92,12 +111,13 @@ export const Input = {
   typed() { return this._typed; },
 
   /** Advance per-frame edge state. Called by the loop AFTER update+draw. */
-  consume() {
+  consume(dt) {
     const m = this.mouse;
     m.dx = m.x - m.px; m.dy = m.y - m.py;
-    if (m.down) m.dragDist += Math.hypot(m.dx, m.dy);
+    if (m.down) { m.dragDist += Math.hypot(m.dx, m.dy); m.holdT += dt || 1 / 60; }
+    else m.holdT = 0;
     m.px = m.x; m.py = m.y;
-    m.pressed = false; m.released = false; m.rightPressed = false; m.wheel = 0;
+    m.pressed = false; m.released = false; m.rightPressed = false; m.wheel = 0; m.tapped = false;
     this._pressed = Object.create(null);
     this._released = Object.create(null);
     this._anyPressed = false;

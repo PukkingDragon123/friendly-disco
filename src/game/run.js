@@ -1,0 +1,432 @@
+// Run state: the roguelike wrapper around the pool table.
+//
+// A run is 8 antes x 3 blinds. Between blinds you visit the dock and a boat brings you
+// one crate. Everything a scene needs to know lives on the `run` object, and every
+// mutation goes through a function here so relics/vouchers/upgrades have one place to hook.
+
+import { makeRng, randomSeedString } from '../core/rng.js';
+import { ANIMAL_BY_ID, STARTER_DECK } from '../data/animals.js';
+import { HABITATS, HABITAT_BY_ID, GATE_LAYOUT } from '../data/habitats.js';
+import { RELIC_BY_ID } from '../data/relics.js';
+import { ANTES, BLIND_KINDS, blindTarget, rollBoss, neutralEffect } from '../data/blinds.js';
+import { CUE_UPGRADES, FEEDS, VOUCHERS, applyHabitatUpgrade } from '../data/cargo.js';
+
+export const BLIND_ORDER = ['small', 'big', 'boss'];
+
+/** Baseline run stats. Cue upgrades and vouchers mutate these. */
+function baseRun(seed) {
+  return {
+    seed,
+    rng: makeRng(seed + '/run'),
+    ante: 1,
+    blindIx: 0,                 // index into BLIND_ORDER
+    money: 6,
+    won: false,
+    dead: false,
+
+    // --- caravan
+    caravan: STARTER_DECK.slice(),
+    hand: [],                   // animal ids currently racked
+    stash: [],                  // caravan ids not yet drawn this blind
+    vitrine: {},                // habitatId -> [animal ids] delivered this blind
+
+    // --- loadout
+    relics: [],
+    feeds: [],
+    vouchers: [],
+    cueUpgrades: [],
+    habitatLevels: {},
+
+    // --- tunables (cargo.js documents that it mutates exactly these)
+    power: 1,
+    spin: 0.6,
+    guideLen: 46,
+    guideBounces: 1,
+    railChips: 4,
+    shots: 4,
+    reracks: 3,
+    gateScale: 1,
+    crateSlots: 3,
+    rerollCost: 3,
+    interest: 1,
+    sellBonus: 0,
+    handSize: 9,
+    relicSlots: 5,
+    breakBonus: 0,
+    spinDrift: 1,
+
+    // --- per-blind
+    shotsLeft: 4,
+    reracksLeft: 3,
+    score: 0,
+    target: 0,
+    blind: null,
+    seenBosses: [],
+    scoredHabitatsThisBlind: [],
+    assignment: {},
+
+    stats: {
+      shotsTaken: 0, potted: 0, exact: 0, wrong: 0, eaten: 0,
+      bestShot: 0, moneyEarned: 0, blindsCleared: 0, cratesBought: 0,
+    },
+    log: [],
+  };
+}
+
+export function newRun(seed) {
+  const s = seed || randomSeedString('boot');
+  const run = baseRun(s);
+  return run;
+}
+
+/* ------------------------------------------------------------- habitat gates */
+
+/**
+ * Pick which 6 of the 9 habitats are open this blind.
+ * Weighted by what is actually in your caravan, so a run never becomes unplayable —
+ * but always seeded with one wildcard so you must adapt.
+ */
+export function rollAssignment(run, rng, closed = []) {
+  const counts = {};
+  for (const id of run.caravan) {
+    const a = ANIMAL_BY_ID[id];
+    if (a) counts[a.home] = (counts[a.home] || 0) + 1;
+  }
+  const pool = HABITATS.filter((h) => !closed.includes(h.id));
+  const weighted = pool.map((h) => [h.id, 1 + (counts[h.id] || 0) * 2.2 + (run.habitatLevels[h.id] || 0) * 3]);
+
+  const picked = [];
+  const take = Math.min(6, pool.length);
+  // guarantee the two best-represented habitats so there is always somewhere to score
+  const ranked = weighted.slice().sort((a, b) => b[1] - a[1]);
+  for (const r of ranked.slice(0, 2)) picked.push(r[0]);
+  while (picked.length < take) {
+    const cand = weighted.filter((w) => !picked.includes(w[0]));
+    if (!cand.length) break;
+    picked.push(rng.weighted(cand));
+  }
+  // one wildcard swap keeps blinds from feeling samey
+  if (picked.length === 6 && pool.length > 6 && rng.chance(0.55)) {
+    const outsider = pool.find((h) => !picked.includes(h.id));
+    if (outsider) picked[4 + rng.int(2)] = outsider.id;
+  }
+
+  const shuffled = rng.shuffle(picked);
+  const assignment = {};
+  GATE_LAYOUT.forEach((slot, i) => { assignment[slot] = shuffled[i % shuffled.length]; });
+  return assignment;
+}
+
+/* ----------------------------------------------------------------- blinds */
+
+export function currentKind(run) { return BLIND_ORDER[run.blindIx] || 'small'; }
+
+export function startBlind(run) {
+  const kind = currentKind(run);
+  const rng = run.rng.fork(`blind/${run.ante}/${kind}`);
+  const info = BLIND_KINDS.find((b) => b.key === kind) || BLIND_KINDS[0];
+
+  let boss = null;
+  let effect = neutralEffect();
+  if (kind === 'boss') {
+    boss = rollBoss(rng, run.ante, run.seenBosses);
+    if (boss) {
+      run.seenBosses.push(boss.id);
+      effect = Object.assign(neutralEffect(), boss.effect || {});
+    }
+  }
+
+  const blind = {
+    ante: run.ante,
+    kind,
+    name: boss ? boss.name : info.name,
+    desc: boss ? boss.desc : '',
+    color: boss ? boss.color : info.color,
+    icon: boss ? boss.icon : null,
+    boss,
+    effect,
+    reward: info.reward,
+    target: blindTarget(run.ante, kind),
+    rng,
+  };
+
+  run.blind = blind;
+  run.target = blind.target;
+  run.score = 0;
+  run.shotsLeft = Math.max(1, run.shots + (effect.shots || 0));
+  run.reracksLeft = Math.max(0, run.reracks + (effect.reracks || 0));
+  run.scoredHabitatsThisBlind = [];
+  run.vitrine = {};
+  run.assignment = rollAssignment(run, rng, effect.closeHabitats || []);
+
+  // caravan -> stash, then draw the opening hand
+  run.stash = rng.shuffle(run.caravan);
+  run.hand = [];
+  drawHand(run);
+
+  for (const relic of run.relics) {
+    if (relic.hooks && relic.hooks.onBlindStart) {
+      try { relic.hooks.onBlindStart(relicCtx(run, relic)); } catch (e) { warn(relic, e); }
+    }
+  }
+  return blind;
+}
+
+/** Fill the felt back up to handSize from the stash. */
+export function drawHand(run) {
+  const want = Math.max(1, run.handSize);
+  const added = [];
+  while (run.hand.length < want && run.stash.length) {
+    const id = run.stash.shift();
+    run.hand.push(id);
+    added.push(id);
+  }
+  return added;
+}
+
+export function rerack(run) {
+  if (run.reracksLeft <= 0) return false;
+  run.reracksLeft--;
+  // unpotted animals go back under the stash, then redraw
+  run.stash = run.stash.concat(run.hand);
+  run.hand = [];
+  drawHand(run);
+  return true;
+}
+
+export function blindCleared(run) { return run.score >= run.target; }
+export function blindFailed(run) { return run.shotsLeft <= 0 && run.score < run.target; }
+
+/** Commit a resolved shot to the run. Returns a summary for the scene. */
+export function applyShot(run, resolved, potted) {
+  run.score += resolved.totalScore;
+  run.money += resolved.totalMoney;
+  run.stats.shotsTaken++;
+  run.stats.potted += potted.length;
+  run.stats.moneyEarned += resolved.totalMoney;
+  run.stats.bestShot = Math.max(run.stats.bestShot, resolved.totalScore);
+  run.scoredHabitatsThisBlind = resolved.scoredHabitats || run.scoredHabitatsThisBlind;
+
+  for (const e of resolved.entries) {
+    if (e.match === 'exact') run.stats.exact++;
+    else if (e.match === 'wrong') run.stats.wrong++;
+    if (e.habitatId) {
+      if (!run.vitrine[e.habitatId]) run.vitrine[e.habitatId] = [];
+      run.vitrine[e.habitatId].push(e.animal.id);
+    }
+  }
+
+  // devoured animals leave the habitat display and the felt
+  for (const id of resolved.consumed || []) {
+    run.stats.eaten++;
+    for (const hid of Object.keys(run.vitrine)) {
+      const ix = run.vitrine[hid].indexOf(id);
+      if (ix >= 0) run.vitrine[hid].splice(ix, 1);
+    }
+  }
+
+  // sunk animals are spent for this blind
+  for (const p of potted) {
+    const ix = run.hand.indexOf(p.animalId);
+    if (ix >= 0) run.hand.splice(ix, 1);
+  }
+
+  run.shotsLeft--;
+
+  // The Tithe: a shot that scores too little costs you another one.
+  const floor = (run.blind && run.blind.effect && run.blind.effect.scoreFloorPerShot) || 0;
+  let tithed = false;
+  if (floor > 0 && resolved.totalScore < floor && run.shotsLeft > 0) {
+    run.shotsLeft--;
+    tithed = true;
+  }
+
+  for (const relic of run.relics) {
+    if (relic.hooks && relic.hooks.onShotEnd) {
+      try { relic.hooks.onShotEnd(relicCtx(run, relic)); } catch (e) { warn(relic, e); }
+    }
+  }
+
+  return { tithed, cleared: blindCleared(run), failed: blindFailed(run) };
+}
+
+/** Money and bookkeeping when a blind is beaten. */
+export function endBlind(run) {
+  const info = BLIND_KINDS.find((b) => b.key === currentKind(run)) || BLIND_KINDS[0];
+  const shotBonus = Math.max(0, run.shotsLeft);
+  const interest = Math.min(5, Math.floor(run.money / 5)) * Math.max(0, run.interest);
+  const reward = info.reward + shotBonus + interest;
+  run.money += reward;
+  run.stats.blindsCleared++;
+  run.stats.moneyEarned += reward;
+
+  for (const relic of run.relics) {
+    if (relic.hooks && relic.hooks.onBlindEnd) {
+      try { relic.hooks.onBlindEnd(relicCtx(run, relic)); } catch (e) { warn(relic, e); }
+    }
+  }
+
+  return { base: info.reward, shotBonus, interest, total: reward };
+}
+
+export function advance(run) {
+  run.blindIx++;
+  if (run.blindIx >= BLIND_ORDER.length) {
+    run.blindIx = 0;
+    run.ante++;
+    if (run.ante > ANTES) { run.won = true; }
+  }
+  return run;
+}
+
+/* ---------------------------------------------------------------- purchases */
+
+export function addAnimal(run, animalId) {
+  if (!ANIMAL_BY_ID[animalId]) return false;
+  run.caravan.push(animalId);
+  return true;
+}
+
+export function removeAnimal(run, animalId) {
+  const ix = run.caravan.indexOf(animalId);
+  if (ix < 0) return false;
+  run.caravan.splice(ix, 1);
+  return true;
+}
+
+export function addRelic(run, relicId) {
+  const def = RELIC_BY_ID[relicId];
+  if (!def) return false;
+  if (run.relics.some((r) => r.id === relicId)) return false;
+  if (run.relics.length >= run.relicSlots) return false;
+  const inst = Object.assign({}, def, { state: JSON.parse(JSON.stringify(def.state || {})) });
+  run.relics.push(inst);
+  if (inst.hooks && inst.hooks.modifyRun) {
+    try { inst.hooks.modifyRun(run); } catch (e) { warn(inst, e); }
+  }
+  return true;
+}
+
+export function sellRelic(run, relicId) {
+  const ix = run.relics.findIndex((r) => r.id === relicId);
+  if (ix < 0) return 0;
+  const r = run.relics[ix];
+  const value = Math.max(1, Math.floor((r.price || 4) / 2) + (run.sellBonus || 0));
+  run.relics.splice(ix, 1);
+  run.money += value;
+  return value;
+}
+
+export function addFeed(run, feedId) {
+  const def = FEEDS.find((f) => f.id === feedId);
+  if (!def) return false;
+  if (run.feeds.length >= 2) return false;
+  run.feeds.push(Object.assign({}, def, { charges: def.charges || 1 }));
+  return true;
+}
+
+export function addCue(run, cueId) {
+  const def = CUE_UPGRADES.find((c) => c.id === cueId);
+  if (!def) return false;
+  run.cueUpgrades.push(def.id);
+  if (def.apply) { try { def.apply(run); } catch (e) { warn(def, e); } }
+  return true;
+}
+
+export function addVoucher(run, voucherId) {
+  const def = VOUCHERS.find((v) => v.id === voucherId);
+  if (!def) return false;
+  if (run.vouchers.includes(voucherId)) return false;
+  run.vouchers.push(voucherId);
+  if (def.apply) { try { def.apply(run); } catch (e) { warn(def, e); } }
+  return true;
+}
+
+/** Apply everything inside a delivered crate. Returns display lines for the unload anim. */
+export function deliverCrate(run, crate) {
+  const got = [];
+  for (const item of crate.contents || []) {
+    const qty = Math.max(1, item.qty || 1);
+    for (let i = 0; i < qty; i++) {
+      switch (item.kind) {
+        case 'animal':
+          if (addAnimal(run, item.ref)) got.push({ kind: 'animal', ref: item.ref, name: (ANIMAL_BY_ID[item.ref] || {}).name || item.ref });
+          break;
+        case 'relic':
+          if (addRelic(run, item.ref)) got.push({ kind: 'relic', ref: item.ref, name: (RELIC_BY_ID[item.ref] || {}).name || item.ref });
+          break;
+        case 'habitat_up':
+          applyHabitatUpgrade(run, item.ref);
+          got.push({ kind: 'habitat_up', ref: item.ref, name: ((HABITAT_BY_ID[item.ref] || {}).name || item.ref) + ' +1' });
+          break;
+        case 'cue':
+          if (addCue(run, item.ref)) got.push({ kind: 'cue', ref: item.ref, name: (CUE_UPGRADES.find((c) => c.id === item.ref) || {}).name || item.ref });
+          break;
+        case 'feed':
+          if (addFeed(run, item.ref)) got.push({ kind: 'feed', ref: item.ref, name: (FEEDS.find((f) => f.id === item.ref) || {}).name || item.ref });
+          break;
+        case 'voucher':
+          if (addVoucher(run, item.ref)) got.push({ kind: 'voucher', ref: item.ref, name: (VOUCHERS.find((v) => v.id === item.ref) || {}).name || item.ref });
+          break;
+        case 'money':
+          run.money += qty;
+          got.push({ kind: 'money', ref: String(qty), name: '$' + qty });
+          i = qty; // money is granted in one lump
+          break;
+        default:
+          break;
+      }
+    }
+  }
+  run.stats.cratesBought++;
+  return got;
+}
+
+export function canAfford(run, price) { return run.money >= price; }
+export function spend(run, price) {
+  if (run.money < price) return false;
+  run.money -= price;
+  return true;
+}
+
+/* ------------------------------------------------------------------ helpers */
+
+export function relicCtx(run, relic) {
+  return {
+    run, relic,
+    blind: run.blind,
+    shot: run.stats.shotsTaken,
+    shotIndex: run.stats.shotsTaken,
+    potted: [],
+    residents: run.vitrine,
+    tableAnimals: run.hand.map((id) => ANIMAL_BY_ID[id]).filter(Boolean),
+    deck: run.stash.map((id) => ANIMAL_BY_ID[id]).filter(Boolean),
+    rng: run.rng,
+    log: (t, c) => { run.log.push({ text: String(t).slice(0, 48), color: c || 'brass3', relic: relic && relic.id }); if (run.log.length > 40) run.log.shift(); },
+    addMoney: (n) => { run.money += Math.round(n) || 0; },
+    consumeAnimal: (id) => { removeAnimal(run, id); },
+  };
+}
+
+function warn(def, e) {
+  if (typeof console !== 'undefined') console.warn('run hook failed:', def && def.id, e);
+}
+
+/** Deck stats for the caravan panel. */
+export function caravanBreakdown(run) {
+  const byHome = {};
+  for (const id of run.caravan) {
+    const a = ANIMAL_BY_ID[id];
+    if (!a) continue;
+    byHome[a.home] = (byHome[a.home] || 0) + 1;
+  }
+  return {
+    total: run.caravan.length,
+    byHome,
+    rarities: run.caravan.reduce((acc, id) => {
+      const a = ANIMAL_BY_ID[id];
+      if (a) acc[a.rarity] = (acc[a.rarity] || 0) + 1;
+      return acc;
+    }, {}),
+  };
+}

@@ -1,14 +1,22 @@
 # POCKET ARK
 
-**A 2.5D pixel-art habitat pool roguelike.**
+**A 2.5D pixel-art habitat pool roguelike, played on the deck of the ark while the flood
+comes up.**
 
-Animals are racked on the tilted felt deck of a floating ark. Six gates ring the deck,
-each one opening onto a habitat. Sink every animal into the biome it calls home — and
-watch out, because the animals notice each other. A fox that lands beside a rabbit eats
-well. Sheep panic near wolves. Penguins would rather not meet a polar bear.
+> *"So you want me to build a boat."*
+> *"I want you to build a TABLE."*
 
-Beat the blind, sail to the dock, pick one crate off the manifest, and let the boat bring
-it in.
+Animals are racked on the tilted felt deck of the ark. Six gates ring the rail, each one
+opening onto a habitat. Sink every animal into the biome it calls home — and watch out,
+because the animals notice each other. A fox that lands beside a rabbit eats well. Sheep
+panic near wolves. Penguins would rather not meet a polar bear.
+
+**The water climbs one mark with every shot you take.** Beat the target before it reaches
+the felt, or the deck is gone. Then sail to the dock, pick one crate off the manifest, and
+let the boat bring it in.
+
+Eight antes, three blinds each, and the last of every three is a named disaster out of
+somebody's flood myth — Fimbulwinter, Leviathan, Tiamat, Ma'at's Scale, Ragnarok.
 
 ```
                  ╭──────────────────────────────────────────╮
@@ -37,12 +45,18 @@ Then open <http://localhost:8000/> and click to board.
 |---|---|
 | **Click an animal** | take it as your cue ball |
 | **Hold left mouse** | charge the shot — release to break |
+| **Touch: tap** | pick an animal |
+| **Touch: drag away** | aim and load — distance is power. Lift to break |
 | **A / D** or **wheel** | put english (side spin) on the ball |
 | **S** | zero the english |
 | **R** | re-rack the felt (costs a re-rack) |
 | **1 / 2** | use a feed from your satchel |
 | **M** / **F** | mute · fullscreen |
 | **Right click** | cancel a charging shot |
+| **Space / Enter** | advance dialogue &nbsp;·&nbsp; **Esc** skips a cutscene |
+
+Plays on a phone: landscape, fullscreen on the boarding tap, and one gesture does the
+whole shot.
 
 ## The rules
 
@@ -60,8 +74,23 @@ already in the gate (the prey is *gone*), herds buff each other, flocks stack, a
 pairings are simply a mistake. Same-shot combos, animals still on the felt, and even the
 animals still in your caravan can all trigger rules.
 
-**Structure** — 8 antes × 3 blinds (small, big, boss). Boss blinds seal gates, kill your
-interactions, slick the felt, hide the labels, or plant a mimic in the rack.
+**The flood** is the real clock. It climbs to the rail over exactly the shots you are
+given, so normally the water and the shot counter run out together — but The Deluge
+doubles the rate and drowns you in half the time, and the Ziz can hold it back a shot.
+
+**Skills.** Sixteen animals carry an engine-implemented skill, not just flavour text: the
+dove returns to your caravan instead of being spent, the phoenix is not spent by a wrong
+gate, the griffin hunts across every gate, the lamb and the behemoth are never eaten, the
+nightingale sings a debuff off, the qilin blesses everything scored after it, and the
+thunderbird ignores whatever the boss is doing to chips.
+
+**Structure** — 8 antes × 3 blinds (small, big, boss). Sixteen mythological bosses seal
+gates, kill your interactions, freeze the felt, tilt the sea, hide the labels, turn the
+gates between shots, halve your multipliers, or plant something aboard that is not an
+animal.
+
+**Story.** God narrates. There is a prologue, a lesson, a beat per ante as the world goes
+under, a scripted entrance for every disaster, and two endings.
 
 **The dock** — one crate per visit. Crates carry animals for your caravan, relics, cue
 work, feed, habitat upgrades and vouchers. Bigger hauls arrive on bigger boats.
@@ -87,6 +116,11 @@ There is a software Canvas2D in `tools/softcanvas.mjs` (fillRect / drawImage / c
 alpha, plus a PNG encoder) so the renderer can be reviewed by looking at real frames from
 node instead of guessing.
 
+The suites are load-bearing, not decoration. `tests/run.mjs` fails the build if an animal
+claims a skill `scoring.js` does not implement, or if a boss uses an effect key the engine
+would silently ignore. `tests/play.mjs` found a missing import that only threw once a
+cherub pair was actually mid-flight — a path no single-scene screenshot had hit.
+
 ## Build
 
 There is no build. No dependencies, no bundler, no assets — every sprite is drawn from a
@@ -96,11 +130,13 @@ procedural recipe at load time and every sound is synthesised in WebAudio.
 index.html            shell, click-gate, canvas scaling
 serve.mjs             zero-dep static server
 DESIGN.md             the full design + module contract
-src/core/             palette, pixel primitives, rng, input, loop, juice, audio, particles
-src/render/           bitmap fonts, sprite factory, ui kit, seascape, the 2.5D deck
-src/data/             habitats, 74 animals, interactions, relics, blinds, cargo
-src/game/             physics, scoring pipeline, run state
-src/scenes/           menu, table, dock, summary
+src/core/             palette, pixel primitives, rng, input, loop, juice, audio,
+                      particles, scene transitions
+src/render/           three bitmap fonts, sprite factory, ui kit, seascape, speaker
+                      portraits, the 2.5D deck
+src/data/             habitats, 90 animals, interactions, relics, blinds, cargo, story
+src/game/             physics, scoring pipeline, run state, scene router
+src/scenes/           menu, deck, dock, cutscene, summary
 tests/                headless suites: run.mjs, play.mjs, browser.mjs
 tools/                checksyntax, softcanvas + PNG encoder, shot.mjs, stubdom
 ```

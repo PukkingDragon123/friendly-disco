@@ -128,7 +128,7 @@ const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'grey2', paper: '
 
 export function panelTitle(g, x, y, w, label, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
-  const tw = textW(label) + 12;
+  const tw = textW(label, { font: o.font || 7 }) + 12;
   const tx = Math.round(x + (w - tw) / 2);
   // The plate is always dark regardless of panel style — a brass title on a brass
   // panel is unreadable, and this is the one label the player must never squint at.
@@ -136,7 +136,8 @@ export function panelTitle(g, x, y, w, label, o = {}) {
   rect(g, tx + 1, y - 2, tw - 2, 9, 'shadow');
   rect(g, tx + 1, y - 2, tw - 2, 1, s.trim);
   px(g, tx + 1, y - 2, s.bright); px(g, tx + tw - 2, y - 2, s.bright);
-  text(g, label, x + w / 2, y, o.color || TITLE_ACCENT[o.style] || 'bone', { center: true, shadow: 'ink' });
+  text(g, label, x + w / 2, y, o.color || TITLE_ACCENT[o.style] || 'bone',
+    { center: true, shadow: 'ink', font: o.font || 7 });
 }
 
 export function divider(g, x, y, w, o = {}) {
@@ -172,13 +173,15 @@ export function button(g, r, label, o = {}) {
   if (hov) { px(g, x + 1, y + 1, 'white'); px(g, x + w - 2, y + 1, 'white'); }
 
   const fg = dis ? 'grey1' : hov ? 'white' : 'bone';
-  const font = o.small ? 3 : 5;
+  // the heavier face on anything that is not a cramped micro-button
+  const font = o.small ? 3 : (o.font || 7);
   let tx = x + w / 2;
   if (o.icon) {
     icon(g, o.icon, x + 4, y + Math.round((h - 9) / 2), { color: dis ? 'grey1' : 'brass3' });
     tx = x + 7 + w / 2 - 4;
   }
-  const ty = o.sub ? y + Math.round(h / 2) - (font === 3 ? 5 : 6) : y + Math.round((h - (font === 3 ? 5 : 7)) / 2);
+  const capH = font === 3 ? 5 : font === 7 ? 7 : 5;
+  const ty = o.sub ? y + Math.round(h / 2) - capH - 1 : y + Math.round((h - capH) / 2);
   text(g, label, tx, ty, fg, { center: true, font, shadow: 'ink' });
   if (o.sub) text(g, o.sub, tx, ty + (font === 3 ? 6 : 8), dis ? 'grey0' : 'brass2', { center: true, font: 3 });
   return r;
@@ -261,14 +264,14 @@ export function moneyPill(g, x, y, v, o = {}) { return pill(g, x, y, 'MONEY', '$
 
 /** Banner with notched ends. */
 export function ribbon(g, x, y, w, label, o = {}) {
-  const h = o.h || 11;
+  const h = o.h || 13;
   const c = o.color || 'gold';
   rect(g, x + 3, y, w - 6, h, 'ink');
   rect(g, x + 4, y + 1, w - 8, h - 2, mix(col(c), P.ink, 0.55));
   rect(g, x + 4, y + 1, w - 8, 1, mix(col(c), P.ink, 0.2));
   tri(g, x + 3, y, x + 3, y + h - 1, x, y + Math.round(h / 2), 'ink');
   tri(g, x + w - 4, y, x + w - 4, y + h - 1, x + w - 1, y + Math.round(h / 2), 'ink');
-  text(g, label, x + w / 2, y + Math.round((h - 7) / 2), c, { center: true, shadow: 'ink', font: o.font || 5 });
+  text(g, label, x + w / 2, y + Math.round((h - 7) / 2), c, { center: true, shadow: 'ink', font: o.font || 7 });
   return rectOf(x, y, w, h);
 }
 
@@ -298,9 +301,15 @@ export function card(g, x, y, w, h, o = {}) {
   // title, wrapped tightly
   const tx = x + 32;
   const tw = w - 38;
-  const tl = wrap(o.title || '', tw, { font: 5 });
-  tl.slice(0, 2).forEach((l, i) => text(g, l, tx, y + 6 + i * 9, 'white', { shadow: 'ink' }));
-  if (o.rarity) starRow(g, tx, y + 6 + Math.min(2, tl.length) * 9, RARITY_STARS[o.rarity] || 1, { color: rc });
+  // A short card cannot afford the heavy face wrapping to two rows — it would push the
+  // rarity stars onto the price pill. Pick the face that fits the box.
+  const tf = h >= 62 && textW(o.title || '', { font: 7 }) <= tw ? 7 : 5;
+  const lh = tf === 7 ? 11 : 9;
+  const tl = wrap(o.title || '', tw, { font: tf });
+  tl.slice(0, 2).forEach((l, i) => text(g, l, tx, y + 5 + i * lh, 'white', { shadow: 'ink', font: tf }));
+  if (o.rarity && h >= 56) {
+    starRow(g, tx, y + 5 + Math.min(2, tl.length) * lh, RARITY_STARS[o.rarity] || 1, { color: rc });
+  }
 
   // body lines
   let by = y + 32;
@@ -326,8 +335,8 @@ export function card(g, x, y, w, h, o = {}) {
 /** Always clamps itself inside the 640x360 frame. */
 export function tooltip(g, x, y, o = {}) {
   const lines = (o.lines || []).slice(0, 8);
-  const w = Math.min(220, Math.max(o.w || 120, textW(o.title || '', {}) + 12));
-  const h = 8 + (o.title ? 10 : 0) + lines.length * 7;
+  const w = Math.min(230, Math.max(o.w || 120, textW(o.title || '', { font: 7 }) + 14));
+  const h = 8 + (o.title ? 12 : 0) + lines.length * 7;
   let px0 = Math.round(x), py0 = Math.round(y);
   if (px0 + w > 638) px0 = 638 - w;
   if (px0 < 2) px0 = 2;
@@ -341,7 +350,7 @@ export function tooltip(g, x, y, o = {}) {
   rect(g, px0 + 1, py0 + 1, w - 2, 1, c);
   boxFrame(g, px0, py0, w, h, 'ink', 1);
   let ty = py0 + 4;
-  if (o.title) { text(g, o.title, px0 + 4, ty, c, { shadow: 'ink' }); ty += 10; }
+  if (o.title) { text(g, o.title, px0 + 4, ty, c, { shadow: 'ink', font: 7 }); ty += 12; }
   for (const l of lines) { text(g, l, px0 + 4, ty, o.textColor || 'bone', { font: 3 }); ty += 7; }
   return rectOf(px0, py0, w, h);
 }

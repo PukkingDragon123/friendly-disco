@@ -38,6 +38,8 @@ const rawReplace = app.replace;
 app.replace = (scene, args) => rawReplace(guardScene(scene, onError), args);
 const rawPush = app.push;
 app.push = (scene, args) => rawPush(guardScene(scene, onError), args);
+const rawGo = app.go;
+app.go = (scene, args, kind, dur) => rawGo(guardScene(scene, onError), args, kind, dur);
 
 const router = createRouter(app, { onRun: (r) => { window.__ARK.run = r; } });
 

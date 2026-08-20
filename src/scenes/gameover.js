@@ -58,7 +58,7 @@ export function makeGameOverScene() {
       const ry = yy + 62 + i * 12;
       if (i % 2 === 0) rect(g, 38, ry - 1, 254, 11, 'deep');
       text(g, r[0], 44, ry + 1, 'grey2', { font: 3 });
-      text(g, r[1], 288, ry, r[2], { right: true, font: 3 });
+      text(g, r[1], 288, ry - 1, r[2], { right: true, font: 3 });
     });
 
     // --- census

@@ -7,12 +7,14 @@
 import { Input } from './input.js';
 import { Juice } from './juice.js';
 import { W, H } from './pixel.js';
+import { drawTransition } from './transition.js';
 
 export function createGame(canvas) {
   const g = canvas.getContext('2d', { alpha: false });
   g.imageSmoothingEnabled = false;
 
   const stack = [];
+  let trans = null;          // {kind, t, dur, scene, args, swapped}
   let scale = 1;
   let raf = 0;
   let last = 0;
@@ -92,6 +94,19 @@ export function createGame(canvas) {
       return api.push(scene, args);
     },
 
+    /**
+     * Replace the top scene behind a transition. The swap happens at the covered
+     * midpoint, so a heavy enter() lands out of sight instead of hitching the frame the
+     * player is looking at.
+     */
+    go(scene, args, kind, dur) {
+      if (trans) { api.replace(scene, args); return scene; }
+      trans = { kind: kind || 'wave', t: 0, dur: dur || 0.85, scene, args, swapped: false };
+      return scene;
+    },
+
+    get transitioning() { return !!trans; },
+
     /** Swap the top scene, leaving anything beneath intact. */
     swap(scene, args) {
       const s = stack.pop();
@@ -126,7 +141,15 @@ export function createGame(canvas) {
     const ts = Juice.timeScale;
     Juice.update(dt);
 
+    if (trans) {
+      trans.t += dt;
+      const p = trans.t / trans.dur;
+      if (!trans.swapped && p >= 0.5) { trans.swapped = true; api.replace(trans.scene, trans.args); }
+      if (p >= 1) trans = null;
+    }
+
     const top = api.scene;
+    // A scene still under the cover should not take input meant for the transition.
     if (top && top.update) top.update(dt * ts, api, dt);
 
     // --- draw ---
@@ -141,9 +164,12 @@ export function createGame(canvas) {
     Juice.drawPops(g);
     if (top && top.drawUI) top.drawUI(g, api);
     Juice.drawOverlay(g);
+    if (trans) drawTransition(g, trans.kind, clamp01(trans.t / trans.dur), api.time);
 
     Input.consume(dt);
   }
+
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
   window.addEventListener('resize', fit);
   window.addEventListener('orientationchange', () => setTimeout(fit, 120));

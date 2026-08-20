@@ -19,6 +19,11 @@ import { getScript, anteScript, bossScript } from '../data/story.js';
 export function createRouter(app, o = {}) {
   let run = null;
 
+  // Which wipe suits which destination. The water taking the screen is the default
+  // because the whole game is about that; holy light for the divine beats; timber slats
+  // for the dock; a closing porthole for the summary.
+  const go = (scene, args, kind) => (app.go ? app.go(scene, args, kind) : app.replace(scene, args));
+
   const R = {
     get run() { return run; },
     set run(v) { run = v; },
@@ -41,7 +46,7 @@ export function createRouter(app, o = {}) {
         if (run.seenScripts.includes(script.id)) { then(); return; }
         run.seenScripts.push(script.id);
       }
-      app.replace(makeCutscene(), { script, onDone: then });
+      go(makeCutscene(), { script, onDone: then }, script.boss ? 'clouds' : 'light');
     },
 
     /** Whatever story beat is owed before this blind, then the deck. */
@@ -57,12 +62,12 @@ export function createRouter(app, o = {}) {
     },
 
     deck() {
-      app.replace(makeTableScene(), {
+      go(makeTableScene(), {
         run,
         onExit: (result) => (result === 'cleared'
           ? R.afterBlind()
           : R.play(getScript('epilogue_lose'), () => R.summary(false))),
-      });
+      }, 'wave');
     },
 
     afterBlind() {
@@ -72,11 +77,11 @@ export function createRouter(app, o = {}) {
     },
 
     dock() {
-      app.replace(makeShopScene(), { run, onDone: () => R.intoBlind() });
+      go(makeShopScene(), { run, onDone: () => R.intoBlind() }, 'curtain');
     },
 
     summary(won) {
-      app.replace(makeGameOverScene(), { run, won, onDone: () => R.menu() });
+      go(makeGameOverScene(), { run, won, onDone: () => R.menu() }, 'iris');
     },
   };
 

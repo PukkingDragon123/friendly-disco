@@ -429,7 +429,7 @@ export function makeShopScene() {
 
     // header
     UI.panel(g, 4, 18, 632, 22, { style: 'wood', shadow: true, rivets: true });
-    text(g, 'THE DOCK', 12, 24, 'brass3', { shadow: 'ink' });
+    text(g, 'THE DOCK', 12, 22, 'brass3', { shadow: 'ink', font: 7 });
     UI.divider(g, 74, 23, 2, { pip: false });
     text(g, `NEXT — ANTE ${run.ante} ${nb.name.toUpperCase()}`, 92, 22, nb.color, { font: 3 });
     text(g, `target ${nb.target}`, 92, 30, 'grey2', { font: 3 });
@@ -561,11 +561,11 @@ export function makeShopScene() {
     // A single row of the caravan, clear of the pier decking — it is what the crates
     // are for, so it belongs on screen while you are choosing one.
     const uniq = Array.from(new Set(run.caravan)).slice(0, 38);
-    text(g, 'ABOARD', 136, 236, 'brass2', { font: 3 });
-    uniq.forEach((id, i) => {
+    text(g, 'ABOARD', 136, 234, 'brass2', { font: 3 });
+    uniq.slice(0, 36).forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
-      drawAnimalIcon(g, a, 176 + i * 12, 240, { scale: 1 });
+      drawAnimalIcon(g, a, 182 + i * 12, 241, { scale: 1 });
     });
   }
 
@@ -580,7 +580,7 @@ export function makeShopScene() {
     const cs = 30;
     drawCrateArt(g, cx - cs, cy - cs / 2, cs * 2, cs, c, hov ? Math.round(Math.sin(t * 6) * 1) : 0);
 
-    text(g, c.name, cx, y + 76, 'white', { center: true, shadow: 'ink' });
+    text(g, c.name, cx, y + 74, 'white', { center: true, shadow: 'ink', font: 7 });
     UI.starRow(g, cx - (UI.RARITY_STARS[c.rarity] || 1) * 4, y + 86, UI.RARITY_STARS[c.rarity] || 1, { color: rc });
 
     const lines = crateSummary(c) || [];
@@ -634,7 +634,7 @@ export function makeShopScene() {
   function drawDelivery(g) {
     // dim the dockside furniture so the eye goes to the boat
     wash(g, 0, 16, 640, 30, 'ink', 0.5);
-    text(g, 'INBOUND', 320, 22, 'brass3', { center: true, outline: 'ink' });
+    text(g, 'INBOUND', 320, 20, 'brass3', { center: true, outline: 'ink', font: 7 });
     text(g, crate ? crate.name : '', 320, 34, 'bone', { font: 3, center: true });
 
     if (boat) drawBoat(g, boat, t);

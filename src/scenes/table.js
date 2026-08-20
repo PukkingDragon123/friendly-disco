@@ -696,7 +696,7 @@ export function makeTableScene() {
         .forEach((l, i) => text(g, l, x + 6, y + 20 + i * 7, 'grey2', { font: 3 }));
     }
     text(g, 'TARGET', x + 6, y + 40, 'grey1', { font: 3 });
-    text(g, fmtBig(run.target), x + 40, y + 38, 'gold', { shadow: 'ink' });
+    text(g, fmtBig(run.target), x + 40, y + 37, 'gold', { shadow: 'ink', font: 7 });
     const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
     UI.bar(g, x + 6, y + 50, 152, 8, prog, {
       fill: prog >= 1 ? 'green1' : prog > 0.66 ? 'amber' : 'gold',
@@ -727,36 +727,36 @@ export function makeTableScene() {
     line(g, cx + bw + 18, y + 29 - lift, cx + bw + 11, y + 15, 'brass0');
 
     UI.panel(g, cx - bw - 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
-    text(g, String(showChips), cx - 12 - bw / 2, y + 19, previewing ? 'sky' : 'ice',
-      { center: true, scale: 2, shadow: 'ink' });
+    text(g, String(showChips), cx - 12 - bw / 2, y + 16, previewing ? 'sky' : 'ice',
+      { center: true, scale: 2, font: 7, shadow: 'ink' });
     text(g, 'CHIPS', cx - 12 - bw / 2, y + 44, 'sky', { font: 3, center: true });
 
-    text(g, '×', cx - 4, y + 20, 'white', { center: true, scale: 2, shadow: 'ink' });
+    text(g, '×', cx - 4, y + 18, 'white', { center: true, scale: 2, font: 7, shadow: 'ink' });
 
     UI.panel(g, cx + 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
-    text(g, fmt(liveMultTotal), cx + 12 + bw / 2, y + 19, previewing ? 'red1' : 'red2',
-      { center: true, scale: 2, shadow: 'ink' });
+    text(g, fmt(liveMultTotal), cx + 12 + bw / 2, y + 16, previewing ? 'red1' : 'red2',
+      { center: true, scale: 2, font: 7, shadow: 'ink' });
     text(g, 'MULT', cx + 12 + bw / 2, y + 44, 'red1', { font: 3, center: true });
 
     // --- right: what this shot has banked so far, or what the aimed shot is worth
     if (previewing) {
-      text(g, '~' + projected.score, x + w - 8, y + 16, 'grey2', { right: true, scale: 2, shadow: 'ink' });
+      text(g, '~' + projected.score, x + w - 8, y + 14, 'grey2', { right: true, scale: 2, font: 7, shadow: 'ink' });
       text(g, projected.match === 'exact' ? 'IF IT GOES HOME' : projected.match === 'partial' ? 'IF IT GOES CLOSE' : 'IF IT GOES WRONG',
         x + w - 8, y + 36, projected.match === 'exact' ? 'gold' : projected.match === 'partial' ? 'sky' : 'red2',
         { font: 3, right: true });
     } else if (shotScore > 0) {
-      text(g, '+' + shotScore, x + w - 8, y + 16, 'gold', { right: true, scale: 2, shadow: 'ink' });
+      text(g, '+' + shotScore, x + w - 8, y + 14, 'gold', { right: true, scale: 2, font: 7, shadow: 'ink' });
       text(g, 'THIS SHOT', x + w - 8, y + 36, 'brass2', { font: 3, right: true });
     }
 
     // --- the step banner: what just fired, in the colour of what kind of thing it was
     if (bannerT > 0 && bannerText) {
-      const bw2 = textW(bannerText) + 16;
+      const bw2 = textW(bannerText, { font: 7 }) + 16;
       const bcx = clamp(cx, x + bw2 / 2 + 4, x + w - bw2 / 2 - 4);
       const by = y + h - 4;
       box(g, bcx - bw2 / 2, by, bw2, 13, 'ink', 1);
       boxFrame(g, bcx - bw2 / 2, by, bw2, 13, bannerColor, 1);
-      text(g, bannerText, bcx, by + 3, bannerColor, { center: true });
+      text(g, bannerText, bcx, by + 2, bannerColor, { center: true, font: 7 });
     }
   }
 
@@ -787,14 +787,14 @@ export function makeTableScene() {
 
     let cy = y + 6;
     // ante + blind
-    text(g, `ANTE ${run.ante}/8`, x + 6, cy, 'brass3');
+    text(g, `ANTE ${run.ante}/8`, x + 6, cy, 'brass3', { font: 7, shadow: 'ink' });
     text(g, currentKind(run).toUpperCase(), x + w - 6, cy, run.blind ? run.blind.color : 'white', { font: 3, right: true });
     cy += 12;
 
     // score / target
     UI.panel(g, x + 4, cy, w - 8, 30, { style: 'slate', inset: true });
     text(g, 'SCORE', x + 8, cy + 3, 'grey2', { font: 3 });
-    text(g, String(Math.round(dispScore)), x + w - 8, cy + 2, 'gold', { right: true, shadow: 'ink' });
+    text(g, String(Math.round(dispScore)), x + w - 8, cy + 1, 'gold', { right: true, shadow: 'ink', font: 7 });
     const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
     UI.bar(g, x + 8, cy + 16, w - 16, 6, prog, { fill: prog >= 1 ? 'green1' : 'gold', bg: 'shadow', frame: 'brass1', glow: prog >= 1 });
     text(g, 'NEED ' + fmtBig(run.target), x + 8, cy + 24, 'grey2', { font: 3 });
@@ -805,7 +805,8 @@ export function makeTableScene() {
     const floodK = clamp(run.flood || 0, 0, 1);
     UI.panel(g, x + 4, cy, w - 8, 26, { style: 'slate', inset: true });
     text(g, 'FLOOD', x + 8, cy + 3, moves <= 1 ? 'red2' : 'foam', { font: 3 });
-    text(g, moves + (moves === 1 ? ' MOVE' : ' MOVES'), x + w - 8, cy + 2, moves <= 1 ? 'red2' : 'ice', { right: true });
+    text(g, moves + (moves === 1 ? ' MOVE' : ' MOVES'), x + w - 8, cy + 1, moves <= 1 ? 'red2' : 'ice',
+      { right: true, font: 7, shadow: 'ink' });
     // the gauge fills with water and the hull marks show how much rail is left
     UI.bar(g, x + 8, cy + 13, w - 16, 9, floodK, {
       fill: floodK > 0.75 ? 'red2' : floodK > 0.5 ? 'water3' : 'water2',
@@ -943,7 +944,7 @@ export function makeTableScene() {
       const cw = 150, cxx = x + w - cw - 4;
       UI.panel(g, cxx, y + 6, cw, h - 12, { style: 'slate', inset: true });
       drawAnimal(g, a, cxx + 16, y + 24, { scale: 1 });
-      text(g, a.name, cxx + 32, y + 10, 'white');
+      text(g, a.name, cxx + 32, y + 9, 'white', { font: 7, shadow: 'ink' });
       const hab = HABITAT_BY_ID[a.home];
       if (hab) {
         UI.icon(g, hab.icon, cxx + 32, y + 19, { color: hab.color });

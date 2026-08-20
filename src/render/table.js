@@ -283,6 +283,73 @@ function bakeFrame(seed, assignment) {
     dither(g, Math.round(mid - hw) + 4 + i * 3, H + i, Math.round(hw * 2) - 8 - i * 6, 1, 'rgba(0,0,0,0)', 'ink', 13 - i * 2);
   }
 
+  // ---- the ark, not a barge. The deck is boxed in by the readout above and the
+  // control bar below, so the boat has to be sold on the timber itself: hull ribs down
+  // the side rails, tarred seams and a keel on the apron, and real deck furniture.
+
+  // ribs: vertical members down the side rails, converging with the hull
+  for (let r = 2; r < DECK.feltH; r += 13) {
+    const ty = r / VIEW.tilt;
+    const hw = (DECK.feltW / 2) * scaleAt(ty);
+    const y = R + r;
+    for (let i = 2; i < R - 2; i++) {
+      px(g, Math.round(mid - hw) - 1 - i, y, 'wood0');
+      px(g, Math.round(mid - hw) - 1 - i, y + 1, 'wood3');
+      px(g, Math.round(mid + hw) + i, y, 'wood0');
+      px(g, Math.round(mid + hw) + i, y + 1, 'wood3');
+    }
+  }
+
+  // tarred seams and a keel line across the apron
+  {
+    const ay = R + DECK.feltH + R;
+    for (let i = 1; i < DECK.apron; i += 3) {
+      const ty = TABLE_H + (R + i) / VIEW.tilt;
+      const hw = (DECK.feltW / 2) * scaleAt(ty) + R;
+      rect(g, Math.round(mid - hw) + 3, ay + i, Math.round(hw * 2) - 6, 1, 'wood0');
+    }
+    const hwK = (DECK.feltW / 2) * scaleAt(TABLE_H + R / VIEW.tilt) + R;
+    rect(g, Math.round(mid - hwK) + 8, ay + DECK.apron - 3, Math.round(hwK * 2) - 16, 2, 'wood0');
+    rect(g, Math.round(mid - hwK) + 8, ay + DECK.apron - 3, Math.round(hwK * 2) - 16, 1, 'wood2');
+  }
+
+  // a carved dove figurehead on the far rail, either side of the centre gate
+  for (const fx of [TABLE_W * 0.26, TABLE_W * 0.74]) {
+    const s2 = toScreen(fx, -R / VIEW.tilt * 0.55);
+    const hx = Math.round(s2.x - DECK.x), hy = Math.round(s2.y - DECK.y);
+    ellipse(g, hx, hy, 5, 3, 'wood4');
+    ellipse(g, hx, hy - 1, 4, 2, 'bone');
+    disc(g, hx - 4, hy - 2, 2, 'bone');
+    px(g, hx - 5, hy - 3, 'ink');
+    tri(g, hx - 7, hy - 2, hx - 5, hy - 3, hx - 5, hy - 1, 'amber');
+    for (let i = 0; i < 5; i++) px(g, hx + 1 + i, hy - 2 + Math.round(i * 0.4), 'white');
+    rect(g, hx - 2, hy + 2, 5, 2, 'wood2');
+  }
+
+  // rope coiled at the near corners, and cleats with a swagged line between them
+  for (const cxr of [TABLE_W * 0.12, TABLE_W * 0.88]) {
+    const s2 = toScreen(cxr, TABLE_H + (R * 0.55) / VIEW.tilt);
+    const rx = Math.round(s2.x - DECK.x), ry = Math.round(s2.y - DECK.y);
+    for (let i = 0; i < 3; i++) ellipseFrame(g, rx, ry, 6 - i * 2, 3 - i, i ? 'wood3' : 'wood4');
+  }
+  for (let i = 0; i < 5; i++) {
+    const s2 = toScreen(TABLE_W * (0.2 + i * 0.15), TABLE_H + (R * 0.35) / VIEW.tilt);
+    const kx = Math.round(s2.x - DECK.x), ky = Math.round(s2.y - DECK.y);
+    rect(g, kx - 3, ky, 7, 2, 'grey0');
+    rect(g, kx - 1, ky - 1, 3, 1, 'grey2');
+  }
+
+  // a lantern hung on each far corner post
+  for (const lx of [TABLE_W * 0.06, TABLE_W * 0.94]) {
+    const s2 = toScreen(lx, -R / VIEW.tilt * 0.5);
+    const px0 = Math.round(s2.x - DECK.x), py0 = Math.round(s2.y - DECK.y);
+    rect(g, px0 - 1, py0 - 5, 2, 3, 'grey0');
+    box(g, px0 - 3, py0 - 2, 7, 7, 'brass1', 1);
+    rect(g, px0 - 2, py0 - 1, 5, 5, 'gold');
+    rect(g, px0 - 1, py0, 3, 3, 'white');
+    px(g, px0, py0 + 5, 'brass0');
+  }
+
   // ---- gate mouths, cut into the timber
   for (const slot of Object.keys(GATE_POS)) {
     const hid = assignment[slot];
@@ -342,8 +409,9 @@ export function createDeck(o = {}) {
 
     update(dt) { t += dt; },
 
-    /** Static layers. Call before the animals. */
+    /** Static layers plus the live water around the hull. Call before the animals. */
     drawBase(g) {
+      drawHullWake(g, t);
       // hull shadow spilling onto the water
       for (let i = 0; i < 6; i++) {
         const hw = (DECK.feltW / 2) * scaleAt(TABLE_H) + DECK.rail;
@@ -351,6 +419,7 @@ export function createDeck(o = {}) {
       }
       if (frameCv) blit(g, frameCv, DECK.x, DECK.y);
       if (felt) blit(g, felt, DECK.feltX, DECK.feltY);
+      drawHullFoam(g, t);
     },
 
     /** Habitat gates: pulse, icon, name plate. */
@@ -540,6 +609,63 @@ export function createDeck(o = {}) {
   };
 
   return deck;
+}
+
+/**
+ * The sea breaking on the outside of the hull. Nothing says "this is a boat" like water
+ * that knows the shape of it, and the timber itself is boxed in by the HUD above and
+ * below, so the hull has to be sold from the outside.
+ */
+function drawHullWake(g, t) {
+  // a broad displaced swell either side of the hull, widest at the near rail
+  for (let r = -DECK.rail; r < DECK.feltH + DECK.rail + DECK.apron; r += 1) {
+    const ty = r / VIEW.tilt;
+    const hw = (DECK.feltW / 2) * scaleAt(ty) + DECK.rail;
+    const y = DECK.feltY + r;
+    if (y < 90 || y > 359) continue;
+    const depth = clamp((r + DECK.rail) / (DECK.feltH + DECK.rail * 2), 0, 1);
+    const reach = Math.round(3 + depth * 12);
+    for (let i = 0; i < reach; i++) {
+      const a = 0.22 * (1 - i / reach);
+      const ph = Math.sin(t * 1.6 + r * 0.08 + i * 0.4);
+      if (ph < -0.2) continue;
+      wash(g, VIEW.cx - hw - i - 1, y, 1, 1, 'foam', a);
+      wash(g, VIEW.cx + hw + i, y, 1, 1, 'foam', a);
+    }
+  }
+  // wake streaming away from the near corners
+  const hwN = (DECK.feltW / 2) * scaleAt(TABLE_H) + DECK.rail;
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 44; i++) {
+      const x = VIEW.cx + side * (hwN + i * 1.6);
+      const y = DECK.apronY + DECK.apron + Math.round(i * 0.9) + Math.round(Math.sin(t * 3 + i * 0.5) * 1.5);
+      if (y > 358 || x < 150 || x > 639) continue;
+      const c = i < 10 ? 'white' : i < 24 ? 'foam' : 'water3';
+      px(g, x, y, c);
+      if (i < 16) px(g, x, y + 1, 'foam');
+    }
+  }
+}
+
+/** Bright foam right at the waterline where the hull meets the sea. */
+function drawHullFoam(g, t) {
+  const hw = (DECK.feltW / 2) * scaleAt(TABLE_H) + DECK.rail;
+  const y = DECK.apronY + DECK.apron - 1;
+  for (let i = 0; i < 3; i++) {
+    const ww = Math.round(hw * 2) - i * 10;
+    if (ww <= 0) break;
+    const wob = Math.round(Math.sin(t * 2.4 + i) * 1.5);
+    rect(g, Math.round(VIEW.cx - ww / 2), y + i + wob, ww, 1, i === 0 ? 'white' : i === 1 ? 'foam' : 'water3');
+  }
+  // spray leaping up the sides
+  for (let i = 0; i < 18; i++) {
+    const side = i % 2 ? 1 : -1;
+    const up = ((i * 37 + Math.floor(t * 110)) % 16);
+    const yy = y - up;
+    const xx = VIEW.cx + side * (hw + 1 + Math.round(up * 0.3));
+    if (yy < 100) continue;
+    px(g, xx, yy, up < 6 ? 'white' : 'foam');
+  }
 }
 
 /** Aim angle in TABLE space from a ball toward a screen point. */

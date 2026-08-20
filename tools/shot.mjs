@@ -115,6 +115,24 @@ switch (which) {
     };
     break;
   }
+  case 'trans': {
+    // a transition frame over a still of the deck, so the wipe can be reviewed
+    const { drawTransition, KINDS } = await import('../src/core/transition.js');
+    const { makeTableScene } = await import('../src/scenes/table.js');
+    const R2 = await import('../src/game/run.js');
+    const under = makeTableScene();
+    const r2 = R2.newRun('TRANS');
+    under.enter({ run: r2, onExit: () => {} }, app);
+    for (let i = 0; i < 80; i++) { under.update(1 / 60, app); Input.consume(); }
+    const kind = process.env.KIND || 'wave';
+    const p = Number(process.env.P || 0.42);
+    scene = {
+      update() {},
+      draw() { under.draw(g, app); drawTransition(g, kind, p, Number(process.env.TT || 1.3)); },
+    };
+    void KINDS;
+    break;
+  }
   case 'cut': {
     const { makeCutscene } = await import('../src/scenes/cutscene.js');
     const S = await import('../src/data/story.js');

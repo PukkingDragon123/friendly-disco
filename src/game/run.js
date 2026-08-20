@@ -59,12 +59,16 @@ function baseRun(seed) {
     // --- per-blind
     feedChips: {},        // animalId -> chips granted by a feed this blind
     feedMult: {},         // animalId -> mult granted by a feed this blind
+    flood: 0,             // 0 = dry rail, 1 = the water has the deck
+    floodPerShot: 0.25,   // how much of the hull the water claims per shot
     shotsLeft: 4,
     reracksLeft: 3,
     score: 0,
     target: 0,
     blind: null,
+    pendingBoss: null,
     seenBosses: [],
+    seenScripts: [],       // story beats already played, so nothing repeats on a re-run
     scoredHabitatsThisBlind: [],
     assignment: {},
 
@@ -124,6 +128,20 @@ export function rollAssignment(run, rng, closed = []) {
 
 export function currentKind(run) { return BLIND_ORDER[run.blindIx] || 'small'; }
 
+/**
+ * The boss for the upcoming blind, rolled early and stashed.
+ * The router needs the boss's identity to play its entrance BEFORE the deck scene
+ * exists, and startBlind() must then use the same one rather than rolling again.
+ */
+export function peekBoss(run) {
+  if (currentKind(run) !== 'boss') return null;
+  if (run.pendingBoss && run.pendingBoss.ante === run.ante) return run.pendingBoss.boss;
+  const rng = run.rng.fork(`boss/${run.ante}`);
+  const boss = rollBoss(rng, run.ante, run.seenBosses);
+  run.pendingBoss = { ante: run.ante, boss };
+  return boss;
+}
+
 export function startBlind(run) {
   const kind = currentKind(run);
   const rng = run.rng.fork(`blind/${run.ante}/${kind}`);
@@ -132,7 +150,8 @@ export function startBlind(run) {
   let boss = null;
   let effect = neutralEffect();
   if (kind === 'boss') {
-    boss = rollBoss(rng, run.ante, run.seenBosses);
+    boss = peekBoss(run);
+    run.pendingBoss = null;
     if (boss) {
       run.seenBosses.push(boss.id);
       effect = Object.assign(neutralEffect(), boss.effect || {});
@@ -158,6 +177,11 @@ export function startBlind(run) {
   run.score = 0;
   run.shotsLeft = Math.max(1, run.shots + (effect.shots || 0));
   run.reracksLeft = Math.max(0, run.reracks + (effect.reracks || 0));
+  // The water climbs to the rail over exactly the shots you are given, so at the
+  // default rate the flood and the shot counter run out together — and a boss that
+  // doubles the rate genuinely drowns you in half the time.
+  run.flood = 0;
+  run.floodPerShot = (1 / run.shotsLeft) * Math.max(0.1, effect.floodRate || 1);
   run.scoredHabitatsThisBlind = [];
   run.vitrine = {};
   run.feedChips = {};
@@ -191,6 +215,8 @@ export function drawHand(run) {
 
 export function rerack(run) {
   if (run.reracksLeft <= 0) return false;
+  // a re-rack costs time, and time is water — but only a third of a shot's worth
+  run.flood = Math.min(0.999, run.flood + (run.floodPerShot || 0.25) * 0.34);
   run.reracksLeft--;
   // unpotted animals go back under the stash, then redraw
   run.stash = run.stash.concat(run.hand);
@@ -200,7 +226,17 @@ export function rerack(run) {
 }
 
 export function blindCleared(run) { return run.score >= run.target; }
-export function blindFailed(run) { return run.shotsLeft <= 0 && run.score < run.target; }
+
+/** Shots you can still take before the water is over the rail. */
+export function movesLeft(run) {
+  const per = Math.max(1e-6, run.floodPerShot || 0.25);
+  return Math.max(0, Math.min(run.shotsLeft, Math.ceil((1 - run.flood - 1e-9) / per)));
+}
+
+export function blindFailed(run) {
+  if (run.score >= run.target) return false;
+  return run.flood >= 1 - 1e-6 || run.shotsLeft <= 0;
+}
 
 /** Commit a resolved shot to the run. Returns a summary for the scene. */
 export function applyShot(run, resolved, potted) {
@@ -230,13 +266,20 @@ export function applyShot(run, resolved, potted) {
     }
   }
 
-  // sunk animals are spent for this blind
+  // Sunk animals are spent for this blind — except the ones whose skill sends them
+  // back (the dove always, the phoenix when it lands in the wrong gate).
+  const returning = new Set(resolved.returned || []);
   for (const p of potted) {
     const ix = run.hand.indexOf(p.animalId);
     if (ix >= 0) run.hand.splice(ix, 1);
+    if (returning.has(p.animalId)) run.stash.push(p.animalId);
   }
 
   run.shotsLeft--;
+  // the Ziz spreads its wings and the water waits a shot
+  const held = Math.max(0, resolved.floodHeld || 0);
+  if (held > 0) run.log.push({ text: 'The Ziz holds the water', color: 'foam' });
+  else run.flood = Math.min(1, run.flood + (run.floodPerShot || 0.25));
 
   // The Tithe: a shot that scores too little costs you another one.
   // A value <= 1 is read as a FRACTION of the blind target per shot, so the boss keeps
@@ -248,6 +291,7 @@ export function applyShot(run, resolved, potted) {
   let tithed = false;
   if (floor > 0 && resolved.totalScore < floor && run.shotsLeft > 0) {
     run.shotsLeft--;
+    run.flood = Math.min(1, run.flood + (run.floodPerShot || 0.25));
     tithed = true;
   }
 

@@ -467,6 +467,63 @@ export function createDeck(o = {}) {
       }
     },
 
+    /**
+     * The flood, climbing the ark. level 0 = dry rail, 1 = the water is over the felt.
+     * Drawn as a real waterline with foam, wet timber below it, and — once it is on the
+     * cloth — a shallow sheet with reflections, so the threat is legible at a glance
+     * rather than being a number in the corner.
+     */
+    drawFlood(g, level, o2 = {}) {
+      const k = clamp(level, 0, 1);
+      if (k <= 0.001) return;
+      // the water starts below the hull and climbs to just over the near rail
+      const bottom = DECK.apronY + DECK.apron + 10;
+      const topAt = DECK.feltY + DECK.feltH * 0.52;
+      const wl = Math.round(lerp(bottom, topAt, Math.pow(k, 0.9)));
+      const wob = Math.sin(t * 2.2) * (0.6 + k * 1.6);
+
+      for (let y = wl; y < 360; y++) {
+        const d = (y - wl) / Math.max(1, 360 - wl);
+        const hw = (DECK.feltW / 2) * scaleAt(TABLE_H) + DECK.rail + 6;
+        const x0 = Math.round(VIEW.cx - hw), ww = Math.round(hw * 2);
+        // inside the hull the water is dark and still; outside it is open sea
+        const band = d < 0.12 ? 'water2' : d < 0.34 ? 'water1' : d < 0.7 ? 'water0' : 'deep';
+        dither(g, x0, y, ww, 1, band, 'water0', Math.round(d * 10));
+        // moving crests
+        if (((y + Math.floor(t * 26)) % 5) === 0) {
+          for (let cx2 = 0; cx2 < ww; cx2 += 22) {
+            const sx = Math.round(x0 + ((cx2 + t * 34) % ww) + Math.sin((cx2 + t * 40) * 0.06) * 3);
+            rect(g, sx, y, 6, 1, d < 0.4 ? 'foam' : 'water3');
+          }
+        }
+      }
+      // the waterline itself: bright foam, and a wet stain on the timber above it
+      rect(g, 0, wl + Math.round(wob), 640, 1, 'foam');
+      rect(g, 0, wl + Math.round(wob) - 1, 640, 1, 'white');
+      for (let i = 1; i < 7; i++) {
+        dither(g, 0, wl + Math.round(wob) - 1 - i, 640, 1, 'rgba(0,0,0,0)', 'water1', 9 - i);
+      }
+      // spray along the line
+      for (let i = 0; i < 26; i++) {
+        const sx = ((i * 71 + Math.floor(t * 90)) % 640);
+        const sy = wl + Math.round(wob) - 2 - ((i * 37 + Math.floor(t * 130)) % Math.round(4 + k * 8));
+        px(g, sx, sy, i % 3 ? 'foam' : 'white');
+      }
+      // once it is on the cloth, sheet the felt and mirror the rail
+      if (wl < DECK.feltY + DECK.feltH) {
+        const from = Math.max(DECK.feltY, wl);
+        for (let y = from; y < DECK.feltY + DECK.feltH; y++) {
+          const row = y - DECK.feltY;
+          const hw = feltHalfAtRow(row);
+          wash(g, VIEW.cx - hw, y, hw * 2, 1, 'water1', 0.42);
+          if (((y + Math.floor(t * 18)) % 7) === 0) {
+            wash(g, VIEW.cx - hw, y, hw * 2, 1, 'foam', 0.16);
+          }
+        }
+      }
+      void o2;
+    },
+
     /** The hooded table light: a bright pool at the far rail falling off toward you. */
     drawLight(g) {
       for (let i = 0; i < 22; i++) {

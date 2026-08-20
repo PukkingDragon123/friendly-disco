@@ -26,6 +26,23 @@ page.on('console', (m) => {
 page.on('pageerror', (e) => errors.push('pageerror: ' + (e && e.message)));
 page.on('requestfailed', (r) => errors.push('requestfailed: ' + r.url() + ' ' + (r.failure() && r.failure().errorText)));
 
+
+/** Click/skip through any dialogue until the deck scene is up. */
+async function skipDialogue(page, tries = 60) {
+  for (let i = 0; i < tries; i++) {
+    const kind = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
+      return d.phase !== undefined ? 'deck' : d.scriptId !== undefined ? 'cutscene' : 'other';
+    });
+    if (kind === 'deck') return true;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(160);
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(160);
+  }
+  return false;
+}
+
 await page.goto(URL, { waitUntil: 'networkidle' });
 await page.screenshot({ path: `${OUT}-1-gate.png` });
 
@@ -54,8 +71,11 @@ const box = await page.evaluate(() => {
   return { x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s };
 });
 await page.mouse.click(box.x, box.y);
-await page.waitForTimeout(2200);
-await page.screenshot({ path: `${OUT}-3-deck.png` });
+await page.waitForTimeout(1200);
+await page.screenshot({ path: `${OUT}-3-prologue.png` });
+if (!await skipDialogue(page)) errors.push('never reached the deck through the dialogue');
+await page.waitForTimeout(1600);
+await page.screenshot({ path: `${OUT}-4-deck.png` });
 
 const deck = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
@@ -81,12 +101,12 @@ await page.mouse.move(shot.x, shot.y);
 await page.waitForTimeout(120);
 await page.mouse.down();
 await page.waitForTimeout(500);
-await page.screenshot({ path: `${OUT}-4-charging.png` });
+await page.screenshot({ path: `${OUT}-5-charging.png` });
 await page.mouse.up();
 await page.waitForTimeout(1200);
-await page.screenshot({ path: `${OUT}-5-rolling.png` });
+await page.screenshot({ path: `${OUT}-6-rolling.png` });
 await page.waitForTimeout(4000);
-await page.screenshot({ path: `${OUT}-6-scored.png` });
+await page.screenshot({ path: `${OUT}-7-scored.png` });
 
 const after = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
@@ -97,7 +117,7 @@ console.log('after one shot:', JSON.stringify(after));
 // jump to the dock so the delivery renders in a real browser too
 await page.evaluate(() => window.__ARK.dock());
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${OUT}-7-dock.png` });
+await page.screenshot({ path: `${OUT}-8-dock.png` });
 
 console.log('\nconsole output:');
 for (const l of logs.slice(0, 12)) console.log('  ' + l);

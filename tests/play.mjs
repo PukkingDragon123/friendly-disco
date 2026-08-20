@@ -159,6 +159,18 @@ function playDeck(app, log) {
   return 'stuck';
 }
 
+/** Click through a dialogue script. Two clicks per line: finish the type, then advance. */
+function playCutscene(app, id) {
+  let guard = 0;
+  while (guard++ < 400) {
+    const d = app.scene.debug ? app.scene.debug() : null;
+    if (!d || d.scriptId === undefined || d.scriptId !== id) return;
+    if (d.outT >= 0) { tick(app, 40); return; }
+    pressAt(320, 300); tick(app, 2); releaseNow(); tick(app, 3);
+  }
+  errors.push(`cutscene ${id} never finished`);
+}
+
 function playDock(app) {
   tick(app, 20);
   snap('dock');
@@ -224,8 +236,9 @@ for (let s = 0; s < SEEDS; s++) {
   const log = [];
   let blinds = 0;
   let outcome = 'ran out of steps';
-  for (let guard = 0; guard < 30; guard++) {
+  for (let guard = 0; guard < 80; guard++) {
     const d = app.scene.debug ? app.scene.debug() : {};
+    if (d.scriptId !== undefined) { playCutscene(app, d.scriptId); continue; }  // dialogue
     if (d.rects && d.rects.crates) { playDock(app); continue; }         // dock
     if (d.rects && d.rects.again) {                                      // summary
       outcome = d.won ? 'WON THE RUN' : `died on ante ${d.run.ante}`;
@@ -234,7 +247,7 @@ for (let s = 0; s < SEEDS; s++) {
     }
     if (d.phase !== undefined) {
       const kind = d.run.blind ? d.run.blind.kind : '?';
-      log.push(` ante ${d.run.ante} ${kind} target ${d.run.target}`);
+      log.push(` ante ${d.run.ante} ${kind} target ${d.run.target} flood/shot ${(d.run.floodPerShot || 0).toFixed(2)}`);
       if (blinds === 0) snap('deck');
       const r = playDeck(app, VERBOSE ? log : null);
       blinds++;

@@ -10,6 +10,23 @@ const CHROME = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linu
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] });
 const errors = [];
 
+/** Click/skip through any dialogue until the deck scene is up. */
+async function skipDialogue(page, tries = 60) {
+  for (let i = 0; i < tries; i++) {
+    const kind = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
+      return d.phase !== undefined ? 'deck' : d.scriptId !== undefined ? 'cutscene' : 'other';
+    });
+    if (kind === 'deck') return true;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(160);
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(160);
+  }
+  return false;
+}
+
+
 async function run(label, viewport, isPortrait) {
   const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, deviceScaleFactor: 3 });
   const page = await ctx.newPage();
@@ -49,7 +66,10 @@ async function run(label, viewport, isPortrait) {
     return { x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s };
   });
   await page.touchscreen.tap(b.x, b.y);
-  await page.waitForTimeout(2200);
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: `shots/mobile-${label}-prologue.png` });
+  if (!await skipDialogue(page)) { errors.push(`${label}: never reached the deck`); await ctx.close(); return; }
+  await page.waitForTimeout(1600);
 
   const pts = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();

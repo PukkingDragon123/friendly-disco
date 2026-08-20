@@ -68,61 +68,119 @@ export function neutralEffect() {
     decoy: false,               // one animal in the rack is a mimic
     shrinkGates: 0,             // 0..1 fraction taken off every gate radius
     rotateGates: false,         // gates shuffle a seat between shots
+    floodRate: 1,               // multiplier on how fast the water climbs per shot
   };
 }
 
-function boss(id, name, desc, color, icon, minAnte, effect) {
-  return { id, name, desc, color, icon, minAnte, effect };
+function boss(o) {
+  return {
+    id: o.id, name: o.name, desc: o.desc, myth: o.myth, disaster: o.disaster,
+    color: o.color, icon: o.icon, minAnte: o.minAnte || 1, effect: o.effect || {},
+  };
 }
 
+/**
+ * Each boss is a named disaster out of somebody's flood myth, and each one is composed
+ * only from the legal effect keys. `myth` is the pantheon it comes from and `disaster`
+ * is the one-line threat the cutscene falls back to if it has no scripted dialogue.
+ */
 export const BOSSES = [
-  boss('drought', 'The Drought', 'The water gates are sealed', 'orange', 'sun', 1,
-    { closeHabitats: ['ocean', 'wetland'] }),
-
-  boss('blizzard', 'The Blizzard', 'The cloth is ice — nothing stops', 'ice', 'snowflake', 1,
-    { friction: 0.42 }),
-
-  boss('fog', 'The Fog', 'You cannot read the gates', 'grey2', 'cloud', 1,
-    { hideLabels: true }),
-
-  boss('narrows', 'The Narrows', 'Every gate closes to a slot', 'grey1', 'minus', 2,
-    { shrinkGates: 0.34 }),
-
-  boss('stampede', 'The Stampede', 'One shot fewer, and they bolt', 'red2', 'paw', 2,
-    { shots: -1, friction: 0.82 }),
-
-  boss('tide', 'The Tide', 'The deck leans with the swell', 'water3', 'wave', 2,
-    { gravityDrift: 1.1 }),
-
-  boss('manifest', 'The Manifest', 'No re-racks. Take what you are dealt', 'wood3', 'scroll', 2,
-    { reracks: -99 }),
-
-  boss('quarantine', 'The Quarantine', 'The animals ignore each other', 'teal', 'lock', 3,
-    { noInteractions: true }),
-
-  boss('inspector', 'The Inspector', 'Each gate is only counted once', 'brass2', 'eye', 3,
-    { onceScoringPerHabitat: true }),
-
-  boss('carousel', 'The Carousel', 'The gates turn after every shot', 'pink', 'wheel', 3,
-    { rotateGates: true }),
-
-  boss('poacher', 'The Poacher', 'Chips are cut to three fifths', 'red1', 'sword', 3,
-    { chipsMul: 0.6 }),
-
-  boss('mimic', 'The Mimic', 'Something in the rack is not an animal', 'purple1', 'skull', 4,
-    { decoy: true, hideLabels: true }),
-
-  boss('tithe', 'The Tithe', 'A weak shot costs you a shot', 'gold', 'coin', 4,
-    { scoreFloorPerShot: 0.14 }),
-
-  boss('famine', 'The Famine', 'Every multiplier is halved', 'rust', 'bone', 5,
-    { multMul: 0.5 }),
-
-  boss('sealed_hold', 'The Sealed Hold', 'Three gates are nailed shut', 'night', 'peak', 5,
-    { closeHabitats: ['arctic', 'mountain', 'forest'] }),
-
-  boss('long_night', 'The Long Night', 'Slick cloth, blind gates, one less shot', 'purple0', 'moon', 6,
-    { friction: 0.6, hideLabels: true, shots: -1 }),
+  boss({
+    id: 'deluge', name: 'The Deluge', myth: 'Hebrew',
+    desc: 'The water climbs twice as fast', disaster: 'I am the forty days',
+    color: 'water3', icon: 'drop', minAnte: 1,
+    effect: { floodRate: 2 },
+  }),
+  boss({
+    id: 'fimbulwinter', name: 'Fimbulwinter', myth: 'Norse',
+    desc: 'Three winters, no summer — the felt is ice', disaster: 'No summer comes between',
+    color: 'ice', icon: 'snowflake', minAnte: 1,
+    effect: { friction: 0.4 },
+  }),
+  boss({
+    id: 'plagues', name: 'The Ten Plagues', myth: 'Egyptian',
+    desc: 'Everything you count counts for less', disaster: 'I have brought a list',
+    color: 'green0', icon: 'bolt', minAnte: 1,
+    effect: { chipsMul: 0.6 },
+  }),
+  boss({
+    id: 'poseidon', name: "Poseidon's Wrath", myth: 'Greek',
+    desc: 'He is tilting the sea', disaster: 'The sea is mine',
+    color: 'teal', icon: 'wave', minAnte: 2,
+    effect: { gravityDrift: 1.2 },
+  }),
+  boss({
+    id: 'leviathan', name: 'Leviathan', myth: 'Hebrew',
+    desc: 'One creature aboard is not a creature', disaster: 'Which one? Yes',
+    color: 'purple1', icon: 'skull', minAnte: 2,
+    effect: { decoy: true },
+  }),
+  boss({
+    id: 'fenrir', name: 'Fenrir', myth: 'Norse',
+    desc: 'The wolf eats a shot', disaster: 'I ate the sun',
+    color: 'grey2', icon: 'paw', minAnte: 2,
+    effect: { shots: -1, floodRate: 1.2 },
+  }),
+  boss({
+    id: 'typhon', name: 'Typhon', myth: 'Greek',
+    desc: 'A hundred heads lean on the gates', disaster: 'Every head is leaning',
+    color: 'rust', icon: 'minus', minAnte: 2,
+    effect: { shrinkGates: 0.34 },
+  }),
+  boss({
+    id: 'jormungandr', name: 'Jormungandr', myth: 'Norse',
+    desc: 'The gates turn after every shot', disaster: 'I circle the world',
+    color: 'moss', icon: 'wheel', minAnte: 3,
+    effect: { rotateGates: true },
+  }),
+  boss({
+    id: 'duat', name: 'The Duat', myth: 'Egyptian',
+    desc: 'You cannot read the gates', disaster: 'Tell me which door is which',
+    color: 'purple0', icon: 'moon', minAnte: 3,
+    effect: { hideLabels: true },
+  }),
+  boss({
+    id: 'tiamat', name: 'Tiamat', myth: 'Babylonian',
+    desc: 'Every multiplier is halved', disaster: 'I halve what you multiply',
+    color: 'red1', icon: 'fish', minAnte: 3,
+    effect: { multMul: 0.5 },
+  }),
+  boss({
+    id: 'vritra', name: 'Vritra', myth: 'Hindu',
+    desc: 'The serpent has swallowed the rivers', disaster: 'Drink from my coils',
+    color: 'orange', icon: 'sun', minAnte: 3,
+    effect: { closeHabitats: ['ocean', 'wetland'] },
+  }),
+  boss({
+    id: 'amaterasu', name: "Amaterasu's Absence", myth: 'Japanese',
+    desc: 'She took the light into the cave', disaster: 'The light has gone with her',
+    color: 'night', icon: 'eye', minAnte: 4,
+    effect: { hideLabels: true, friction: 0.62 },
+  }),
+  boss({
+    id: 'charybdis', name: 'Charybdis', myth: 'Greek',
+    desc: 'Everything goes down, and down here', disaster: 'Down. Everything goes down',
+    color: 'water2', icon: 'drop', minAnte: 4,
+    effect: { gravityDrift: 0.9, floodRate: 1.6 },
+  }),
+  boss({
+    id: 'maat', name: "Ma'at's Scale", myth: 'Egyptian',
+    desc: 'A weak shot costs you a shot', disaster: 'Weighed against a feather',
+    color: 'gold', icon: 'feather', minAnte: 4,
+    effect: { scoreFloorPerShot: 0.14 },
+  }),
+  boss({
+    id: 'eden', name: 'The Sealing of Eden', myth: 'Hebrew',
+    desc: 'Three gates shut, a sword at each', disaster: 'The flaming sword is at each',
+    color: 'red2', icon: 'sword', minAnte: 5,
+    effect: { closeHabitats: ['arctic', 'mountain', 'forest'] },
+  }),
+  boss({
+    id: 'ragnarok', name: 'Ragnarok', myth: 'Norse',
+    desc: 'The last one. It brought everything', disaster: 'I have brought everything',
+    color: 'red2', icon: 'flame', minAnte: 7,
+    effect: { friction: 0.62, hideLabels: true, shots: -1, floodRate: 1.4 },
+  }),
 ];
 
 export const BOSS_BY_ID = {};

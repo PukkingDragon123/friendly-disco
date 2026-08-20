@@ -15,8 +15,18 @@ export function installDom(o = {}) {
     return c;
   };
 
+  const classList = () => {
+    const set = new Set();
+    return {
+      add: (...c) => c.forEach((x) => set.add(x)),
+      remove: (...c) => c.forEach((x) => set.delete(x)),
+      toggle: (c, on) => { const want = on === undefined ? !set.has(c) : !!on; if (want) set.add(c); else set.delete(c); return want; },
+      contains: (c) => set.has(c),
+    };
+  };
+
   const el = () => ({
-    style: {}, classList: { add: noop, remove: noop, contains: () => false },
+    style: {}, classList: classList(),
     addEventListener: noop, removeEventListener: noop, appendChild: noop, remove: noop,
     querySelector: () => null, textContent: '', innerHTML: '', hidden: false,
   });
@@ -28,8 +38,8 @@ export function installDom(o = {}) {
     getElementById: (id) => (id === 'game' ? main : null),
     querySelector: () => null,
     addEventListener: noop, removeEventListener: noop,
-    body: Object.assign(el(), { appendChild: noop }),
-    documentElement: el(),
+    body: Object.assign(el(), { appendChild: noop, classList: classList() }),
+    documentElement: Object.assign(el(), { requestFullscreen: () => Promise.resolve() }),
     fullscreenElement: null,
     exitFullscreen: () => Promise.resolve(),
   };

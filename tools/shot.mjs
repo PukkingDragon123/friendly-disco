@@ -21,6 +21,7 @@ const { Juice } = await import('../src/core/juice.js');
 
 // run.js pulls in every data module, so only load it for the scenes that need it
 const NEEDS_RUN = ['table', 'shop', 'over'];
+void NEEDS_RUN;
 let newRun = () => ({}), startBlind = () => {}, advance = () => {};
 if (NEEDS_RUN.includes(which)) {
   const R = await import('../src/game/run.js');
@@ -50,6 +51,11 @@ switch (which) {
     const { makeTableScene } = await import('../src/scenes/table.js');
     scene = makeTableScene();
     scene.enter({ run, onExit: () => {} }, app);
+    // FLOOD=0..1 forces the waterline for a screenshot without playing the shots
+    if (process.env.FLOOD) {
+      const d = scene.debug();
+      d.run.flood = Number(process.env.FLOOD);
+    }
     mouse(560, 130);
     break;
   }
@@ -105,6 +111,43 @@ switch (which) {
         deck.drawAnimals(g, world, { lookup: (id) => ANIMAL_BY_ID[id], selected: sel });
         deck.drawLight(g);
         ps.draw(g);
+      },
+    };
+    break;
+  }
+  case 'cut': {
+    const { makeCutscene } = await import('../src/scenes/cutscene.js');
+    const S = await import('../src/data/story.js');
+    const B = await import('../src/data/blinds.js');
+    const which = process.env.SCRIPT || 'prologue';
+    const script = which.startsWith('boss:')
+      ? S.bossScript(B.BOSS_BY_ID[which.slice(5)] || B.BOSSES[0])
+      : which.startsWith('ante')
+        ? S.anteScript(Number(which.slice(4)) || 1)
+        : S.getScript(which);
+    scene = makeCutscene();
+    scene.enter({ script, onDone: () => {} }, app);
+    const skip = Number(process.env.LINE || 0);
+    for (let i = 0; i < skip; i++) {
+      // advance past earlier lines so a later beat can be captured
+      Input.mouse.pressed = true; scene.update(1 / 60, app); Input.consume();
+      for (let k = 0; k < 4; k++) { Input.mouse.pressed = true; scene.update(1 / 60, app); Input.consume(); }
+    }
+    break;
+  }
+  case 'portraits': {
+    const { drawPortrait, PORTRAIT_IDS } = await import('../src/render/portraits.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, 640, 360, 'ink');
+        PORTRAIT_IDS.forEach((id, i) => {
+          const x = 24 + i * 100, y = 60;
+          drawPortrait(g, id, x, y, 84, 120, 1.4 + i * 0.7, { color: 'red2', icon: 'skull' });
+          text(g, id, x + 42, y + 128, 'bone', { font: 3, center: true });
+        });
+        text(g, 'SPEAKERS', 320, 24, 'brass3', { font: 7, center: true });
       },
     };
     break;

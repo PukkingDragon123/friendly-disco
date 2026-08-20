@@ -6,7 +6,7 @@
 // scoring.resolveShot() and the resulting SCRIPT is played back step by step so the
 // chips x mult readout assembles itself in front of you.
 
-import { P, mix } from '../core/palette.js';
+import { P, col, mix } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, dashLine, disc, ring, ellipse, ellipseFrame, tri,
   dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp,
@@ -18,6 +18,7 @@ import { createParticles } from '../core/particles.js';
 import { createSeascape } from '../render/seascape.js';
 import * as UI from '../render/uikit.js';
 import { drawAnimal, drawAnimalIcon } from '../render/sprites.js';
+import { drawCherub } from '../render/portraits.js';
 import {
   createDeck, DECK, VIEW, toScreen, toTable, buildGates, gateScreen, ballPixelRadius, aimAngle,
 } from '../render/table.js';
@@ -27,6 +28,7 @@ import { HABITAT_BY_ID } from '../data/habitats.js';
 import { resolveShot, previewPot } from '../game/scoring.js';
 import {
   startBlind, applyShot, endBlind, rerack, drawHand, blindCleared, blindFailed, currentKind,
+  movesLeft,
 } from '../game/run.js';
 import { BLIND_KINDS } from '../data/blinds.js';
 
@@ -64,6 +66,9 @@ export function makeTableScene() {
   let shotScore = 0;
   let tithed = false;
   let msg = '', msgT = 0;
+  // Cherubim that physically carry a scored number up to the ledger. Requested, and it
+  // turns out to be the clearest possible "this number went into your total".
+  const carriers = [];
 
   const STEP_TIME = 0.34;
 
@@ -302,7 +307,7 @@ export function makeTableScene() {
     } else {
       phase = 'aim'; phaseT = 0;
       if ((run.blind.effect || {}).rotateGates) rotateAssignment();
-      if (run.shotsLeft === 1) Audio.music('deck_tense');
+      if (movesLeft(run) <= 1) Audio.music('deck_tense');
     }
   }
 
@@ -341,7 +346,15 @@ export function makeTableScene() {
     Audio.sfx('score_slam');
     Juice.shake(3.2, 0.22);
     Juice.chromatic(3, 0.25);
-    Juice.pop('+' + entry.score, 320, 74, { color: 'gold', outline: 'ink', scale: 2, vy: -34, life: 1.1 });
+    const gs0 = entry.gate ? gateScreen(entry.gate) : { x: 400, y: 200 };
+    carriers.push({
+      x: gs0.x, y: gs0.y - 18, t: 0,
+      life: 1.5, text: '+' + entry.score,
+      tx: 74, ty: 62,                 // the score plate in the ledger
+      color: entry.match === 'exact' ? 'gold' : entry.match === 'partial' ? 'sky' : 'grey2',
+    });
+    if (carriers.length > 6) carriers.shift();
+    Audio.sfx('sparkle', { delay: 0.08 });
     liveChips = 0; liveMult = 0; liveXm = 1;
     entryIx++; stepIx = 0;
     if (entryIx >= script.entries.length) {
@@ -361,6 +374,16 @@ export function makeTableScene() {
     sea.update(dt);
     deck.update(dt);
     parts.update(dt);
+
+    for (let i = carriers.length - 1; i >= 0; i--) {
+      const c = carriers[i];
+      c.t += dt;
+      const k = clamp(c.t / c.life, 0, 1);
+      const e = Ease.inOutCubic(k);
+      c.cx = lerp(c.x, c.tx, e);
+      c.cy = lerp(c.y, c.ty, e) - Math.sin(e * Math.PI) * 26;
+      if (k >= 1) { carriers.splice(i, 1); Audio.sfx('coin', { vol: 0.5 }); }
+    }
 
     dispScore = approach(dispScore, run.score, 9, dt);
     dispChips = approach(dispChips, liveChips, 16, dt);
@@ -570,10 +593,12 @@ export function makeTableScene() {
 
     // ---------- backdrop
     rect(g, 0, 0, 640, 360, 'deep');
+    // The sea gets angrier as the water climbs — the backdrop is the timer.
+    const fl = clamp(run.flood || 0, 0, 1);
     sea.draw(g, {
       x: 0, y: 0, w: 640, h: 360, horizonY: 96,
       timeOfDay: run.blind && run.blind.kind === 'boss' ? 0.62 : 0.3,
-      storm: run.blind && run.blind.kind === 'boss' ? 0.55 : 0.1,
+      storm: clamp((run.blind && run.blind.kind === 'boss' ? 0.45 : 0.08) + fl * 0.55, 0, 1),
       parallax: 0.4, reflect: true,
     });
 
@@ -584,12 +609,14 @@ export function makeTableScene() {
     drawAimLayer(g);
     deck.drawAnimals(g, world, { lookup, selected, still: phase === 'score' });
     deck.drawLight(g);
+    deck.drawFlood(g, fl);
     parts.draw(g, 'front');
     drawGateFronts(g, eff);
 
     // ---------- HUD
     drawReadout(g);
     drawHud(g);
+    drawCarriers(g);
     drawRelicRibbon(g);
     drawControls(g);
 
@@ -687,6 +714,18 @@ export function makeTableScene() {
       ? projected.mult * projected.xmult
       : Math.max(0, dispMult) * (liveXm || 1);
 
+    // A cherub to each side of the readout, holding the plates on ribbons. They beat
+    // faster while a shot is being counted.
+    const beat = phase === 'score' ? 2.4 : 1;
+    const lift = Math.round(Math.sin(t * beat * 2.2) * 1.5);
+    drawCherub(g, cx - bw - 26, y + 28 + lift, t * beat, { scale: 2, arms: true });
+    drawCherub(g, cx + bw + 26, y + 28 - lift, t * beat + 1.9, { scale: 2, arms: true });
+    // ribbons from their hands to the plate corners
+    line(g, cx - bw - 18, y + 28 + lift, cx - bw - 11, y + 14, 'brass2');
+    line(g, cx - bw - 18, y + 29 + lift, cx - bw - 11, y + 15, 'brass0');
+    line(g, cx + bw + 18, y + 28 - lift, cx + bw + 11, y + 14, 'brass2');
+    line(g, cx + bw + 18, y + 29 - lift, cx + bw + 11, y + 15, 'brass0');
+
     UI.panel(g, cx - bw - 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
     text(g, String(showChips), cx - 12 - bw / 2, y + 19, previewing ? 'sky' : 'ice',
       { center: true, scale: 2, shadow: 'ink' });
@@ -721,6 +760,27 @@ export function makeTableScene() {
     }
   }
 
+  /** Two cherubim to a plate, hauling a scored number up to the ledger. */
+  function drawCarriers(g) {
+    for (const c of carriers) {
+      if (c.cx === undefined) continue;
+      const k = clamp(c.t / c.life, 0, 1);
+      if (k > 0.9 && Math.floor(c.t * 26) % 2 === 0) continue;
+      const w = textW(c.text) + 12;
+      const x = Math.round(c.cx), y = Math.round(c.cy);
+      // the plate they are carrying
+      box(g, x - w / 2, y - 6, w, 13, 'ink', 2);
+      box(g, x - w / 2 + 1, y - 5, w - 2, 11, mix(col(c.color), P.ink, 0.5), 2);
+      rect(g, x - w / 2 + 2, y - 4, w - 4, 1, c.color);
+      text(g, c.text, x, y - 3, c.color, { center: true, shadow: 'ink' });
+      // the pair holding it, and the slings
+      drawCherub(g, x - w / 2 - 7, y - 4, t * 1.6 + c.t * 3, { scale: 1, arms: true });
+      drawCherub(g, x + w / 2 + 7, y - 4, t * 1.6 + c.t * 3 + 1.6, { scale: 1, arms: true, flip: true });
+      line(g, x - w / 2 - 5, y - 3, x - w / 2, y - 4, 'bone');
+      line(g, x + w / 2 + 5, y - 3, x + w / 2, y - 4, 'bone');
+    }
+  }
+
   function drawHud(g) {
     const x = 4, y = 18, w = HUD_W - 8;
     UI.panel(g, x, y, w, 336, { style: 'wood', shadow: true });
@@ -740,7 +800,19 @@ export function makeTableScene() {
     text(g, 'NEED ' + fmtBig(run.target), x + 8, cy + 24, 'grey2', { font: 3 });
     cy += 36;
 
-    // shots + reracks
+    // --- the flood gauge: the real clock, so it gets the space
+    const moves = movesLeft(run);
+    const floodK = clamp(run.flood || 0, 0, 1);
+    UI.panel(g, x + 4, cy, w - 8, 26, { style: 'slate', inset: true });
+    text(g, 'FLOOD', x + 8, cy + 3, moves <= 1 ? 'red2' : 'foam', { font: 3 });
+    text(g, moves + (moves === 1 ? ' MOVE' : ' MOVES'), x + w - 8, cy + 2, moves <= 1 ? 'red2' : 'ice', { right: true });
+    // the gauge fills with water and the hull marks show how much rail is left
+    UI.bar(g, x + 8, cy + 13, w - 16, 9, floodK, {
+      fill: floodK > 0.75 ? 'red2' : floodK > 0.5 ? 'water3' : 'water2',
+      bg: 'ink', frame: 'brass1', ticks: Math.max(run.shots, run.shotsLeft),
+      stripe: true, glow: floodK > 0.75,
+    });
+    cy += 30;
     text(g, 'SHOTS', x + 6, cy, 'bone', { font: 3 });
     UI.segBar(g, x + 44, cy - 1, w - 52, 7, Math.max(run.shots, run.shotsLeft), run.shotsLeft, { fill: run.shotsLeft <= 1 ? 'red2' : 'sky' });
     cy += 10;
@@ -935,9 +1007,12 @@ export function makeTableScene() {
     const k = clamp(phaseT / 0.4, 0, 1);
     const yy = lerp(-30, 132, Ease.outQuad(k));
     UI.panel(g, 180, yy, 280, 76, { style: 'slate', shadow: true });
-    text(g, 'THE ARK IS LOST', 320, yy + 10, 'red2', { center: true, outline: 'ink' });
-    text(g, `${run.score} / ${run.target}`, 320, yy + 28, 'white', { center: true });
-    text(g, 'not enough animals found a home', 320, yy + 44, 'grey2', { font: 3, center: true });
+    const drowned = (run.flood || 0) >= 1 - 1e-6;
+    text(g, drowned ? 'THE WATER TAKES THE DECK' : 'OUT OF SHOTS', 320, yy + 8, 'red2',
+      { center: true, font: 7, shadow: 'ink' });
+    text(g, `${run.score} / ${run.target}`, 320, yy + 26, 'white', { center: true, scale: 2, shadow: 'ink' });
+    text(g, drowned ? 'the flood reached the felt' : 'not enough animals found a home',
+      320, yy + 46, 'grey2', { font: 3, center: true });
     if (phaseT > 0.9 && Math.floor(t * 2) % 2 === 0) text(g, 'CLICK TO CONTINUE', 320, yy + 58, 'bone', { font: 3, center: true });
   }
 

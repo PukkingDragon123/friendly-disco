@@ -64,6 +64,20 @@ const ROSTER = {
   mountain: ['mountaingoat', 'eagle', 'snowleopard', 'yak', 'marmot', 'condor', 'redpanda'],
   forest: ['fox', 'rabbit', 'deer', 'owl', 'hedgehog', 'badger', 'squirrel', 'brownbear', 'wolf', 'boar'],
 };
+// The apocrypha: added with the flood story. Real creatures the ark needed, plus beasts
+// out of the same myths the disasters come from. Every one carries an engine skill.
+const APOCRYPHA = {
+  forest: ['dove', 'unicorn', 'nightingale'],
+  mountain: ['raven', 'ibex', 'griffin'],
+  farm: ['lamb', 'ox'],
+  desert: ['locust', 'scarab', 'phoenix'],
+  ocean: ['kraken'],
+  wetland: ['behemoth'],
+  savanna: ['ziz'],
+  jungle: ['qilin'],
+  arctic: ['thunderbird'],
+};
+for (const [home, list] of Object.entries(APOCRYPHA)) ROSTER[home] = ROSTER[home].concat(list);
 const ALL_IDS = Object.values(ROSTER).flat();
 const TAGS = new Set(`predator prey herbivore carnivore omnivore bird fish mammal reptile insect amphibian
 cat canine bovine equine primate rodent bear pachyderm marsupial mustelid big small tiny flying swimming
@@ -141,6 +155,16 @@ if (section('data/animals') && M.animals) {
   ok(badRecipe.length === 0, 'all sprite recipe values legal', badRecipe.slice(0, 6).join(' '));
   ok(badCol.length === 0, 'all sprite colours are palette keys', badCol.slice(0, 6).join(' '));
   ok(badNum.length === 0, 'all animal numbers sane', badNum.slice(0, 6).join(' '));
+  // every skill an animal claims must be one the engine actually implements
+  if (M.scoring && M.scoring.SKILLS) {
+    const known = new Set(Object.keys(M.scoring.SKILLS));
+    const badSkill = (A.ANIMALS || []).filter((a) => a.skill && !known.has(a.skill.id)).map((a) => `${a.id}:${a.skill.id}`);
+    ok(badSkill.length === 0, 'every animal skill is implemented by scoring.js', badSkill.join(' '));
+    const skilled = (A.ANIMALS || []).filter((a) => a.skill).length;
+    ok(skilled >= 14, 'at least 14 animals carry a skill', String(skilled));
+    const noDesc = (A.ANIMALS || []).filter((a) => a.skill && (!a.skill.desc || a.skill.desc.length > 72)).map((a) => a.id);
+    ok(noDesc.length === 0, 'every skill has a short description', noDesc.join(' '));
+  }
   ok(Array.isArray(A.STARTER_DECK) && A.STARTER_DECK.length >= 18, 'STARTER_DECK sized', A.STARTER_DECK && A.STARTER_DECK.length);
   ok((A.STARTER_DECK || []).every((id) => A.ANIMAL_BY_ID[id]), 'STARTER_DECK ids all real');
   const homes = new Set((A.STARTER_DECK || []).map((id) => (A.ANIMAL_BY_ID[id] || {}).home));
@@ -271,7 +295,7 @@ if (section('data/blinds') && M.blinds) {
   const legal = new Set(Object.keys(B.neutralEffect ? B.neutralEffect() : {}));
   const LEGAL = ['closeHabitats', 'shots', 'reracks', 'friction', 'gravityDrift', 'noInteractions',
     'hideLabels', 'chipsMul', 'multMul', 'scoreFloorPerShot', 'onceScoringPerHabitat', 'decoy',
-    'shrinkGates', 'rotateGates'];
+    'shrinkGates', 'rotateGates', 'floodRate'];
   for (const k of LEGAL) ok(legal.has(k), `neutralEffect has ${k}`);
   let badKeys = [];
   for (const b of B.BOSSES || []) {
@@ -281,6 +305,9 @@ if (section('data/blinds') && M.blinds) {
   }
   ok(badKeys.length === 0, 'boss effects use only legal keys', badKeys.join(' '));
   ok((B.BOSSES || []).length >= 12, 'at least 12 bosses', (B.BOSSES || []).length);
+  // every boss should name the myth it came out of, and threaten something
+  const noMyth = (B.BOSSES || []).filter((b) => !b.myth || !b.disaster).map((b) => b.id);
+  ok(noMyth.length === 0, 'every boss names its myth and its threat', noMyth.join(','));
   // Targets must rise within an ante, and rise within a kind across antes. They are
   // deliberately NOT globally monotonic: ante 6's small blind is easier than ante 5's
   // boss, and that dip is the breather a player earns for beating a boss.

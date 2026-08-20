@@ -11,7 +11,7 @@
 //   6 rail bounces        7 combo xmult            8 boss multipliers
 //   9 commit: score += floor(chips * mult * xmult)
 
-import { ANIMAL_BY_ID } from '../data/animals.js';
+import { ANIMAL_BY_ID, SKILL_BY_ANIMAL } from '../data/animals.js';
 import { affinity, HABITAT_BY_ID } from '../data/habitats.js';
 import { INTERACTIONS } from '../data/interactions.js';
 import { habitatLevel } from '../data/cargo.js';
@@ -19,6 +19,47 @@ import { habitatLevel } from '../data/cargo.js';
 export const MATCH = { EXACT: 'exact', PARTIAL: 'partial', WRONG: 'wrong' };
 
 const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
+
+/* ------------------------------------------------------------------ skills */
+
+// Animal skills are engine features, not flavour: each id here is read at a specific
+// point in the pipeline. An unknown id is inert, never a crash, so content can name a
+// skill before the engine learns it.
+export const SKILLS = {
+  returns: 'Flies home to the caravan instead of being spent',
+  scout: 'Sealed and hidden gates read normally while it is aboard',
+  sure_footed: 'Each cushion it strikes pays double chips',
+  spared: 'Never devoured',
+  draught: 'Heavy: barely slows when it strikes another animal',
+  swarm: '+1 Mult per other member of its kind in play',
+  gilded: 'Pays $1 every time it is sent home',
+  lullaby: 'Cancels the first debuff in its habitat',
+  solitary_grace: 'x2 Mult when alone in its habitat',
+  rekindle: 'A wrong gate does not spend it',
+  far_hunter: 'Devours prey in any habitat',
+  drag_down: 'Animals it struck this shot count as sunk with it',
+  unmoved: 'Immune to debuffs, and never devoured',
+  stay_the_water: 'Holds the flood back one shot',
+  auspice: '+1 Mult to every animal scored after it this shot',
+  storm_born: 'Boss chip and mult penalties do not apply',
+};
+
+export function skillOf(animal) {
+  return animal ? SKILL_BY_ANIMAL[animal.id] || null : null;
+}
+export function hasSkill(animal, id) { return skillOf(animal) === id; }
+
+/** Skills that make an animal safe from being eaten. */
+function isProtected(animal) {
+  const sk = skillOf(animal);
+  return sk === 'spared' || sk === 'unmoved';
+}
+
+/** Skills that shrug off negative interaction gains. */
+function ignoresDebuffs(animal) {
+  const sk = skillOf(animal);
+  return sk === 'unmoved';
+}
 
 /* --------------------------------------------------------------- selectors */
 
@@ -48,12 +89,23 @@ function poolFor(scope, s, selfRef) {
 function runInteractions(res, s, entry) {
   const self = res.animal;
   const immune = INTERACTIONS.some((r) => r.id === `immune_${self.id}`)
-    || (self.tags || []).includes('immune');
+    || (self.tags || []).includes('immune')
+    || ignoresDebuffs(self);
+  // a nightingale in the gate sings off the first debuff that lands
+  let lullabies = (s.residents[s.habitatId] || []).filter((a) => hasSkill(a, 'lullaby')).length;
 
   for (const rule of INTERACTIONS) {
     if (rule.id && rule.id.startsWith('immune_')) continue;   // marker rules, not effects
 
-    const pool = poolFor(rule.scope || 'habitat', s, self);
+    let pool = poolFor(rule.scope || 'habitat', s, self);
+    // the griffin hunts across the whole ark, not just its own gate
+    if (rule.kind === 'eat' && hasSkill(self, 'far_hunter') && (rule.scope || 'habitat') === 'habitat') {
+      const everywhere = [];
+      for (const hid of Object.keys(s.residents)) {
+        for (const a of s.residents[hid] || []) if (a !== self) everywhere.push(a);
+      }
+      if (everywhere.length > pool.length) pool = everywhere;
+    }
 
     // set bonus: every named id must be present (self counts)
     if (rule.requireAll && rule.requireAll.length) {
@@ -77,6 +129,14 @@ function runInteractions(res, s, entry) {
     // honey-badger style immunity: negative gains simply do not land
     const g = rule.gain || {};
     const negative = num(g.chips) < 0 || num(g.mult) < 0 || num(g.xmult, 1) < 1;
+    if (negative && lullabies > 0) {
+      lullabies--;
+      entry.steps.push({
+        kind: 'buff', label: 'Nightingale sings it off', color: 'sky',
+        chips: 0, mult: 0, xmult: 1, ruleId: rule.id,
+      });
+      continue;
+    }
     if (immune && negative) {
       entry.steps.push({
         kind: 'immune', label: `${self.name} does not care`, color: 'brass2',
@@ -90,6 +150,7 @@ function runInteractions(res, s, entry) {
     // devouring: the other animal is removed from the habitat and never scores again
     if (rule.onOther && rule.onOther.consume) {
       for (let i = 0; i < stacks && i < matches.length; i++) {
+        if (isProtected(matches[i])) continue;      // the lamb and the behemoth are spared
         res.consumed.push(matches[i]);
         const list = s.residents[s.habitatId];
         if (list) {
@@ -134,6 +195,69 @@ function applyGain(res, rule, stacks, entry, matches, s) {
     ruleId: rule.id,
     others: matches ? matches.slice(0, stacks).map((a) => a.id) : (rule.requireAll || []),
   });
+}
+
+/**
+ * Per-animal skills. Everything here either adjusts this animal's own numbers or sets a
+ * flag on the entry for run.js to honour — nothing reaches into the world directly.
+ */
+function applySkills(res, entry, state, pot, indexInShot) {
+  const a = res.animal;
+  const sk = skillOf(a);
+  if (!sk) return;
+  const push = (label, color, d) => entry.steps.push(Object.assign({
+    kind: 'buff', label, color, chips: 0, mult: 0, xmult: 1,
+  }, d));
+
+  switch (sk) {
+    case 'swarm': {
+      const kin = state.shotAnimals.filter((o) => o !== a && o.id === a.id).length
+        + (state.residents[state.habitatId] || []).filter((o) => o.id === a.id).length
+        + state.tableAnimals.filter((o) => o.id === a.id).length;
+      if (kin > 0) { res.mult += kin; push(`Swarm x${kin}`, 'green1', { mult: kin }); }
+      break;
+    }
+    case 'solitary_grace': {
+      const alone = (state.residents[state.habitatId] || []).filter((o) => o !== a).length === 0
+        && state.shotAnimals.filter((o) => o !== a).length === 0;
+      if (alone) { res.xmult *= 2; push('Alone and holy', 'purple1', { xmult: 2 }); }
+      break;
+    }
+    case 'auspice':
+      // marks the shot; the boost is applied to LATER animals below
+      state.auspice = (state.auspice || 0) + 1;
+      push('Auspicious', 'gold', {});
+      break;
+    case 'gilded':
+      if (res.match === MATCH.EXACT) { res.money += 1; push('Gilded', 'brass3', { money: 1 }); }
+      break;
+    case 'returns':
+      entry.returns = true;
+      push('It comes back', 'ice', {});
+      break;
+    case 'rekindle':
+      if (res.match === MATCH.WRONG) { entry.returns = true; push('Rekindled', 'orange', {}); }
+      break;
+    case 'stay_the_water':
+      if (res.match !== MATCH.WRONG) { entry.floodHold = 1; push('The water waits', 'foam', {}); }
+      break;
+    case 'drag_down': {
+      const struck = pot.ball && Array.isArray(pot.ball.struck) ? pot.ball.struck.length : 0;
+      if (struck > 0) {
+        const add = struck * 26;
+        res.chips += add;
+        push(`Dragged down x${struck}`, 'purple1', { chips: add });
+      }
+      break;
+    }
+    default: break;
+  }
+
+  // anything scored after a qilin rides its luck
+  if (state.auspice && sk !== 'auspice' && indexInShot > 0) {
+    res.mult += state.auspice;
+    push('Auspice', 'gold', { mult: state.auspice });
+  }
 }
 
 /* ------------------------------------------------------------------ relics */
@@ -330,6 +454,9 @@ export function resolveShot(s) {
     } else {
       entry.steps.push({ kind: 'blocked', label: 'QUARANTINED', color: 'grey2', chips: 0, mult: 0, xmult: 1 });
     }
+    // --- 4b: the animal's own skill
+    applySkills(res, entry, state, pot, i);
+
     prevInter = { chips: res.interChips, mult: res.interMult };
 
     // --- 5: relics. Skipped in preview mode: relic hooks own mutable state
@@ -339,7 +466,7 @@ export function resolveShot(s) {
     // --- 6: rail bounces
     const bounces = pot.ball ? num(pot.ball.bounces) : 0;
     if (bounces > 0 && num(run.railChips) > 0) {
-      const add = bounces * num(run.railChips);
+      const add = bounces * num(run.railChips) * (hasSkill(animal, 'sure_footed') ? 2 : 1);
       res.chips += add;
       entry.steps.push({ kind: 'buff', label: `${bounces} cushion${bounces > 1 ? 's' : ''}`, color: 'brass3', chips: add, mult: 0, xmult: 1 });
     }
@@ -351,13 +478,17 @@ export function resolveShot(s) {
       entry.steps.push({ kind: 'combo', label: `COMBO x${i + 1}`, color: 'purple1', chips: 0, mult: 0, xmult: xm });
     }
 
-    // --- 8: boss squeeze
-    if (num(eff.chipsMul, 1) !== 1) {
+    // --- 8: boss squeeze. The thunderbird was born in one.
+    const stormBorn = hasSkill(animal, 'storm_born');
+    if (stormBorn && (num(eff.chipsMul, 1) !== 1 || num(eff.multMul, 1) !== 1)) {
+      entry.steps.push({ kind: 'buff', label: 'Storm-born', color: 'purple1', chips: 0, mult: 0, xmult: 1 });
+    }
+    if (!stormBorn && num(eff.chipsMul, 1) !== 1) {
       const add = res.chips * (num(eff.chipsMul, 1) - 1);
       res.chips += add;
       entry.steps.push({ kind: 'boss', label: 'BOSS', color: 'red2', chips: add, mult: 0, xmult: 1 });
     }
-    if (num(eff.multMul, 1) !== 1) {
+    if (!stormBorn && num(eff.multMul, 1) !== 1) {
       const before = res.mult;
       res.mult *= num(eff.multMul, 1);
       entry.steps.push({ kind: 'boss', label: 'BOSS', color: 'red2', chips: 0, mult: res.mult - before, xmult: 1 });
@@ -395,6 +526,9 @@ export function resolveShot(s) {
     perfect,
     scoredHabitats: Array.from(scoredHabitats),
     consumed: entries.flatMap((e) => e.consumed).concat(state.pendingConsume),
+    // skills that reach outside a single animal's score, for run.js to act on
+    returned: entries.filter((e) => e.returns).map((e) => e.animal.id),
+    floodHeld: entries.reduce((a, e) => a + (e.floodHold || 0), 0),
   };
 }
 

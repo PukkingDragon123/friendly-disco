@@ -27,7 +27,7 @@
 
 /* ------------------------------------------------------------------ roster */
 
-export const ANIMALS = [
+const BASE_ANIMALS = [
 
   /* ============================================================== SAVANNA */
   {
@@ -1010,6 +1010,139 @@ export const ANIMALS = [
   },
 ];
 
+/* ------------------------------------------------------------ APOCRYPHA */
+// Sixteen more, added with the flood story: eight real creatures the ark was always
+// going to need, and eight out of the myths the disasters come from.
+//
+// Every one of these carries a `skill`, which is an ENGINE-RECOGNISED id handled in
+// src/game/scoring.js — unlike `rules`, which is only a promise made to the player.
+// A skill id the engine does not know about is inert, never a crash.
+
+const APOCRYPHA = [
+  // --- real creatures
+  { id: 'dove', name: 'Dove', chips: 26, mult: 3, home: 'forest',
+    tags: ['bird', 'flying', 'small', 'prey', 'cute', 'social'], rarity: 'uncommon', cost: 5,
+    mass: 0.62, size: 0.85,
+    sprite: { body: 'white', shade: 'grey2', light: 'white', belly: 'bone', eye: 'ink', eyeStyle: 'dot', ears: 'none', face: 'beak', pattern: 'none', patternColor: 'grey1', extra: 'wing' },
+    blurb: 'Comes back. Always comes back.', rules: 'Returns to the caravan after scoring.',
+    skill: { id: 'returns', desc: 'Flies home to the caravan instead of being spent' } },
+
+  { id: 'raven', name: 'Raven', chips: 34, mult: 3, home: 'mountain',
+    tags: ['bird', 'flying', 'scavenger', 'smart', 'nocturnal'], rarity: 'uncommon', cost: 5,
+    mass: 0.7, size: 0.9,
+    sprite: { body: 'ink', shade: 'shadow', light: 'purple0', belly: 'shadow', eye: 'gold', eyeStyle: 'angry', ears: 'none', face: 'beak', pattern: 'none', patternColor: 'purple0', extra: 'wing' },
+    blurb: 'Sent out first. Did not return.', rules: 'Reveals the gates when they are hidden.',
+    skill: { id: 'scout', desc: 'While aboard, sealed and hidden gates read normally' } },
+
+  { id: 'ibex', name: 'Ibex', chips: 52, mult: 2.4, home: 'mountain',
+    tags: ['bovine', 'herbivore', 'fast', 'wild', 'herd'], rarity: 'common', cost: 4,
+    mass: 1.0, size: 1.0,
+    sprite: { body: 'wood3', shade: 'wood1', light: 'sand', belly: 'bone', eye: 'ink', eyeStyle: 'dot', ears: 'horn', face: 'muzzle', pattern: 'none', patternColor: 'wood0', extra: 'tail' },
+    blurb: 'Stands where nothing should stand.', rules: 'Rail bounces are worth double for it.',
+    skill: { id: 'sure_footed', desc: 'Each cushion it strikes pays double chips' } },
+
+    { id: 'lamb', name: 'Lamb', chips: 20, mult: 2.2, home: 'farm',
+    tags: ['domestic', 'prey', 'small', 'cute', 'herd'], rarity: 'common', cost: 3,
+    mass: 0.7, size: 0.85,
+    sprite: { body: 'white', shade: 'grey2', light: 'white', belly: 'bone', eye: 'ink', eyeStyle: 'wide', ears: 'round', face: 'snout', pattern: 'wool', patternColor: 'grey2', extra: 'tail' },
+    blurb: 'Small. Extremely aware of it.', rules: 'Cannot be eaten while a Shepherd relic is held.',
+    skill: { id: 'spared', desc: 'Never devoured — predators leave it alone' } },
+
+  { id: 'ox', name: 'Ox', chips: 74, mult: 1.6, home: 'farm',
+    tags: ['bovine', 'domestic', 'big', 'herbivore', 'slow'], rarity: 'uncommon', cost: 5,
+    mass: 1.55, size: 1.22,
+    sprite: { body: 'wood2', shade: 'wood0', light: 'wood4', belly: 'sand', eye: 'ink', eyeStyle: 'sleepy', ears: 'horn', face: 'muzzle', pattern: 'patches', patternColor: 'bone', extra: 'tail' },
+    blurb: 'Pulls the whole ark if asked.', rules: 'Pushes other animals much harder.',
+    skill: { id: 'draught', desc: 'Heavy: it barely slows when it hits another animal' } },
+
+  { id: 'locust', name: 'Locust', chips: 16, mult: 4, home: 'desert',
+    tags: ['insect', 'flying', 'tiny', 'social', 'wild'], rarity: 'common', cost: 3,
+    mass: 0.6, size: 0.8,
+    sprite: { body: 'green0', shade: 'moss', light: 'green1', belly: 'sand', eye: 'ink', eyeStyle: 'goggle', ears: 'none', face: 'mandible', pattern: 'bands', patternColor: 'moss', extra: 'antenna' },
+    blurb: 'Never travels alone. Ever.', rules: '+1 Mult for every other Locust anywhere.',
+    skill: { id: 'swarm', desc: '+1 Mult for every other Locust on the felt or in a gate' } },
+
+  { id: 'scarab', name: 'Scarab', chips: 30, mult: 3.2, home: 'desert',
+    tags: ['insect', 'tiny', 'armored', 'digging'], rarity: 'uncommon', cost: 5,
+    mass: 0.75, size: 0.82,
+    sprite: { body: 'teal', shade: 'water0', light: 'foam', belly: 'brass2', eye: 'gold', eyeStyle: 'sparkle', ears: 'none', face: 'mandible', pattern: 'plates', patternColor: 'brass1', extra: 'antenna' },
+    blurb: 'Rolls the sun uphill, apparently.', rules: 'Pays money as well as chips.',
+    skill: { id: 'gilded', desc: 'Pays $1 every time it is sent home' } },
+
+  { id: 'nightingale', name: 'Nightingale', chips: 24, mult: 3.6, home: 'forest',
+    tags: ['bird', 'flying', 'tiny', 'nocturnal', 'cute'], rarity: 'uncommon', cost: 5,
+    mass: 0.6, size: 0.8,
+    sprite: { body: 'wood3', shade: 'wood1', light: 'sand', belly: 'bone', eye: 'ink', eyeStyle: 'dot', ears: 'crest', face: 'beak', pattern: 'freckles', patternColor: 'wood0', extra: 'wing' },
+    blurb: 'Sings the others calm.', rules: 'Cancels one debuff in its gate.',
+    skill: { id: 'lullaby', desc: 'Cancels the first debuff in its habitat' } },
+
+  // --- out of the myths
+  { id: 'unicorn', name: 'Unicorn', chips: 96, mult: 4, home: 'forest',
+    tags: ['equine', 'majestic', 'exotic', 'solitary', 'smart'], rarity: 'rare', cost: 8,
+    mass: 1.05, size: 1.08,
+    sprite: { body: 'white', shade: 'purple1', light: 'white', belly: 'ice', eye: 'purple1', eyeStyle: 'sparkle', ears: 'horn', face: 'muzzle', pattern: 'none', patternColor: 'purple0', extra: 'plume' },
+    blurb: 'Missed the boat, in most tellings.', rules: 'x2 Mult if it is alone in the gate.',
+    skill: { id: 'solitary_grace', desc: 'x2 Mult when it is the only animal in its habitat' } },
+
+  { id: 'phoenix', name: 'Phoenix', chips: 110, mult: 4.5, home: 'desert',
+    tags: ['bird', 'flying', 'exotic', 'majestic', 'solitary'], rarity: 'legendary', cost: 10,
+    mass: 0.9, size: 1.1,
+    sprite: { body: 'orange', shade: 'red1', light: 'gold', belly: 'amber', eye: 'gold', eyeStyle: 'sparkle', ears: 'crest', face: 'beak', pattern: 'bands', patternColor: 'gold', extra: 'plume' },
+    blurb: 'Burns down. Gets up. Repeats.', rules: 'A wrong gate costs it nothing — it returns.',
+    skill: { id: 'rekindle', desc: 'A wrong gate does not spend it: it comes back to the caravan' } },
+
+  { id: 'griffin', name: 'Griffin', chips: 102, mult: 3.6, home: 'mountain',
+    tags: ['bird', 'predator', 'flying', 'exotic', 'majestic', 'big'], rarity: 'rare', cost: 8,
+    mass: 1.3, size: 1.18,
+    sprite: { body: 'brass2', shade: 'wood1', light: 'brass3', belly: 'bone', eye: 'gold', eyeStyle: 'angry', ears: 'tuft', face: 'beak', pattern: 'patches', patternColor: 'wood2', extra: 'wing' },
+    blurb: 'Front half judges. Back half hunts.', rules: 'Eats prey in any gate, not just its own.',
+    skill: { id: 'far_hunter', desc: 'Devours prey in ANY habitat, not only its own' } },
+
+  { id: 'kraken', name: 'Kraken', chips: 140, mult: 4, home: 'ocean',
+    tags: ['aquatic', 'predator', 'big', 'weird', 'exotic', 'smart'], rarity: 'legendary', cost: 10,
+    mass: 1.6, size: 1.25,
+    sprite: { body: 'purple0', shade: 'ink', light: 'purple1', belly: 'water1', eye: 'gold', eyeStyle: 'wide', ears: 'fin', face: 'mandible', pattern: 'spots', patternColor: 'purple1', extra: 'gill' },
+    blurb: 'Takes the whole shot with it.', rules: 'Drags every animal it touched into its gate.',
+    skill: { id: 'drag_down', desc: 'Every animal it struck this shot counts as sunk with it' } },
+
+  { id: 'behemoth', name: 'Behemoth', chips: 150, mult: 2, home: 'wetland',
+    tags: ['big', 'herbivore', 'armored', 'slow', 'exotic', 'majestic'], rarity: 'legendary', cost: 10,
+    mass: 1.6, size: 1.25,
+    sprite: { body: 'moss', shade: 'green0', light: 'green1', belly: 'sand', eye: 'ink', eyeStyle: 'sleepy', ears: 'horn', face: 'tusk', pattern: 'plates', patternColor: 'green0', extra: 'hump' },
+    blurb: 'The first of the land things.', rules: 'Immune to every debuff.',
+    skill: { id: 'unmoved', desc: 'Immune to debuffs, and never devoured' } },
+
+  { id: 'ziz', name: 'Ziz', chips: 118, mult: 3.4, home: 'savanna',
+    tags: ['bird', 'flying', 'big', 'exotic', 'majestic'], rarity: 'rare', cost: 8,
+    mass: 1.15, size: 1.2,
+    sprite: { body: 'sky', shade: 'water2', light: 'foam', belly: 'white', eye: 'gold', eyeStyle: 'wide', ears: 'crest', face: 'beak', pattern: 'bands', patternColor: 'water1', extra: 'wing' },
+    blurb: 'Its wingspan blots out the sun.', rules: 'Holds the flood back one shot.',
+    skill: { id: 'stay_the_water', desc: 'Sending it home holds the flood back one full shot' } },
+
+  { id: 'qilin', name: 'Qilin', chips: 92, mult: 4.2, home: 'jungle',
+    tags: ['exotic', 'majestic', 'smart', 'herbivore', 'solitary'], rarity: 'rare', cost: 8,
+    mass: 1.1, size: 1.05,
+    sprite: { body: 'green1', shade: 'green0', light: 'gold', belly: 'brass3', eye: 'gold', eyeStyle: 'sleepy', ears: 'antler', face: 'muzzle', pattern: 'scales', patternColor: 'brass1', extra: 'mane' },
+    blurb: 'Arrives when someone good is born.', rules: 'Every animal after it this shot gains Mult.',
+    skill: { id: 'auspice', desc: '+1 Mult to every animal scored after it in the same shot' } },
+
+  { id: 'thunderbird', name: 'Thunderbird', chips: 108, mult: 3.8, home: 'arctic',
+    tags: ['bird', 'flying', 'big', 'exotic', 'majestic', 'polar'], rarity: 'rare', cost: 8,
+    mass: 1.1, size: 1.15,
+    sprite: { body: 'purple1', shade: 'purple0', light: 'ice', belly: 'sky', eye: 'gold', eyeStyle: 'angry', ears: 'crest', face: 'beak', pattern: 'bands', patternColor: 'gold', extra: 'wing' },
+    blurb: 'The storm has a favourite.', rules: 'Ignores what the boss is doing to chips.',
+    skill: { id: 'storm_born', desc: 'Boss chip and mult penalties do not apply to it' } },
+];
+
+/** The full roster: the original manifest plus the apocrypha. */
+export const ANIMALS = Object.freeze(BASE_ANIMALS.concat(APOCRYPHA));
+
+/** Animals whose skill id the scoring engine actually implements. */
+export const SKILLED = Object.freeze(ANIMALS.filter((a) => a.skill && a.skill.id));
+export const SKILL_BY_ANIMAL = Object.freeze(
+  SKILLED.reduce((acc, a) => { acc[a.id] = a.skill.id; return acc; }, {}),
+);
+
 /* ----------------------------------------------------------------- indexes */
 
 export const ANIMAL_BY_ID = Object.freeze(
@@ -1055,6 +1188,8 @@ export const STARTER_DECK = [
   'marmot',
   'fennecfox',
 ];
+
+
 
 /* --------------------------------------------------------------- the roller */
 

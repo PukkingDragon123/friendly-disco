@@ -649,7 +649,7 @@ export function makeTableScene() {
     });
 
     // --- centre: chips x mult, at a size you can read from across the room
-    const cx = x + w / 2 + 26;
+    const cx = x + Math.round(w * 0.5) + 12;
     const bw = 104, bh = 30;
     // While aiming, the readout previews the shot instead of sitting on zero — a dead
     // 0 x 0 tells the player nothing, and this is the number they are aiming at.
@@ -677,7 +677,7 @@ export function makeTableScene() {
       text(g, projected.match === 'exact' ? 'IF IT GOES HOME' : projected.match === 'partial' ? 'IF IT GOES CLOSE' : 'IF IT GOES WRONG',
         x + w - 8, y + 36, projected.match === 'exact' ? 'gold' : projected.match === 'partial' ? 'sky' : 'red2',
         { font: 3, right: true });
-    } else if (phase === 'score' || shotScore) {
+    } else if (shotScore > 0) {
       text(g, '+' + shotScore, x + w - 8, y + 16, 'gold', { right: true, scale: 2, shadow: 'ink' });
       text(g, 'THIS SHOT', x + w - 8, y + 36, 'brass2', { font: 3, right: true });
     }
@@ -685,10 +685,11 @@ export function makeTableScene() {
     // --- the step banner: what just fired, in the colour of what kind of thing it was
     if (bannerT > 0 && bannerText) {
       const bw2 = textW(bannerText) + 16;
+      const bcx = clamp(cx, x + bw2 / 2 + 4, x + w - bw2 / 2 - 4);
       const by = y + h - 4;
-      box(g, cx - bw2 / 2, by, bw2, 13, 'ink', 1);
-      boxFrame(g, cx - bw2 / 2, by, bw2, 13, bannerColor, 1);
-      text(g, bannerText, cx, by + 3, bannerColor, { center: true });
+      box(g, bcx - bw2 / 2, by, bw2, 13, 'ink', 1);
+      boxFrame(g, bcx - bw2 / 2, by, bw2, 13, bannerColor, 1);
+      text(g, bannerText, bcx, by + 3, bannerColor, { center: true });
     }
   }
 

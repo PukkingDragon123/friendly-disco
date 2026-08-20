@@ -10,6 +10,7 @@
 import { P, col, mix, alpha } from '../core/palette.js';
 import {
   rect, px, line, disc, ring, ellipse, tri, dither, vgrad, text, wash, clamp, lerp,
+  makeCanvas, blit,
 } from '../core/pixel.js';
 import { makeRng } from '../core/rng.js';
 
@@ -34,7 +35,7 @@ const PRESETS = {
     sky: ['deep', 'purple0', 'purple1', 'red2', 'orange'],
     glowC: 'orange', bodyC: 'gold', night: false,
     water: ['orange', 'red1', 'purple1', 'purple0', 'water0', 'deep', 'ink'],
-    foam: 'pink', horizon: 'orange', far: 'ink', far2: 'shadow',
+    foam: 'sand', horizon: 'orange', far: 'ink', far2: 'shadow',
   },
   night: {
     sky: ['ink', 'shadow', 'deep', 'night', 'purple0'],
@@ -244,6 +245,49 @@ export function createSeascape(seed, o = {}) {
   const splashes = [];
   const boats = [];
 
+  // The sky bands and the water depth ramp are fully dithered, which means a per-pixel
+  // pass over the whole frame — about 160k fillRects, and it measured 22fps in Chromium.
+  // Neither of them changes unless the time of day, the storm level or the layout does,
+  // so they get baked once into an offscreen canvas and blitted. Only the genuinely
+  // animated parts (sun, clouds, crests, glitter, rain, birds) are drawn per frame.
+  let bakeKey = '';
+  let bakeCv = null;
+  let bakeH = 0;
+
+  function ensureBake(o) {
+    const w = Math.max(1, Math.round(o.w || 640));
+    const h = Math.max(1, Math.round(o.h || 360));
+    const hy = Math.round((o.horizonY !== undefined ? o.horizonY : (o.y || 0) + h * 0.42) - (o.y || 0));
+    const todv = o.timeOfDay !== undefined ? o.timeOfDay : tod;
+    const stormv = Math.round(clamp(o.storm || 0, 0, 1) * 10) / 10;
+    const key = `${w}/${h}/${hy}/${Math.round(todv * 200)}/${stormv}`;
+    if (key === bakeKey && bakeCv) return { cv: bakeCv, hy };
+    const mk = makeCanvas(w, h);
+    if (!mk) return { cv: null, hy };
+    const bg = mk.g;
+    const p = presetFor(todv);
+    const skyKeys = stormv > 0.35 ? p.sky.map((k) => mix(k, P.deep, stormv * 0.6)) : p.sky;
+    const waterKeys = stormv > 0.35 ? p.water.map((k) => mix(k, P.ink, stormv * 0.45)) : p.water;
+
+    if (hy > 0) vgrad(bg, 0, 0, w, hy, skyKeys, 3);
+
+    const waterH = Math.max(1, h - hy);
+    const n = waterKeys.length;
+    for (let i = 0; i < waterH; i++) {
+      const k = Math.pow(i / waterH, 0.78);
+      const fk = k * (n - 1);
+      const i0 = Math.min(n - 1, Math.floor(fk));
+      const i1 = Math.min(n - 1, i0 + 1);
+      dither(bg, 0, hy + i, w, 1, waterKeys[i0], waterKeys[i1], Math.round((fk - i0) * 16));
+    }
+    rect(bg, 0, Math.max(0, hy - 1), w, 1, p.horizon);
+
+    bakeKey = key;
+    bakeCv = mk.canvas;
+    bakeH = h;
+    return { cv: bakeCv, hy };
+  }
+
   function bandColor(list, k, offset) {
     const n = list.length;
     const idx = clamp(Math.floor(k * n) + (offset || 0), 0, n - 1);
@@ -297,7 +341,9 @@ export function createSeascape(seed, o = {}) {
       const hy = opt.horizonY !== undefined ? opt.horizonY : y + Math.round((opt.h || 360) * 0.42);
       const skyH = Math.max(1, hy - y);
       const keys = storm > 0.35 ? p.sky.map((k) => mix(k, P.deep, storm * 0.6)) : p.sky;
-      vgrad(g, x, y, w, skyH, keys, 3);
+      const bake = ensureBake(opt);
+      if (bake.cv) g.drawImage(bake.cv, 0, 0, w, Math.max(1, bake.hy), x, y, w, Math.max(1, bake.hy));
+      else vgrad(g, x, y, w, skyH, keys, 3);
 
       if (p.night) {
         for (const s of stars) {
@@ -412,16 +458,23 @@ export function createSeascape(seed, o = {}) {
       const foamC = storm > 0.5 ? 'white' : p.foam;
 
       const n = keys.length;
+      // the depth ramp comes from the bake; only the crests are live
+      const bake = ensureBake(opt);
+      if (bake.cv) {
+        const bh = Math.max(1, (opt.h || 360) - bake.hy);
+        g.drawImage(bake.cv, 0, bake.hy, w, bh, x, hy, w, waterH);
+      }
       for (let i = 0; i < waterH; i++) {
         const yy = hy + i;
         // depth curve: rows bunch up near the horizon, which is what sells the recession
         const k = Math.pow(i / waterH, 0.78);
         const fk = k * (n - 1);
         const i0 = Math.min(n - 1, Math.floor(fk));
-        const i1 = Math.min(n - 1, i0 + 1);
         const band = keys[i0];
-        // dither across the WHOLE band, not just its seam — a stepped sea reads as stripes
-        dither(g, x, yy, w, 1, band, keys[i1], Math.round((fk - i0) * 16));
+        if (!bake.cv) {
+          const i1 = Math.min(n - 1, i0 + 1);
+          dither(g, x, yy, w, 1, band, keys[i1], Math.round((fk - i0) * 16));
+        }
 
         // foam crests: spacing, length and scroll speed all grow with depth
         const spacing = Math.max(2, Math.round(2 + k * 10));

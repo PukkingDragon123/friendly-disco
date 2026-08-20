@@ -24,7 +24,7 @@ import {
 import * as PH from '../game/physics.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { HABITAT_BY_ID } from '../data/habitats.js';
-import { resolveShot } from '../game/scoring.js';
+import { resolveShot, previewPot } from '../game/scoring.js';
 import {
   startBlind, applyShot, endBlind, rerack, drawHand, blindCleared, blindFailed, currentKind,
 } from '../game/run.js';
@@ -48,6 +48,8 @@ export function makeTableScene() {
   let spin = 0;
   let aimPath = null;
   let aimPreview = null;
+  let projected = null;        // cached score preview for the current (animal, gate)
+  let projectedKey = '';
 
   // shot bookkeeping
   const pottedThisShot = [];
@@ -69,6 +71,25 @@ export function makeTableScene() {
   function say(s, dur = 2.2) { msg = s; msgT = dur; }
 
   function lookup(id) { return ANIMAL_BY_ID[id]; }
+
+  /** Boss effects that live on the physics world rather than in scoring. */
+  function applyWorldEffects() {
+    const eff = (run.blind && run.blind.effect) || {};
+    world.friction = Math.max(0.2, eff.friction || 1);
+    world.spinDrift = run.spinDrift || 1;
+  }
+
+  /** The Carousel: the gates shuffle round one seat between shots. */
+  function rotateAssignment() {
+    const ring = ['tl', 'tm', 'tr', 'br', 'bm', 'bl'];   // clockwise
+    const vals = ring.map((sl) => run.assignment[sl]);
+    vals.unshift(vals.pop());
+    ring.forEach((sl, i) => { run.assignment[sl] = vals[i]; });
+    deck.setAssignment(run.assignment);
+    syncGates();
+    Audio.sfx('whoosh');
+    say('The gates turn!', 1.8);
+  }
 
   function syncGates() {
     const eff = (run.blind && run.blind.effect) || {};
@@ -92,8 +113,29 @@ export function makeTableScene() {
       world.balls[ix].decoy = true;
     }
     for (const b of world.balls) b.shotsSurvived = 0;
-    selected = world.balls[0] || null;
+    selected = pickShooter();
     Audio.sfx('shuffle');
+  }
+
+  /**
+   * The ball a player would naturally shoot with: the one with the most room around it,
+   * biased toward the near rail. Defaulting to balls[0] hands them the rack apex, which
+   * is boxed in on every side and makes the aim guide look broken.
+   */
+  function pickShooter() {
+    let best = null, bestScore = -Infinity;
+    for (const b of world.balls) {
+      if (b.sunk) continue;
+      let nearest = Infinity;
+      for (const o of world.balls) {
+        if (o === b || o.sunk) continue;
+        nearest = Math.min(nearest, Math.hypot(o.x - b.x, o.y - b.y));
+      }
+      if (nearest === Infinity) nearest = 60;
+      const score = Math.min(nearest, 40) + b.y * 0.25;   // clearance, then nearness to the player
+      if (score > bestScore) { bestScore = score; best = b; }
+    }
+    return best || world.balls[0] || null;
   }
 
   function habitatResidents() {
@@ -237,8 +279,7 @@ export function makeTableScene() {
       // nothing left to shoot — the blind is over
       run.shotsLeft = 0;
     }
-    if (selected && selected.sunk) selected = world.balls[0] || null;
-    if (!selected) selected = world.balls[0] || null;
+    if (!selected || selected.sunk || !world.balls.includes(selected)) selected = pickShooter();
 
     pottedThisShot.length = 0;
     script = null;
@@ -259,6 +300,7 @@ export function makeTableScene() {
       Juice.flash('red1', 0.5, 0.5);
     } else {
       phase = 'aim'; phaseT = 0;
+      if ((run.blind.effect || {}).rotateGates) rotateAssignment();
       if (run.shotsLeft === 1) Audio.music('deck_tense');
     }
   }
@@ -352,6 +394,7 @@ export function makeTableScene() {
 
       if (selected && !selected.sunk) {
         angle = aimAngle(selected, m.x, m.y);
+        refreshProjection();
         if (Input.key('KeyA')) spin = clamp(spin - dt * 2, -1, 1);
         if (Input.key('KeyD')) spin = clamp(spin + dt * 2, -1, 1);
         if (m.wheel) spin = clamp(spin + m.wheel * 0.12, -1, 1);
@@ -386,6 +429,11 @@ export function makeTableScene() {
     }
 
     if (phase === 'roll') {
+      // The Tide: the whole deck leans, and everything creeps with it
+      const drift = (run.blind && run.blind.effect && run.blind.effect.gravityDrift) || 0;
+      if (drift && PH.nudge) {
+        PH.nudge(world, Math.sin(t * 0.55) * drift * dt * 26, Math.cos(t * 0.4) * drift * dt * 12);
+      }
       const evts = PH.step(world, dt);
       handleEvents(evts);
       // ball trails, sampled off the frame counter so they stay deterministic-ish
@@ -439,7 +487,8 @@ export function makeTableScene() {
       selected, gates: world.gates,
       log: (s) => say(String(s)),
       stopAll: () => { for (const b of world.balls) { b.vx = 0; b.vy = 0; b.resting = true; } },
-      addChips: (id, n) => { const a = ANIMAL_BY_ID[id]; if (a) { a.__bonusChips = (a.__bonusChips || 0) + n; } },
+      addChips: (id, n) => { if (ANIMAL_BY_ID[id]) run.feedChips[id] = (run.feedChips[id] || 0) + (n || 0); },
+      addMult: (id, n) => { if (ANIMAL_BY_ID[id]) run.feedMult[id] = (run.feedMult[id] || 0) + (n || 0); },
       teleport: (ball, gate) => { if (ball && gate) { ball.x = gate.x; ball.y = gate.y; ball.vx = 0; ball.vy = 0; } },
       grantRerack: () => { run.reracksLeft++; },
     };
@@ -449,6 +498,26 @@ export function makeTableScene() {
     Audio.sfx('upgrade');
     Juice.flash('green1', 0.16, 0.25);
     say(feed.name + ' used!');
+  }
+
+  /**
+   * What would this animal score if it went in? Recomputed only when the pairing
+   * changes — resolveShot walks every interaction rule, and the preview deliberately
+   * runs with relics OFF so a hover cannot advance a relic's counter.
+   */
+  function refreshProjection() {
+    const a = selected ? ANIMAL_BY_ID[selected.animalId] : null;
+    if (!a) { projected = null; projectedKey = ''; return; }
+    const gateId = aimPreview ? aimPreview.gate.habitatId : a.home;
+    const key = a.id + '/' + gateId + '/' + run.stats.shotsTaken;
+    if (key === projectedKey) return;
+    projectedKey = key;
+    projected = previewPot(run, run.blind, a.id, gateId, {
+      rng: run.blind.rng,
+      residents: habitatResidents(),
+      tableAnimals: liveAnimals(selected),
+      deckAnimals: run.stash.map((id) => ANIMAL_BY_ID[id]).filter(Boolean),
+    });
   }
 
   function previewFor(path) {
@@ -555,7 +624,7 @@ export function makeTableScene() {
     void eff;
   }
 
-  /** The big centred CHIPS x MULT slab. */
+  /** The big centred CHIPS x MULT slab — the focal point of the whole screen. */
   function drawReadout(g) {
     const x = 168, y = READOUT_Y, w = 464, h = 66;
     UI.panel(g, x, y, w, h, { style: 'slate', shadow: true, rivets: false });
@@ -564,42 +633,61 @@ export function makeTableScene() {
     const kindInfo = BLIND_KINDS.find((b) => b.key === currentKind(run)) || BLIND_KINDS[0];
     const bc = blind ? blind.color : kindInfo.color;
 
-    // left: blind identity
-    UI.ribbon(g, x + 6, y + 4, 150, blind ? blind.name : kindInfo.name, { color: bc });
+    // --- left: which blind this is, and what it does to you
+    UI.ribbon(g, x + 5, y + 5, 138, blind ? blind.name : kindInfo.name, { color: bc, font: 3 });
+    if (blind && blind.icon) UI.icon(g, blind.icon, x + 147, y + 6, { color: bc });
     if (blind && blind.desc) {
-      const ls = wrap(blind.desc, 142, { font: 3 });
-      ls.slice(0, 2).forEach((l, i) => text(g, l, x + 10, y + 20 + i * 6, 'grey2', { font: 3 }));
+      wrap(blind.desc, 152, { font: 3 }).slice(0, 2)
+        .forEach((l, i) => text(g, l, x + 6, y + 20 + i * 7, 'grey2', { font: 3 }));
     }
-    if (blind && blind.icon) UI.icon(g, blind.icon, x + 140, y + 20, { color: bc });
+    text(g, 'TARGET', x + 6, y + 40, 'grey1', { font: 3 });
+    text(g, fmtBig(run.target), x + 40, y + 38, 'gold', { shadow: 'ink' });
+    const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
+    UI.bar(g, x + 6, y + 50, 152, 8, prog, {
+      fill: prog >= 1 ? 'green1' : prog > 0.66 ? 'amber' : 'gold',
+      bg: 'ink', frame: 'grey0', ticks: 4, glow: prog >= 1, stripe: prog > 0 && prog < 1,
+    });
 
-    // centre: chips x mult
-    const cx = x + w / 2;
-    const chipsStr = String(Math.round(dispChips));
-    const multStr = fmt(Math.max(0, dispMult) * (liveXm || 1));
-    const boxW = 96, boxH = 22;
-    // chips plate
-    UI.panel(g, cx - boxW - 10, y + 22, boxW, boxH, { style: 'brass', inset: true });
-    text(g, chipsStr, cx - 10 - boxW / 2, y + 28, 'ice', { center: true, outline: 'ink' });
-    text(g, 'CHIPS', cx - 10 - boxW / 2, y + 45, 'sky', { font: 3, center: true });
-    // x
-    text(g, '×', cx - 2, y + 28, 'white', { center: true, outline: 'ink' });
-    // mult plate
-    UI.panel(g, cx + 10, y + 22, boxW, boxH, { style: 'brass', inset: true });
-    text(g, multStr, cx + 10 + boxW / 2, y + 28, 'red2', { center: true, outline: 'ink' });
-    text(g, 'MULT', cx + 10 + boxW / 2, y + 45, 'red1', { font: 3, center: true });
+    // --- centre: chips x mult, at a size you can read from across the room
+    const cx = x + w / 2 + 26;
+    const bw = 104, bh = 30;
+    // While aiming, the readout previews the shot instead of sitting on zero — a dead
+    // 0 x 0 tells the player nothing, and this is the number they are aiming at.
+    const previewing = phase === 'aim' && liveChips === 0 && projected;
+    const showChips = previewing ? projected.chips : Math.round(dispChips);
+    const liveMultTotal = previewing
+      ? projected.mult * projected.xmult
+      : Math.max(0, dispMult) * (liveXm || 1);
 
-    // right: shot total
-    if (phase === 'score' || shotScore) {
-      text(g, '+' + shotScore, x + w - 8, y + 26, 'gold', { right: true, outline: 'ink' });
-      text(g, 'THIS SHOT', x + w - 8, y + 44, 'brass2', { font: 3, right: true });
+    UI.panel(g, cx - bw - 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
+    text(g, String(showChips), cx - 12 - bw / 2, y + 19, previewing ? 'sky' : 'ice',
+      { center: true, scale: 2, shadow: 'ink' });
+    text(g, 'CHIPS', cx - 12 - bw / 2, y + 44, 'sky', { font: 3, center: true });
+
+    text(g, '×', cx - 4, y + 20, 'white', { center: true, scale: 2, shadow: 'ink' });
+
+    UI.panel(g, cx + 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
+    text(g, fmt(liveMultTotal), cx + 12 + bw / 2, y + 19, previewing ? 'red1' : 'red2',
+      { center: true, scale: 2, shadow: 'ink' });
+    text(g, 'MULT', cx + 12 + bw / 2, y + 44, 'red1', { font: 3, center: true });
+
+    // --- right: what this shot has banked so far, or what the aimed shot is worth
+    if (previewing) {
+      text(g, '~' + projected.score, x + w - 8, y + 16, 'grey2', { right: true, scale: 2, shadow: 'ink' });
+      text(g, projected.match === 'exact' ? 'IF IT GOES HOME' : projected.match === 'partial' ? 'IF IT GOES CLOSE' : 'IF IT GOES WRONG',
+        x + w - 8, y + 36, projected.match === 'exact' ? 'gold' : projected.match === 'partial' ? 'sky' : 'red2',
+        { font: 3, right: true });
+    } else if (phase === 'score' || shotScore) {
+      text(g, '+' + shotScore, x + w - 8, y + 16, 'gold', { right: true, scale: 2, shadow: 'ink' });
+      text(g, 'THIS SHOT', x + w - 8, y + 36, 'brass2', { font: 3, right: true });
     }
 
-    // step banner
+    // --- the step banner: what just fired, in the colour of what kind of thing it was
     if (bannerT > 0 && bannerText) {
-      const bw = textW(bannerText) + 14;
-      const by = y + h - 3;
-      rect(g, cx - bw / 2, by, bw, 12, 'ink');
-      frame(g, cx - bw / 2, by, bw, 12, bannerColor);
+      const bw2 = textW(bannerText) + 16;
+      const by = y + h - 4;
+      box(g, cx - bw2 / 2, by, bw2, 13, 'ink', 1);
+      boxFrame(g, cx - bw2 / 2, by, bw2, 13, bannerColor, 1);
       text(g, bannerText, cx, by + 3, bannerColor, { center: true });
     }
   }
@@ -617,7 +705,7 @@ export function makeTableScene() {
     // score / target
     UI.panel(g, x + 4, cy, w - 8, 30, { style: 'slate', inset: true });
     text(g, 'SCORE', x + 8, cy + 3, 'grey2', { font: 3 });
-    text(g, String(Math.round(dispScore)), x + w - 8, cy + 2, 'gold', { right: true, outline: 'ink' });
+    text(g, String(Math.round(dispScore)), x + w - 8, cy + 2, 'gold', { right: true, shadow: 'ink' });
     const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
     UI.bar(g, x + 8, cy + 16, w - 16, 6, prog, { fill: prog >= 1 ? 'green1' : 'gold', bg: 'shadow', frame: 'brass1', glow: prog >= 1 });
     text(g, 'NEED ' + fmtBig(run.target), x + 8, cy + 24, 'grey2', { font: 3 });
@@ -769,7 +857,7 @@ export function makeTableScene() {
     const hint = phase === 'aim'
       ? 'CLICK an animal to select · HOLD to charge · A/D or wheel = english · R = re-rack'
       : phase === 'roll' ? 'rolling…' : phase === 'score' ? 'scoring…' : '';
-    text(g, hint, x + 8, y + h - 9, 'wood3', { font: 3 });
+    text(g, hint, x + 8, y + h - 11, 'wood3', { font: 3 });
   }
 
   function drawIntro(g) {
@@ -778,11 +866,22 @@ export function makeTableScene() {
     const blind = run.blind;
     const yy = lerp(-40, 150, Ease.outBack(k));
     const w = 300;
-    UI.panel(g, 320 - w / 2, yy, w, 62, { style: 'brass', shadow: true });
-    UI.ribbon(g, 320 - 140, yy + 5, 280, blind ? blind.name : 'BLIND', { color: blind ? blind.color : 'gold', center: true });
-    text(g, 'TARGET  ' + fmtBig(run.target), 320, yy + 26, 'gold', { center: true, outline: 'ink' });
-    if (blind && blind.desc) text(g, blind.desc, 320, yy + 40, 'bone', { font: 3, center: true });
-    text(g, `ANTE ${run.ante}  ·  ${run.shotsLeft} SHOTS  ·  ${run.reracksLeft} RE-RACKS`, 320, yy + 50, 'grey2', { font: 3, center: true });
+    UI.panel(g, 320 - w / 2, yy, w, 74, { style: 'brass', shadow: true, rivets: true });
+    UI.ribbon(g, 320 - 140, yy + 5, 280, blind ? blind.name : 'BLIND', { color: blind ? blind.color : 'gold' });
+    text(g, fmtBig(run.target), 320, yy + 22, 'wood0', { center: true, scale: 2 });
+    text(g, fmtBig(run.target), 320, yy + 21, 'white', { center: true, scale: 2, shadow: 'wood1' });
+    text(g, 'TO BEAT', 320, yy + 38, 'wood0', { font: 3, center: true });
+    // small print gets its own dark strip — engraved brass on brass is unreadable
+    const sub = `ANTE ${run.ante}  ·  ${run.shotsLeft} SHOTS  ·  ${run.reracksLeft} RE-RACKS`;
+    const sw = Math.max(textW(sub, { font: 3 }), blind && blind.desc ? textW(blind.desc, { font: 3 }) : 0) + 14;
+    rect(g, 320 - sw / 2, yy + 46, sw, blind && blind.desc ? 20 : 12, 'wood0');
+    rect(g, 320 - sw / 2, yy + 46, sw, 1, 'brass1');
+    if (blind && blind.desc) {
+      text(g, blind.desc, 320, yy + 49, blind.color || 'bone', { font: 3, center: true });
+      text(g, sub, 320, yy + 58, 'brass2', { font: 3, center: true });
+    } else {
+      text(g, sub, 320, yy + 49, 'brass2', { font: 3, center: true });
+    }
   }
 
   function drawCleared(g) {
@@ -824,6 +923,7 @@ export function makeTableScene() {
       startBlind(run);
       deck.setAssignment(run.assignment);
       syncGates();
+      applyWorldEffects();
       rackHand('triangle');
 
       phase = 'intro'; phaseT = 0;
@@ -835,6 +935,15 @@ export function makeTableScene() {
     },
     exit() { Audio.stopMusic(0.4); },
     update, draw,
+
+    /** Testing + console seam. Read-only by convention. */
+    debug() {
+      return {
+        phase, charge, angle, spin, shotScore,
+        run, world, deck, selected, aimPath, projected,
+        rects: { rerack: rerackRect, feeds: feedRects },
+      };
+    },
   };
 }
 

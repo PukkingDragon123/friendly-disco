@@ -108,5 +108,6 @@ export function makeGameOverScene() {
     },
     exit() { Audio.stopMusic(0.5); },
     update, draw,
+    debug() { return { rects: { again }, run, won }; },
   };
 }

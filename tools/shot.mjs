@@ -50,7 +50,7 @@ switch (which) {
     const { makeTableScene } = await import('../src/scenes/table.js');
     scene = makeTableScene();
     scene.enter({ run, onExit: () => {} }, app);
-    mouse(430, 170);
+    mouse(560, 130);
     break;
   }
   case 'shop': {

@@ -227,5 +227,6 @@ export function makeMenuScene() {
     },
     exit() {},
     update, draw,
+    debug() { return { rects: btn, showHelp, seed }; },
   };
 }

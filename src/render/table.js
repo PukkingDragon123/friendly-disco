@@ -441,15 +441,23 @@ export function createDeck(o = {}) {
       const c = o2.color || 'white';
       let prev = toScreen(pts[0].x, pts[0].y);
       const phase = Math.floor(-t * 26);
-      for (let i = 1; i < pts.length; i++) {
-        const s = toScreen(pts[i].x, pts[i].y);
-        dashLine(g, prev.x, prev.y - 4, s.x, s.y - 4, c, 2, 3, phase + i * 5);
-        prev = s;
+      // A dark underlay first: a pale dashed line on green felt is nearly invisible,
+      // and this is the single most important read on the table.
+      for (let pass = 0; pass < 2; pass++) {
+        prev = toScreen(pts[0].x, pts[0].y);
+        const cc = pass === 0 ? 'ink' : c;
+        const off = pass === 0 ? 1 : 0;
+        for (let i = 1; i < pts.length; i++) {
+          const s = toScreen(pts[i].x, pts[i].y);
+          dashLine(g, prev.x + off, prev.y - 4 + off, s.x + off, s.y - 4 + off, cc, 2, 3, phase + i * 5);
+          prev = s;
+        }
       }
       const hit = path.hit;
       if (hit) {
         const s = toScreen(hit.x, hit.y);
         const pr = ballPixelRadius(o2.r || BALL_R, hit.y);
+        ellipseFrame(g, s.x + 1, s.y - Math.round(pr * 0.5) + 1, Math.round(pr), Math.round(pr * 0.66), 'ink');
         ellipseFrame(g, s.x, s.y - Math.round(pr * 0.5), Math.round(pr), Math.round(pr * 0.66), 'white');
         if (hit.normal) {
           const nx = s.x + hit.normal.x * 20;

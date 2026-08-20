@@ -259,6 +259,18 @@ export function resolveShot(s) {
       chips: res.chips, mult: res.mult, xmult: 1,
     });
 
+    // --- 2b: feed bonuses bought at the dock and spent this blind
+    const fedC = (run.feedChips && run.feedChips[animal.id]) || 0;
+    const fedM = (run.feedMult && run.feedMult[animal.id]) || 0;
+    if (fedC || fedM) {
+      res.chips += fedC;
+      res.mult += fedM;
+      entry.steps.push({
+        kind: 'buff', label: 'Well fed', color: 'green1',
+        chips: fedC, mult: fedM, xmult: 1,
+      });
+    }
+
     // --- 3: match modifier (+ habitat upgrade level)
     const lvl = habitatId ? habitatLevel(run, habitatId) : 0;
     if (match === MATCH.EXACT) {
@@ -320,8 +332,9 @@ export function resolveShot(s) {
     }
     prevInter = { chips: res.interChips, mult: res.interMult };
 
-    // --- 5: relics
-    runRelics(res, state, entry, run);
+    // --- 5: relics. Skipped in preview mode: relic hooks own mutable state
+    // (counters, per-blind flags), so running them for a hover would corrupt the run.
+    if (!s.preview) runRelics(res, state, entry, run);
 
     // --- 6: rail bounces
     const bounces = pot.ball ? num(pot.ball.bounces) : 0;
@@ -390,7 +403,7 @@ export function previewPot(run, blind, animalId, habitatId, s = {}) {
   const animal = ANIMAL_BY_ID[animalId];
   if (!animal) return null;
   const snap = {
-    run, blind, shotIndex: 0, rng: s.rng,
+    run, blind, shotIndex: 0, rng: s.rng, preview: true,
     potted: [{ ball: { bounces: 0 }, animalId, gate: { habitatId } }],
     residents: s.residents || {},
     tableAnimals: s.tableAnimals || [],

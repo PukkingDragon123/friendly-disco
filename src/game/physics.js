@@ -769,14 +769,16 @@ function sim(world, maxT, dt = 1 / 60) {
   return { t, evts };
 }
 
+// Mirrors GATE_LAYOUT/GATE_POS as src/render/table.js lays it out: corner mouths tucked
+// against the cushions and two mid-rail mouths hanging outside the felt entirely.
 function testGates(world) {
   return setGates(world, [
-    { id: 'tl', habitatId: 'farm', x: 6, y: 6, r: 9.5, slot: 'tl' },
-    { id: 'tm', habitatId: 'ocean', x: TABLE_W / 2, y: -1, r: 9.5, slot: 'tm' },
-    { id: 'tr', habitatId: 'forest', x: TABLE_W - 6, y: 6, r: 9.5, slot: 'tr' },
-    { id: 'bl', habitatId: 'arctic', x: 6, y: TABLE_H - 6, r: 9.5, slot: 'bl' },
-    { id: 'bm', habitatId: 'desert', x: TABLE_W / 2, y: TABLE_H + 1, r: 9.5, slot: 'bm' },
-    { id: 'br', habitatId: 'jungle', x: TABLE_W - 6, y: TABLE_H - 6, r: 9.5, slot: 'br' },
+    { id: 'tl', habitatId: 'farm', x: 7, y: 5, r: 10, slot: 'tl' },
+    { id: 'tm', habitatId: 'ocean', x: TABLE_W / 2, y: -1.5, r: 10, slot: 'tm' },
+    { id: 'tr', habitatId: 'forest', x: TABLE_W - 7, y: 5, r: 10, slot: 'tr' },
+    { id: 'bl', habitatId: 'arctic', x: 7, y: TABLE_H - 5, r: 10, slot: 'bl' },
+    { id: 'bm', habitatId: 'desert', x: TABLE_W / 2, y: TABLE_H + 1.5, r: 10, slot: 'bm' },
+    { id: 'br', habitatId: 'jungle', x: TABLE_W - 7, y: TABLE_H - 5, r: 10, slot: 'br' },
   ]);
 }
 

@@ -66,6 +66,27 @@ interactions, slick the felt, hide the labels, or plant a mimic in the rack.
 **The dock** — one crate per visit. Crates carry animals for your caravan, relics, cue
 work, feed, habitat upgrades and vouchers. Bigger hauls arrive on bigger boats.
 
+## Tests
+
+```sh
+node tools/checksyntax.mjs src     # import-check every module under a stubbed DOM
+node tests/run.mjs                 # data contracts, physics stress, scoring fuzz, balance
+node tests/play.mjs 4              # play four complete runs end to end through the scenes
+node tools/shot.mjs table out.png  # headless screenshot of any scene
+node serve.mjs 8099 & node tests/browser.mjs   # real Chromium, real audio, real fps
+```
+
+`tests/run.mjs` validates every data row against the frozen contract (roster, tag
+vocabulary, sprite-recipe enums, legal boss-effect keys, content quotas), fuzzes every
+relic hook, fires 120 randomised full-power breaks checking for tunnelling and stuck
+balls, fuzzes 400 scored shots for NaN, then auto-plays runs with a greedy bot and prints
+the balance curve. `tests/play.mjs` drives the actual scenes with synthetic mouse input —
+menu, deck, dock, summary — and fails if anything throws out of a frame.
+
+There is a software Canvas2D in `tools/softcanvas.mjs` (fillRect / drawImage / clip /
+alpha, plus a PNG encoder) so the renderer can be reviewed by looking at real frames from
+node instead of guessing.
+
 ## Build
 
 There is no build. No dependencies, no bundler, no assets — every sprite is drawn from a
@@ -80,8 +101,8 @@ src/render/           bitmap fonts, sprite factory, ui kit, seascape, the 2.5D d
 src/data/             habitats, 74 animals, interactions, relics, blinds, cargo
 src/game/             physics, scoring pipeline, run state
 src/scenes/           menu, table, dock, summary
-tests/                headless node tests (node tests/run.mjs)
-tools/checksyntax.mjs import-checks every module under a stubbed DOM
+tests/                headless suites: run.mjs, play.mjs, browser.mjs
+tools/                checksyntax, softcanvas + PNG encoder, shot.mjs, stubdom
 ```
 
 Internal resolution is a fixed **640×360**, integer-scaled to the window, with

@@ -281,14 +281,21 @@ if (section('data/blinds') && M.blinds) {
   }
   ok(badKeys.length === 0, 'boss effects use only legal keys', badKeys.join(' '));
   ok((B.BOSSES || []).length >= 12, 'at least 12 bosses', (B.BOSSES || []).length);
-  // monotonic targets
-  let mono = true;
+  // Targets must rise within an ante, and rise within a kind across antes. They are
+  // deliberately NOT globally monotonic: ante 6's small blind is easier than ante 5's
+  // boss, and that dip is the breather a player earns for beating a boss.
+  let withinAnte = true, acrossAntes = true;
   for (let a = 1; a <= 8; a++) {
     const s = B.blindTarget(a, 'small'), g2 = B.blindTarget(a, 'big'), bo = B.blindTarget(a, 'boss');
-    if (!(s < g2 && g2 < bo)) mono = false;
-    if (a > 1 && !(s > B.blindTarget(a - 1, 'boss'))) mono = false;
+    if (!(s < g2 && g2 < bo)) withinAnte = false;
+    if (a > 1) {
+      for (const k of ['small', 'big', 'boss']) {
+        if (!(B.blindTarget(a, k) > B.blindTarget(a - 1, k))) acrossAntes = false;
+      }
+    }
   }
-  ok(mono, 'blindTarget monotonic across kinds and antes');
+  ok(withinAnte, 'small < big < boss within every ante');
+  ok(acrossAntes, 'every blind kind rises with the ante');
   const row = [];
   for (let a = 1; a <= 8; a++) row.push(`a${a}:${B.blindTarget(a, 'small')}/${B.blindTarget(a, 'big')}/${B.blindTarget(a, 'boss')}`);
   console.log('  targets  ' + row.join('  '));

@@ -49,6 +49,7 @@ function baseRun(seed) {
     crateSlots: 3,
     rerollCost: 3,
     interest: 1,
+    crateDiscount: 0,     // flat $ off every crate (relics/vouchers raise it)
     sellBonus: 0,
     handSize: 9,
     relicSlots: 5,
@@ -56,6 +57,8 @@ function baseRun(seed) {
     spinDrift: 1,
 
     // --- per-blind
+    feedChips: {},        // animalId -> chips granted by a feed this blind
+    feedMult: {},         // animalId -> mult granted by a feed this blind
     shotsLeft: 4,
     reracksLeft: 3,
     score: 0,
@@ -157,6 +160,8 @@ export function startBlind(run) {
   run.reracksLeft = Math.max(0, run.reracks + (effect.reracks || 0));
   run.scoredHabitatsThisBlind = [];
   run.vitrine = {};
+  run.feedChips = {};
+  run.feedMult = {};
   run.assignment = rollAssignment(run, rng, effect.closeHabitats || []);
 
   // caravan -> stash, then draw the opening hand
@@ -234,7 +239,12 @@ export function applyShot(run, resolved, potted) {
   run.shotsLeft--;
 
   // The Tithe: a shot that scores too little costs you another one.
-  const floor = (run.blind && run.blind.effect && run.blind.effect.scoreFloorPerShot) || 0;
+  // A value <= 1 is read as a FRACTION of the blind target per shot, so the boss keeps
+  // biting at ante 8 instead of becoming trivial against a five-figure target.
+  const rawFloor = (run.blind && run.blind.effect && run.blind.effect.scoreFloorPerShot) || 0;
+  const floor = rawFloor > 0 && rawFloor <= 1
+    ? Math.round((run.target || 0) * rawFloor)
+    : rawFloor;
   let tithed = false;
   if (floor > 0 && resolved.totalScore < floor && run.shotsLeft > 0) {
     run.shotsLeft--;

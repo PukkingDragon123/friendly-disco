@@ -268,7 +268,7 @@ export function noiseFill(g, x, y, w, h, cA, cB, density = 0.18, seed = 1) {
 
 /* ------------------------------------------------------------------- text   */
 
-function glyphFor(font, ch) {
+function glyphIn(font, ch) {
   const gl = font.glyphs;
   if (gl[ch]) return gl[ch];
   const up = ch.toUpperCase();
@@ -276,6 +276,39 @@ function glyphFor(font, ch) {
   const lo = ch.toLowerCase();
   if (gl[lo]) return gl[lo];
   return null;
+}
+
+/** FONT3 deliberately carries a small glyph set; anything it lacks borrows the FONT5
+ *  shape, scaled down by dropping its widest column. Better a squeezed glyph than a box. */
+const SQUEEZE_CACHE = new Map();
+function squeeze(rows, fromW, toW, fromH, toH) {
+  const key = rows.join(',') + '|' + fromW + toW + fromH + toH;
+  let hit = SQUEEZE_CACHE.get(key);
+  if (hit) return hit;
+  const out = [];
+  for (let r = 0; r < toH; r++) {
+    const src = rows[Math.min(rows.length - 1, Math.round((r * (fromH - 1)) / Math.max(1, toH - 1)))] || 0;
+    let bits = 0;
+    for (let c = 0; c < toW; c++) {
+      const sc = Math.round((c * (fromW - 1)) / Math.max(1, toW - 1));
+      // OR the neighbouring source columns so thin strokes survive the squeeze
+      const lit = (src & (1 << (fromW - 1 - sc)))
+        || (sc + 1 < fromW && c === toW - 1 && (src & (1 << (fromW - 2 - sc))));
+      if (lit) bits |= 1 << (toW - 1 - c);
+    }
+    out.push(bits);
+  }
+  SQUEEZE_CACHE.set(key, out);
+  return out;
+}
+
+function glyphFor(font, ch) {
+  const direct = glyphIn(font, ch);
+  if (direct) return direct;
+  const other = font === FONT3 ? FONT5 : FONT3;
+  const alt = glyphIn(other, ch);
+  if (!alt) return null;
+  return squeeze(alt, other.w, font.w, other.h, font.h);
 }
 
 export function charW(ch, font) {

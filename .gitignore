@@ -1,0 +1,9 @@
+node_modules/
+*.log
+
+# Transient captures from the harnesses. The curated set in shots/ is committed; the
+# hundreds of frames tests/play.mjs and tests/browser.mjs produce are not.
+shots/play-*.png
+shots/browser-*.png
+shots/bigtext.png
+shots/sprites-probe.png

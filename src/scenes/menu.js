@@ -22,10 +22,10 @@ export function makeMenuScene() {
   let logoK = 0;
 
   const btn = {
-    start: UI.rectOf(238, 214, 164, 26),
-    seed: UI.rectOf(238, 246, 164, 16),
-    help: UI.rectOf(238, 266, 78, 16),
-    mute: UI.rectOf(324, 266, 78, 16),
+    start: UI.rectOf(238, 252, 164, 26),
+    seed: UI.rectOf(238, 284, 164, 16),
+    help: UI.rectOf(238, 304, 78, 16),
+    mute: UI.rectOf(324, 304, 78, 16),
   };
 
   function draw(g) {
@@ -35,7 +35,7 @@ export function makeMenuScene() {
     // --- the ark, drifting
     const bob = Math.sin(t * 0.7) * 2;
     const roll = Math.sin(t * 0.5 + 1) * 0.6;
-    drawArk(g, 320, 196 + bob, roll);
+    drawArk(g, 320, 182 + bob, roll);
 
     parts.draw(g, 'back');
 
@@ -45,7 +45,7 @@ export function makeMenuScene() {
     drawLogo(g, 320, ly);
 
     // --- menu plate
-    UI.panel(g, 230, 206, 180, 82, { style: 'wood', shadow: true });
+    UI.panel(g, 230, 244, 180, 82, { style: 'wood', shadow: true });
 
     const m = Input.mouse;
     UI.button(g, btn.start, 'NEW RUN', {
@@ -59,32 +59,46 @@ export function makeMenuScene() {
       state: UI.hover(btn.mute, m) ? 'hover' : 'idle', color: Audio.muted ? 'grey0' : 'wood2', small: true,
     });
 
-    text(g, 'a 2.5D habitat pool roguelike', 320, 298, 'foam', { font: 3, center: true });
-    text(g, 'sink every animal into the biome it calls home', 320, 306, 'water3', { font: 3, center: true });
+    text(g, 'a 2.5D habitat pool roguelike', 320, 332, 'foam', { font: 3, center: true });
+    text(g, 'sink every animal into the biome it calls home', 320, 342, 'water3', { font: 3, center: true });
 
     parts.draw(g, 'front');
     if (showHelp) drawHelp(g);
   }
 
   function drawLogo(g, cx, y) {
-    // POCKET ARK, engraved brass on a timber board
-    const w = 236, h = 54;
-    UI.panel(g, cx - w / 2, y, w, h, { style: 'brass', shadow: true, rivets: true });
-    // big title with a chunky drop
-    text(g, 'POCKET', cx - 2, y + 10, 'wood0', { center: true });
-    text(g, 'POCKET', cx - 3, y + 9, 'brass3', { center: true });
-    // scale the second word up by drawing it twice offset — cheap faux-bold
-    text(g, 'A R K', cx + 1, y + 25, 'wood0', { center: true });
-    text(g, 'A R K', cx, y + 24, 'white', { center: true });
-    UI.divider(g, cx - w / 2 + 10, y + 36, w - 20, { color: 'brass1' });
-    text(g, 'SIX GATES · EIGHT ANTES · ONE ARK', cx, y + 41, 'brass1', { font: 3, center: true });
-    // corner animals peeking over the board
-    const peek = ['penguin', 'fox'];
-    peek.forEach((id, i) => {
+    const w = 250, h = 74;
+    const x = cx - w / 2;
+    UI.panel(g, x, y, w, h, { style: 'wood', shadow: true, rivets: true });
+    // brass sign plate inside the timber
+    UI.panel(g, x + 8, y + 6, w - 16, h - 14, { style: 'brass', inset: true, corners: false });
+
+    // stacked wordmark: engraved dark, then the face, so it reads as struck metal
+    text(g, 'POCKET', cx, y + 12, 'wood0', { center: true, scale: 2 });
+    text(g, 'POCKET', cx, y + 11, 'brass3', { center: true, scale: 2, shadow: 'wood1' });
+    text(g, 'ARK', cx, y + 30, 'wood0', { center: true, scale: 4 });
+    text(g, 'ARK', cx, y + 28, 'white', { center: true, scale: 4, shadow: 'brass1' });
+
+    // a dark strip behind the strapline — engraved brass on brass is unreadable
+    const sw = textW('SIX GATES · EIGHT ANTES · ONE ARK', { font: 3 }) + 12;
+    rect(g, cx - sw / 2, y + h - 17, sw, 9, 'wood0');
+    rect(g, cx - sw / 2, y + h - 17, sw, 1, 'brass1');
+    text(g, 'SIX GATES · EIGHT ANTES · ONE ARK', cx, y + h - 15, 'brass3', { font: 3, center: true });
+
+    // a cue and a ball, crossed like a crest, on the timber shoulders
+    for (const side of [-1, 1]) {
+      const sx = cx + side * (w / 2 - 6);
+      for (let i = 0; i < 12; i++) px(g, sx - side * i, y + 16 + i, 'wood0');
+      disc(g, sx - side * 12, y + 29, 3, 'bone');
+      px(g, sx - side * 13, y + 28, 'white');
+    }
+
+    // two animals peeking over the top edge of the sign
+    ['penguin', 'fox'].forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
-      const ax = i === 0 ? cx - w / 2 + 12 : cx + w / 2 - 12;
-      drawAnimal(g, a, ax, y + 4 + Math.round(Math.sin(t * 2 + i) * 1), { scale: 1, flip: i === 1 });
+      const ax = i === 0 ? cx - w / 2 + 16 : cx + w / 2 - 16;
+      drawAnimal(g, a, ax, y - 3 + Math.round(Math.sin(t * 2 + i * 2) * 1), { scale: 1, flip: i === 1 });
     });
   }
 
@@ -107,17 +121,28 @@ export function makeMenuScene() {
     }
     // gunwale highlight
     rect(g, cx - w / 2 + 6, y - 9, w - 12, 1, 'wood4');
-    // mast + sail
-    line(g, cx + 60, y - 8, cx + 60, y - 62, 'wood2');
-    for (let i = 0; i < 34; i++) {
-      const bulge = Math.round(Math.sin((i / 34) * Math.PI) * 12);
-      rect(g, cx + 60 - bulge - 2, y - 60 + i, bulge + 2, 1, i % 7 < 4 ? 'bone' : 'white');
+    // mast + sail — a proper canvas, not a sliver
+    const mx = cx + 66;
+    rect(g, mx, y - 78, 3, 70, 'wood2');
+    rect(g, mx, y - 78, 1, 70, 'wood3');
+    rect(g, mx - 34, y - 74, 37, 2, 'wood1');          // yard
+    const sailH = 58;
+    for (let i = 0; i < sailH; i++) {
+      const bulge = Math.round(Math.sin((i / sailH) * Math.PI) * 32) + 3;
+      const sxx = mx - bulge;
+      rect(g, sxx, y - 72 + i, bulge, 1, 'white');
+      rect(g, sxx, y - 72 + i, Math.max(1, Math.round(bulge * 0.3)), 1, 'bone');
+      if (i % 11 === 0) rect(g, sxx, y - 72 + i, bulge, 1, 'bone');
     }
-    line(g, cx + 60, y - 62, cx + 60, y - 66, 'wood3');
+    // a reefed jib forward of the mast
+    for (let i = 0; i < 22; i++) {
+      const bl = Math.round(Math.sin((i / 22) * Math.PI) * 9) + 1;
+      rect(g, mx + 2, y - 46 + i, bl, 1, i % 7 < 4 ? 'bone' : 'white');
+    }
     // pennant
     const fl = Math.round(Math.sin(t * 4) * 2);
-    rect(g, cx + 61, y - 66, 9, 4, 'red2');
-    rect(g, cx + 61, y - 66 + fl, 9, 1, 'red1');
+    rect(g, mx + 2, y - 76, 10, 4, 'red2');
+    rect(g, mx + 2, y - 76 + fl, 10, 1, 'red1');
     // animals on deck
     CAST.forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];

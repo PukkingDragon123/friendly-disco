@@ -331,10 +331,16 @@ function pickFont(f) { return f === 3 ? FONT3 : FONT5; }
 export function textW(str, o = {}) {
   const font = pickFont(o.font);
   const sp = o.spacing !== undefined ? o.spacing : (font.gap !== undefined ? font.gap : 1);
+  const scale = Math.max(1, Math.round(o.scale || 1));
   let w = 0;
   const s = String(str);
   for (let i = 0; i < s.length; i++) w += charW(s[i], font) + (i < s.length - 1 ? sp : 0);
-  return w;
+  return w * scale;
+}
+
+/** Line height for a font at a scale — handy for laying out blocks of text. */
+export function textH(o = {}) {
+  return pickFont(o.font).h * Math.max(1, Math.round(o.scale || 1));
 }
 
 /**
@@ -345,6 +351,7 @@ export function textW(str, o = {}) {
 export function text(g, str, x, y, c, o = {}) {
   const font = pickFont(o.font);
   const sp = o.spacing !== undefined ? o.spacing : (font.gap !== undefined ? font.gap : 1);
+  const sc = Math.max(1, Math.round(o.scale || 1));
   const s = String(str);
   const total = textW(s, o);
   let ox = R(x);
@@ -354,7 +361,7 @@ export function text(g, str, x, y, c, o = {}) {
 
   const drawPass = (dx, dy, color) => {
     g.fillStyle = col(color);
-    let cx = ox + dx;
+    let cx = ox + dx * sc;
     for (let i = 0; i < s.length; i++) {
       const ch = s[i];
       const cw = charW(ch, font);
@@ -369,15 +376,15 @@ export function text(g, str, x, y, c, o = {}) {
             const on = cc < font.w && (row & (1 << (font.w - 1 - cc)));
             if (on && runStart < 0) runStart = cc;
             else if (!on && runStart >= 0) {
-              g.fillRect(cx + runStart, oy + dy + r + bob, cc - runStart, 1);
+              g.fillRect(cx + runStart * sc, oy + (dy + r + bob) * sc, (cc - runStart) * sc, sc);
               runStart = -1;
             }
           }
         }
       } else if (!gl && ch !== ' ') {
-        g.fillRect(cx, oy + dy + 1, cw - 1, font.h - 2);
+        g.fillRect(cx, oy + (dy + 1) * sc, (cw - 1) * sc, (font.h - 2) * sc);
       }
-      cx += cw + sp;
+      cx += (cw + sp) * sc;
     }
   };
 

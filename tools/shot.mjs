@@ -20,7 +20,7 @@ const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 
 // run.js pulls in every data module, so only load it for the scenes that need it
-const NEEDS_RUN = ['menu', 'table', 'shop', 'over'];
+const NEEDS_RUN = ['table', 'shop', 'over'];
 let newRun = () => ({}), startBlind = () => {}, advance = () => {};
 if (NEEDS_RUN.includes(which)) {
   const R = await import('../src/game/run.js');

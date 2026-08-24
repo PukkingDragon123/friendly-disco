@@ -62,10 +62,14 @@ function pool(b, cx, cy, r, edge, mid, deep) {
     const f = Math.abs(y) / r;
     rect(b, cx - w, cy + y, w * 2, 1, f > 0.8 ? edge : f > 0.42 ? mid : deep);
   }
-  for (let i = 0; i < 5; i++) {
+  // ripples: SHORT and offset. Five full-width bright lines across a dark pool read as
+  // a speaker grille, which is the last thing deep water should look like.
+  for (let i = 0; i < 6; i++) {
     const ry = cy - r + 3 + Math.round(H2(i * 5) * (r * 2 - 6));
-    const rw = Math.round(Math.sqrt(Math.max(0, r * r - (ry - cy) ** 2)) * 0.6);
-    rect(b, cx - rw, ry, rw * 2, 1, edge);
+    const span = Math.round(Math.sqrt(Math.max(0, r * r - (ry - cy) ** 2)));
+    const rw = Math.max(2, Math.round(span * (0.3 + H2(i * 11) * 0.3)));
+    const off = Math.round((H2(i * 7) - 0.5) * (span - rw) * 1.6);
+    rect(b, cx + off - rw, ry, rw * 2, 1, mix(P[edge], P[mid], 0.35));
   }
   ring(b, cx, cy, r, mix(P[edge], P.white, 0.3), 1);
 }
@@ -341,9 +345,12 @@ export function drawObstacle(g, o, sx, sy, t = 0, opts = {}) {
           const d = r * (1 - ph) * 0.9;
           px(g, sx + Math.cos(a) * d, sy + Math.sin(a) * d * 0.85, 'foam');
         } else {
+          // short, offset, and only where the surface would actually catch light
           const y = sy - r + 4 + Math.round(ph * (r * 2 - 8));
-          const w = Math.round(Math.sqrt(Math.max(0, r * r - (y - sy) ** 2)) * 0.75);
-          rect(g, sx - w, y, w * 2, 1, 'foam');
+          const span = Math.round(Math.sqrt(Math.max(0, r * r - (y - sy) ** 2)));
+          const w = Math.max(2, Math.round(span * 0.34));
+          const off = Math.round(Math.sin(t * 1.3 + i * 2.1) * (span - w) * 0.7);
+          rect(g, sx + off - w, y, w * 2, 1, 'foam');
         }
       }
       break;

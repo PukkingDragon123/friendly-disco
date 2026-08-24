@@ -62,29 +62,50 @@ async function drawTime(page) {
   }));
 }
 
-/** Click/skip through any dialogue until the deck scene is up. */
+/** Which scene is up, read off the debug shape every scene provides. */
+async function sceneKind(page) {
+  return page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
+    if (d.scriptId !== undefined) return 'cutscene';
+    if (d.rescue) return 'island';
+    if (d.encounter) return 'choice';
+    if (d.rects && d.rects.gates) return 'garden';
+    if (d.at && d.at.isles) return 'ocean';
+    if (d.won !== undefined) return 'summary';
+    if (d.showHelp !== undefined) return 'menu';
+    return 'other';
+  });
+}
+
+/** Click through any dialogue until we are out on the map. */
 async function skipDialogue(page, tries = 60) {
   for (let i = 0; i < tries; i++) {
-    const kind = await page.evaluate(() => {
-      const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
-      if (d.phase !== undefined) return 'deck';
-      if (d.scriptId !== undefined) return 'cutscene';
-      if (d.stock !== undefined) return 'ramp';
-      return 'other';
-    });
-    if (kind === 'deck') return true;
-    if (kind === 'ramp') {
-      // the ramp fills itself if you just board, which is what Enter does
-      await page.keyboard.press('Enter');
-      await page.waitForTimeout(400);
-      continue;
-    }
+    const kind = await sceneKind(page);
+    if (kind === 'ocean') return true;
     await page.keyboard.press('Escape');
     await page.waitForTimeout(160);
-    await page.keyboard.press('Space');
-    await page.waitForTimeout(160);
+    if ((await sceneKind(page)) === 'cutscene') {
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(150);
+    }
   }
   return false;
+}
+
+/** Click a rect from the current scene's debug hooks, in page coordinates. */
+async function clickRect(page, path) {
+  const box = await page.evaluate((p) => {
+    const d = window.__ARK.app.scene.debug();
+    let r = d;
+    for (const k of p) r = r && r[k];
+    if (!r) return null;
+    const c = document.getElementById('game').getBoundingClientRect();
+    const s = window.__ARK.app.scale;
+    return { x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s };
+  }, path);
+  if (!box) return false;
+  await page.mouse.click(box.x, box.y);
+  return true;
 }
 
 await page.goto(URL, { waitUntil: 'networkidle' });
@@ -117,60 +138,102 @@ const box = await page.evaluate(() => {
 await page.mouse.click(box.x, box.y);
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${OUT}-3-prologue.png` });
-if (!await skipDialogue(page)) errors.push('never reached the deck through the dialogue');
-await page.waitForTimeout(1600);
-await page.screenshot({ path: `${OUT}-4-deck.png` });
+if (!await skipDialogue(page)) errors.push('never reached the map through the dialogue');
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${OUT}-4-ocean.png` });
 
-const deck = await page.evaluate(() => {
+const ocean = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
-  return { phase: d.phase, balls: d.world.balls.length, gates: d.world.gates.length, target: d.run.target, ante: d.run.ante };
+  const v = d.voyage;
+  return {
+    choices: (v.choices || []).map((c) => c && c.id),
+    aboard: v.aboard.length, capacity: v.tiers && v.aboard.length,
+    flood: +v.flood.toFixed(3), cards: (d.rects.cards || []).filter(Boolean).length,
+  };
 });
-console.log('deck:', JSON.stringify(deck));
-console.log('  (headless Chromium has no GPU: its ~24ms frame time is the compositor,',
-  'not the renderer — see drawTime)');
+console.log('ocean:', JSON.stringify(ocean));
+if (ocean.cards < 3) errors.push(`the map offered ${ocean.cards} destinations, not three`);
 
-// take a real shot: hover a gate, press, hold to charge, release
-const shot = await page.evaluate(() => {
+const oceanT = await drawTime(page);
+console.log('ocean draw:', JSON.stringify(oceanT));
+if (oceanT && oceanT.drawMs > 16.6) errors.push(`ocean draw ${oceanT.drawMs}ms exceeds a 60fps frame`);
+
+// sail somewhere by clicking a card, then get through whatever is on the way in
+await clickRect(page, ['rects', 'cards', 0]);
+await page.waitForTimeout(3200);
+let kind = await sceneKind(page);
+if (kind === 'cutscene') {
+  for (let i = 0; i < 30 && kind === 'cutscene'; i++) {
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(140);
+    kind = await sceneKind(page);
+  }
+}
+if (kind === 'choice') {
+  await page.screenshot({ path: `${OUT}-5-choice.png` });
+  const choiceT = await drawTime(page);
+  console.log('choice draw:', JSON.stringify(choiceT));
+  await page.keyboard.press('Digit1');
+  await page.waitForTimeout(700);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1600);
+  kind = await sceneKind(page);
+}
+if (kind !== 'island') errors.push(`sailing led to "${kind}" instead of an island`);
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${OUT}-6-island.png` });
+
+const island = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
+  return {
+    island: d.island.id, ashore: d.rescue.strand.length,
+    obstacles: d.rescue.obstacles.length, tideStep: +d.rescue.step.toFixed(3),
+  };
+});
+console.log('island:', JSON.stringify(island));
+if (!island.ashore) errors.push('the island had nobody on it to rescue');
+
+// flick one animal home with a real drag, and check the physics ran
+const flicked = await page.evaluate(async () => {
+  const d = window.__ARK.app.scene.debug();
+  const e = d.rescue.strand.find((s) => s.state === 'ashore');
+  if (!e) return null;
+  const before = d.rescue.shots;
+  const p = d.at(e.ball.x, e.ball.y);
   const c = document.getElementById('game').getBoundingClientRect();
   const s = window.__ARK.app.scale;
-  const gate = d.world.gates[0];
-  // project through the renderer's OWN toScreen, not a copy of it
-  const p = window.__ARK.Table.toScreen(gate.x, gate.y, 0);
-  return { x: c.left + p.x * s, y: c.top + p.y * s };
+  return { before, x: c.left + p.x * s, y: c.top + p.y * s };
 });
-await page.mouse.move(shot.x, shot.y);
-await page.waitForTimeout(120);
-await page.mouse.down();
-await page.waitForTimeout(500);
-await page.screenshot({ path: `${OUT}-5-charging.png` });
-await page.mouse.up();
-await page.waitForTimeout(1200);
-await page.screenshot({ path: `${OUT}-6-rolling.png` });
-await page.waitForTimeout(4000);
-await page.screenshot({ path: `${OUT}-7-scored.png` });
+if (flicked) {
+  await page.mouse.move(flicked.x, flicked.y);
+  await page.mouse.down();
+  await page.waitForTimeout(120);
+  await page.mouse.move(flicked.x + 170, flicked.y, { steps: 8 });
+  await page.waitForTimeout(120);
+  await page.mouse.up();
+  await page.waitForTimeout(2200);
+  const after = await page.evaluate(() => window.__ARK.app.scene.debug().rescue.shots);
+  if (after <= flicked.before) errors.push('a real mouse drag did not flick an animal');
+  else console.log(`flick: ${flicked.before} -> ${after} shots`);
+}
+const islandT = await drawTime(page);
+console.log('island draw:', JSON.stringify(islandT));
+if (islandT && islandT.drawMs > 16.6) errors.push(`island draw ${islandT.drawMs}ms exceeds a 60fps frame`);
+await page.screenshot({ path: `${OUT}-7-rescue.png` });
 
-const after = await page.evaluate(() => {
-  const d = window.__ARK.app.scene.debug();
-  return { phase: d.phase, score: d.run.score, shotsLeft: d.run.shotsLeft, shots: d.run.stats.shotsTaken, potted: d.run.stats.potted, fps: window.__ARK.app.fps };
-});
-console.log('after one shot:', JSON.stringify(after));
-
-// the number that is actually mine: how long the scene takes to draw itself
-const deckT = await drawTime(page);
-console.log('deck draw:', JSON.stringify(deckT));
-if (deckT && deckT.drawMs > 16.6) errors.push(`deck draw ${deckT.drawMs}ms exceeds a 60fps frame`);
-
-// jump to the garden, then the freighter, so both shops render in a real browser
+// and the garden, which is the heaviest static scene
 await page.evaluate(() => window.__ARK.eden());
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${OUT}-8-eden.png` });
-const edenT = await drawTime(page);
-console.log('eden draw:', JSON.stringify(edenT));
-if (edenT && edenT.drawMs > 16.6) errors.push(`eden draw ${edenT.drawMs}ms exceeds a 60fps frame`);
-await page.evaluate(() => window.__ARK.freighter());
-await page.waitForTimeout(1800);
-await page.screenshot({ path: `${OUT}-9-freighter.png` });
+await page.screenshot({ path: `${OUT}-8-garden.png` });
+const gardenT = await drawTime(page);
+console.log('garden draw:', JSON.stringify(gardenT));
+if (gardenT && gardenT.drawMs > 16.6) errors.push(`garden draw ${gardenT.drawMs}ms exceeds a 60fps frame`);
+const garden = await page.evaluate(() => {
+  const d = window.__ARK.app.scene.debug();
+  return { gates: (d.rects.gates || []).length, beds: (d.rects.beds || []).length };
+});
+console.log('garden:', JSON.stringify(garden));
+if (!garden.gates) errors.push('the Cherubim offered no gates');
 
 console.log('\nconsole output:');
 for (const l of logs.slice(0, 12)) console.log('  ' + l);

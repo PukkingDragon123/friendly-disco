@@ -657,6 +657,8 @@ export function makeIslandScene() {
     debug() {
       return {
         voyage: v, island, rescue: r,
+        get aim() { return aim; },
+        get held() { return held; },
         finish, advance: (n) => advanceTide(r, n),
         aimAt: (i, ang, pow) => flick(r, r.strand[i], ang, shotPower(pow)),
         place: (id, i) => placeHelper(r, id, r.obstacles[i]),

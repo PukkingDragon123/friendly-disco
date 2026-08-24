@@ -1,30 +1,25 @@
 # POCKET ARK
 
-**A 2.5D pixel-art habitat pool roguelike, played on the deck of the ark while the flood
-comes up.**
+**A cozy pixel-art rescue roguelike. The water is still rising, the boat is not getting
+bigger, and every island has more animals on it than you have room for.**
 
 > *"So you want me to build a boat."*
-> *"I want you to build a TABLE."*
+> *"I want you to build something that can decide who gets on it."*
 
-Animals are racked on the tilted felt deck of the ark. Six gates ring the rail, each one
-opening onto a habitat. Sink every animal into the biome it calls home — and watch out,
-because the animals notice each other. A fox that lands beside a rabbit eats well. Sheep
-panic near wolves. Penguins would rather not meet a polar bear.
-
-**The water climbs one mark with every shot you take.** Beat the target before it reaches
-the felt, or the deck is gone. Then sail to the dock, pick one crate off the manifest, and
-let the boat bring it in.
-
-Eight antes, three blinds each, and the last of every three is a named disaster out of
-somebody's flood myth — Fimbulwinter, Leviathan, Tiamat, Ma'at's Scale, Ragnarok.
+You are a golem of river clay with a shepherd's crook. Three islands stand on the horizon
+and you can see what each one is before you commit: its weather, what is ashore, what is
+in the way, and what the crossing costs you in tide. Pick one. Roll the animals home
+before the water reaches them. Take what you can carry, and know exactly what you left.
 
 ```
-                 ╭──────────────────────────────────────────╮
-   SAV  ●        │                                          │        ● ARC
-                 │        ~ the felt, tilted 0.62 ~          │
-   OCE  ●        │                                          │        ● JUN
-                 ╰──────────────────────────────────────────╯
-                      DES ●                      ● FARM
+        ~ the map ~                              ~ an island ~
+
+   ╭────────╮  ╭────────╮  ╭────────╮        ▓▓│                        ≈≈≈≈≈
+   │ MEADOW │  │ RUINS  │  │CHERUBIM│        ▓▓│    o    ▲     o        ≈≈≈≈≈
+   │ 6 ▲ ×1 │  │ 5 ▲ ×3 │  │  gate  │        ▓▓│  o    ███       o      ≈≈≈≈≈
+   │ ✓ rock │  │ ✗ gap  │  │ +2% ~  │        ▓▓│     o      o           ≈≈≈≈≈
+   ╰────────╯  ╰────────╯  ╰────────╯        ▓▓│  ⌐¬                    ≈≈≈≈≈
+                                            pens   the last of the island   the flood
 ```
 
 ## Play it
@@ -33,8 +28,6 @@ ES modules need a real HTTP origin, so serve the folder:
 
 ```sh
 node serve.mjs            # -> http://localhost:8000
-# or
-python3 -m http.server 8000
 ```
 
 Then open <http://localhost:8000/> and click to board.
@@ -43,83 +36,88 @@ Then open <http://localhost:8000/> and click to board.
 
 | | |
 |---|---|
-| **Click an animal** | take it as your cue ball |
-| **Hold left mouse** | charge the shot — release to break |
-| **Touch: tap** | pick an animal |
-| **Touch: drag away** | aim and load — distance is power. Lift to break |
-| **A / D** or **wheel** | put english (side spin) on the ball |
-| **S** | zero the english |
-| **R** | re-rack the felt (costs a re-rack) |
-| **1 / 2** | use a feed from your satchel |
+| **Press an animal, drag AWAY, let go** | the whole game. Distance is power; the crook lights as it winds |
+| **Click one you carry, then click what is in the way** | it opens it, and stays there |
+| **Click a basket slot, then an animal** | throw an apple |
+| **1 / 2 / 3** | pick a destination, or an option on a decision |
+| **Esc** | cancel an aim, put down what you are holding, skip a cutscene |
+| **Enter** | commit the destination under the cursor |
 | **M** / **F** | mute · fullscreen |
-| **Right click** | cancel a charging shot |
-| **Space / Enter** | advance dialogue &nbsp;·&nbsp; **Esc** skips a cutscene |
 
 Plays on a phone: landscape, fullscreen on the boarding tap, and one gesture does the
-whole shot.
+whole rescue.
 
 ## The rules
 
-**Scoring** is chips × mult, resolved animal by animal.
+**The boat is the whole game.** Every berth an animal occupies is a berth a rescue cannot
+fill, so you start with four farm animals and half a boat empty. Three places an animal
+can be, and the difference between them is the entire economy:
 
-* **Home gate** — ×3 chips and +2 mult. This is where the run lives.
-* **Neighbouring biome** — partial credit, scaled by how close the biomes are
-  (savanna/desert are cousins; arctic/ocean less so).
-* **Wrong gate** — the animal keeps a quarter of its chips and costs you a mult.
-* **Combo** — every extra animal sunk in the same shot compounds the multiplier.
-* **Cushions** — rail bounces before the drop pay chips, and there are relics that care.
+* **Aboard** — useful and in danger. Usable in a rescue, lost if the boat is lost.
+* **In a bed in Eden** — safe for good. Nothing reaches it, it cannot be used, it sells.
+* **Lost** — it did not make it, and the summary says its name.
 
-**Interactions** fire when an animal lands next to the right neighbour. Predators eat prey
-already in the gate (the prey is *gone*), herds buff each other, flocks stack, and a few
-pairings are simply a mistake. Same-shot combos, animals still on the felt, and even the
-animals still in your caravan can all trigger rules.
+**A rescue has two verbs.** FLICK an animal home — it is a ball, so it bounces off
+boulders, bogs down in mire, slides on black ice, gets carried off by a current and drowns
+if it stops in deep water. Or PUT DOWN an animal you already carry on top of whatever is
+in the way: if its ability answers that obstacle the obstacle opens for good, and the
+animal stays there holding it open. Fourteen obstacles, eight abilities, and each
+obstacle is answered by exactly one of them — or by nothing, in which case go round.
 
-**The flood** is the real clock. It climbs to the rail over exactly the shots you are
-given, so normally the water and the shot counter run out together — but The Deluge
-doubles the rate and drowns you in half the time, and the Ziz can hold it back a shot.
+**Everything costs tide.** Every flick and every animal you put down lets the water in
+another step, so the question is never how many you can save. It is what order, and what
+you will spend to reach the last one.
 
-**Skills.** Sixteen animals carry an engine-implemented skill, not just flavour text: the
-dove returns to your caravan instead of being spent, the phoenix is not spent by a wrong
-gate, the griffin hunts across every gate, the lamb and the behemoth are never eaten, the
-nightingale sings a debuff off, the qilin blesses everything scored after it, and the
-thunderbird ignores whatever the boss is doing to chips.
+**Eleven islands**, each a place before it is a level: grassland, jungle, desert, swamp,
+snow, volcano, drowned city, coral shallows, storm rock, mountain, and one quiet island
+with no weather at all. You can read every one of them off the map before you sail.
 
-**Structure** — 8 antes × 3 blinds (small, big, boss). Sixteen mythological bosses seal
-gates, kill your interactions, freeze the felt, tilt the sea, hide the labels, turn the
-gates between shots, halve your multipliers, or plant something aboard that is not an
-animal.
+**Eden** is the hub and the only safe ground. Put animals in beds, sell them, or sit with
+one three times until it will not leave you — the free, slow road to the loyalty the snake
+charges seven coins for. Ask the Cherubim and one of three gates opens, free, and whoever
+comes through stays for the rest of the run: the snake with his apples, Adam with what he
+made, Eve with the long view, Noah with the boat and a list of jobs. Nobody already in the
+garden is offered again, so the choice sharpens every visit.
 
-**Story.** God narrates. There is a prologue, a lesson, a beat per ante as the world goes
-under, a scripted entrance for every disaster, and two endings.
+**Three relic slots** and they are not interchangeable — in hand, worn, in the chest — so a
+build is a shape rather than a pile and every relic displaces one of its own kind.
 
-**The dock** — one crate per visit. Crates carry animals for your caravan, relics, cue
-work, feed, habitat upgrades and vouchers. Bigger hauls arrive on bigger boats.
+**Choices, and the flags they leave.** Something asks you for a decision on most crossings
+in. No option is free and none is obviously right, because the point is rarely what it
+pays now: let the dove go and it flies ahead of the water for the rest of the run; put the
+harpoon down and the whale pulls one animal a rescue out of the deep; take the strongbox
+instead of the charts and the garden grows slower for it, and everybody who sells to you
+has heard about the raft.
+
+**Four chapters of four legs**, and the tide is tuned to a knife edge: an unupgraded boat
+arrives at the last leg with the flood at 0.99. Every point of Sail you buy is the
+difference between that and a margin.
 
 ## Tests
 
 ```sh
-node tools/checksyntax.mjs src     # import-check every module under a stubbed DOM
-node tests/run.mjs                 # data contracts, physics stress, scoring fuzz, balance
-node tests/play.mjs 4              # play four complete runs end to end through the scenes
-node tools/shot.mjs table out.png  # headless screenshot of any scene
-node serve.mjs 8099 & node tests/browser.mjs   # real Chromium, real audio, real fps
+node tools/checksyntax.mjs           # import-check every module under a stubbed DOM
+node tests/run.mjs                   # data contracts, physics stress, balance
+node tests/play.mjs 4                # four complete voyages, played by clicking
+node tools/shot.mjs island out.png   # headless screenshot of any scene
+node tools/profile.mjs               # canvas calls per frame, per scene
+node serve.mjs 8099 & node tests/browser.mjs   # real Chromium, real audio, real draw time
+node serve.mjs 8099 & node tests/mobile.mjs    # phone viewports, real touch gestures
 ```
 
-`tests/run.mjs` validates every data row against the frozen contract (roster, tag
-vocabulary, sprite-recipe enums, legal boss-effect keys, content quotas), fuzzes every
-relic hook, fires 120 randomised full-power breaks checking for tunnelling and stuck
-balls, fuzzes 400 scored shots for NaN, then auto-plays runs with a greedy bot and prints
-the balance curve. `tests/play.mjs` drives the actual scenes with synthetic mouse input —
-menu, deck, dock, summary — and fails if anything throws out of a frame.
+The suites are load-bearing, not decoration:
 
-There is a software Canvas2D in `tools/softcanvas.mjs` (fillRect / drawImage / clip /
-alpha, plus a PNG encoder) so the renderer can be reviewed by looking at real frames from
-node instead of guessing.
-
-The suites are load-bearing, not decoration. `tests/run.mjs` fails the build if an animal
-claims a skill `scoring.js` does not implement, or if a boss uses an effect key the engine
-would silently ignore. `tests/play.mjs` found a missing import that only threw once a
-cherub pair was actually mid-flight — a path no single-scene screenshot had hit.
+* `tests/run.mjs` validates every data row against a closed contract — tag vocabulary,
+  sprite-recipe enums, palette keys, ability coverage, obstacle physics words, effect
+  vocabularies. It equips a fake relic for **every bonus key** and checks a real number
+  moved, because a relic whose key nothing reads is a relic the player paid for that does
+  nothing. It plays a greedy rescue on all eleven islands and reports the balance.
+* `tests/play.mjs` drives whole voyages **by clicking** — title screen, cutscenes, route
+  cards, drag-back flicks, putting an animal down on an obstacle, stowing, opening a gate,
+  buying, casting off. If the bot can finish a voyage with a mouse, so can a person. It has
+  already caught a deal you could not get out of and a keypress that chose your route.
+* `tools/softcanvas.mjs` is a software Canvas2D plus a PNG encoder, so the renderer is
+  reviewed by looking at real frames from node instead of guessing.
 
 ## Build
 
@@ -132,26 +130,34 @@ serve.mjs             zero-dep static server
 DESIGN.md             the full design + module contract
 src/core/             palette, pixel primitives, rng, input, loop, juice, audio,
                       particles, scene transitions
-src/render/           three bitmap fonts, sprite factory, ui kit, seascape, speaker
-                      portraits, the 2.5D deck
-src/data/             habitats, 90 animals, interactions, relics, blinds, cargo, story
-src/game/             physics, scoring pipeline, run state, scene router
-src/scenes/           menu, deck, dock, cutscene, summary
-tests/                headless suites: run.mjs, play.mjs, browser.mjs
-tools/                checksyntax, softcanvas + PNG encoder, shot.mjs, stubdom
+src/render/           three bitmap fonts, ball-animal sprite factory, the cast, ui kit,
+                      seascape, island art, obstacles, the boat, deal panel
+src/data/             90 animals, abilities, obstacles, islands, items, relics, quests,
+                      the cast, encounters, story
+src/game/             physics, voyage state, rescue rules, garden rules, choices, router
+src/scenes/           menu, cutscene, ocean, choice, island, eden, summary
+tests/                headless suites: run.mjs, play.mjs, browser.mjs, mobile.mjs
+tools/                checksyntax, softcanvas + PNG encoder, shot.mjs, profile.mjs
 ```
 
-Internal resolution is a fixed **640×360**, integer-scaled to the window, with
-`imageSmoothingEnabled = false`. Physics runs in flat table units and the view applies an
-orthographic tilt (`screenY = oy + ty*1.24 - tz*2`) — a tilted rectangle, not an isometric
-diamond, so the rails stay readable and the aim geometry stays intuitive.
+Internal resolution is a fixed **960×540**, integer-scaled to the window, with
+`imageSmoothingEnabled = false`.
+
+**A frame is a call budget, not a pixel budget.** Everything static is baked to an
+offscreen canvas once and blitted: text runs, UI panels, the seascape (at half
+resolution), island silhouettes and backdrops, boats per upgrade signature, obstacles per
+kind, animal sprites split by what MOVES so rolling, squashing, blinking and standing in
+rain are free at the call site. `tools/profile.mjs` reports the number that matters —
+canvas calls per frame — and the whole game sits between 700 and 5,200 against a ceiling
+of 10,000. Real Chromium draws every scene in about a millisecond.
 
 ## Debug
 
-`window.__ARK` exposes `app`, `run`, `Audio` and `Juice` in the console.
+`window.__ARK` exposes `app`, `voyage`, `router`, `Audio` and `Juice` in the console.
 
 ```js
-__ARK.run.money = 999        // fund a shopping spree
-__ARK.run.shotsLeft = 99     // never miss
-__ARK.goDock()               // jump straight to the dock
+__ARK.voyage.money = 999        // fund a shopping spree
+__ARK.voyage.flood = 0          // hold the water back
+__ARK.eden()                    // straight to the garden
+__ARK.island('volcano')         // straight to a rescue on any island
 ```

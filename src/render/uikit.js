@@ -22,12 +22,25 @@ export function hover(r, m) {
 
 /* ------------------------------------------------------------------ panels */
 
+/**
+ * Five surfaces, and every one of them is WARM.
+ *
+ * `slate` used to be built out of shadow/deep/night -- and `night` is the one purple in
+ * the palette, so every inset panel in the game had a cold violet cast sitting inside a
+ * warm wooden frame. Nothing looks more like a UI mockup dropped on top of pixel art
+ * than that. It is now oiled dark timber, which is what an inset panel in a boat is.
+ *
+ * `paper` is parchment on purpose: `parch` for the sheet, `cream` for the lit top edge,
+ * `parch0` for the shadowed bottom. Bone and sand were close, but parchment is the
+ * colour the whole cozy palette is built around and the cards are the thing the player
+ * reads most.
+ */
 const STYLES = {
-  wood: { fill: 'wood2', top: 'wood4', mid: 'wood3', bot: 'wood1', edge: 'wood0', ink: 'bone', trim: 'brass1', bright: 'brass2' },
-  brass: { fill: 'brass1', top: 'brass3', mid: 'brass2', bot: 'brass0', edge: 'wood0', ink: 'wood0', trim: 'brass3', bright: 'white' },
-  slate: { fill: 'shadow', top: 'deep', mid: 'night', bot: 'ink', edge: 'ink', ink: 'grey2', trim: 'grey0', bright: 'grey1' },
-  paper: { fill: 'bone', top: 'white', mid: 'bone', bot: 'sand', edge: 'wood2', ink: 'wood0', trim: 'wood3', bright: 'white' },
-  glass: { fill: null, top: 'foam', mid: 'water2', bot: 'water0', edge: 'ice', ink: 'white', trim: 'foam', bright: 'white' },
+  wood: { fill: 'wood2', top: 'wood4', mid: 'wood3', bot: 'wood1', edge: 'wood0', ink: 'cream', trim: 'brass1', bright: 'brass2' },
+  brass: { fill: 'brass1', top: 'brass3', mid: 'brass2', bot: 'brass0', edge: 'wood0', ink: 'wood0', trim: 'brass3', bright: 'cream' },
+  slate: { fill: 'deep', top: 'shadow', mid: 'wood0', bot: 'ink', edge: 'ink', ink: 'parch1', trim: 'wood2', bright: 'wood3' },
+  paper: { fill: 'parch', top: 'cream', mid: 'parch1', bot: 'parch0', edge: 'wood2', ink: 'wood0', trim: 'wood3', bright: 'cream' },
+  glass: { fill: null, top: 'foam', mid: 'water2', bot: 'water0', edge: 'ice', ink: 'cream', trim: 'foam', bright: 'white' },
 };
 
 // Deterministic surface textures. Cheap enough per frame at these sizes, and they are
@@ -56,7 +69,7 @@ function grain(g, x, y, w, h, s) {
 function speckle(g, x, y, w, h) {
   for (let j = 0; j < h; j += 1) {
     for (let i = 0; i < w; i += 1) {
-      if (hash2(x + i, y + j, 29) < 0.045) px(g, x + i, y + j, 'sand');
+      if (hash2(x + i, y + j, 29) < 0.045) px(g, x + i, y + j, 'parch0');
     }
   }
 }
@@ -177,7 +190,7 @@ function paintPanel(g, x, y, w, h, o = {}) {
   if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor || s.ink, style: o.style, font: o.font });
 }
 
-const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'grey2', paper: 'sand', glass: 'foam' };
+const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'parch1', paper: 'cream', glass: 'foam' };
 
 export function panelTitle(g, x, y, w, label, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;

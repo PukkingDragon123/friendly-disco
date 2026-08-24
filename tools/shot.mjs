@@ -21,14 +21,6 @@ const g = cv.getContext('2d');
 const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 
-// run.js pulls in every data module, so only load it for the scenes that need it
-const NEEDS_RUN = ['table', 'shop', 'over', 'draft'];
-void NEEDS_RUN;
-let newRun = () => ({}), startBlind = () => {}, advance = () => {};
-if (NEEDS_RUN.includes(which)) {
-  const R = await import('../src/game/run.js');
-  newRun = R.newRun; startBlind = R.startBlind; advance = R.advance;
-}
 
 const app = {
   g, canvas: cv, scale: 1, time: 0, frame: 0, depth: 1,
@@ -39,7 +31,6 @@ function mouse(x, y) { Input.mouse.x = x; Input.mouse.y = y; Input.mouse.inside 
 
 let scene = null;
 const seed = process.env.SEED || 'ARK-DEMO-0001';
-const run = newRun(seed);
 
 switch (which) {
   case 'menu': {
@@ -47,34 +38,6 @@ switch (which) {
     scene = makeMenuScene();
     scene.enter({ onStart: () => {} }, app);
     mouse(320, 224);
-    break;
-  }
-  case 'table': {
-    const { makeTableScene } = await import('../src/scenes/table.js');
-    const RD = await import('../src/game/run.js');
-    RD.beginDraft(run);
-    RD.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
-    if (process.env.AIDS) { RD.addCue(run, 'brass_compass'); RD.addCue(run, 'rail_sight'); }
-    scene = makeTableScene();
-    scene.enter({ run, onExit: () => {} }, app);
-    // FLOOD=0..1 forces the waterline for a screenshot without playing the shots
-    if (process.env.FLOOD) {
-      const d = scene.debug();
-      d.run.flood = Number(process.env.FLOOD);
-      if (d.syncHazards) d.syncHazards();
-    }
-    mouse(560, 130);
-    break;
-  }
-  case 'draft': {
-    const { makeDraftScene } = await import('../src/scenes/draft.js');
-    scene = makeDraftScene();
-    scene.enter({ run, onDone: () => {} }, app);
-    if (process.env.PICK) {
-      const d = scene.debug();
-      for (const i of process.env.PICK.split(',')) d.toggle(Number(i));
-    }
-    mouse(480, 300);
     break;
   }
   case 'eden': {
@@ -164,6 +127,32 @@ switch (which) {
     mouse(Number(process.env.MX || 480), Number(process.env.MY || 280));
     break;
   }
+  case 'isles': {
+    const I = await import('../src/data/islands.js');
+    const A = await import('../src/render/islandart.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const all = I.ISLANDS.concat([I.CHERUBIM]);
+    if (process.env.BACK) {
+      const isl = I.ISLAND_BY_ID[process.env.BACK] || all[0];
+      scene = { update() {}, draw() {
+        A.drawIslandBack(g, isl, 0, 0, SW, SH, 1.6, {});
+        text(g, isl.name.toUpperCase() + '  —  ' + isl.biome, SW / 2, 12, 'white',
+          { center: true, font: 7, shadow: 'ink' });
+      } };
+    } else {
+      scene = { update() {}, draw() {
+        for (let y = 0; y < SH; y++) rect(g, 0, y, SW, 1, y < 150 ? 'sky' : y < 170 ? 'water3' : 'water1');
+        text(g, 'EVERY ISLAND ON THE MAP', SW / 2, 8, 'gold', { center: true, font: 7 });
+        all.forEach((isl, i) => {
+          const x = 80 + (i % 6) * 160, y = 250 + Math.floor(i / 6) * 230;
+          A.drawIslandFar(g, isl, x, y, 130, 96, 1.3 + i * 0.4, {});
+          text(g, isl.name, x, y + 8, 'cream', { center: true, font: 5, shadow: 'ink' });
+          text(g, isl.biome + '  d' + isl.danger, x, y + 22, 'brass3', { center: true, font: 3 });
+        });
+      } };
+    }
+    break;
+  }
   case 'boat': {
     const B = await import('../src/render/boat.js');
     const { rect, text } = await import('../src/core/pixel.js');
@@ -250,16 +239,18 @@ switch (which) {
     const { ANIMALS } = await import('../src/data/animals.js');
     const { drawAnimal } = await import('../src/render/sprites.js');
     const { rect, text } = await import('../src/core/pixel.js');
-    const { HABITAT_BY_ID } = await import('../src/data/habitats.js');
+    const { abilityOf } = await import('../src/data/abilities.js');
     scene = {
       draw() {
         rect(g, 0, 0, SW, SH, 'deep');
         const COLS = 18, CW = 52, CH = 62;
         ANIMALS.forEach((a, i) => {
           const x = 30 + (i % COLS) * CW, y = 46 + Math.floor(i / COLS) * CH;
-          const hab = HABITAT_BY_ID[a.home];
+          // a strip of the animal's ABILITY colour: the roster's own index of what
+          // each of them is for, now that berth traits are gone
+          const ab = abilityOf(a);
           rect(g, x - 25, y - 26, 50, 58, 'shadow');
-          rect(g, x - 25, y - 26, 50, 2, hab ? hab.color : 'grey0');
+          rect(g, x - 25, y - 26, 50, 2, ab.color);
           drawAnimal(g, a, x, y, { scale: 1 });
           text(g, a.name.slice(0, 11), x, y + 22, 'bone', { font: 3, center: true });
         });

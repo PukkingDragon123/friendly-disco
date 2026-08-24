@@ -7,9 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a0d16">
-<meta name="description" content="Pocket Ark — a 2.5D pixel-art habitat pool roguelike. Sink every animal into the biome it calls home before the flood takes the deck.">
+<meta name="description" content="Pocket Ark — a cozy pixel-art rescue roguelike. Sail an ocean that is running out of islands and decide who gets a berth before the flood takes the rest.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27 shape-rendering=%27crispEdges%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%2312 3a2c%27/%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%23123a2c%27/%3E%3Crect x=%271%27 y=%271%27 width=%2714%27 height=%2714%27 fill=%27%231f6b52%27/%3E%3Crect x=%272%27 y=%272%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%2712%27 y=%272%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%272%27 y=%2712%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%2712%27 y=%2712%27 width=%272%27 height=%272%27 fill=%27%230a0d16%27/%3E%3Crect x=%276%27 y=%275%27 width=%274%27 height=%276%27 fill=%27%23ffcb52%27/%3E%3Crect x=%275%27 y=%276%27 width=%276%27 height=%274%27 fill=%27%23ffcb52%27/%3E%3Crect x=%276%27 y=%276%27 width=%272%27 height=%272%27 fill=%27%23f7f4e8%27/%3E%3C/svg%3E">
-<title>Pocket Ark — a 2.5D habitat pool roguelike</title>
+<title>Pocket Ark — a cozy flood-rescue roguelike</title>
 <style>
   :root { color-scheme: dark; }
   html, body {
@@ -65,7 +65,7 @@
     #game { box-shadow: none; border-radius: 0; cursor: default; }
     #scan { display: none; }
   }
-  /* Landscape is not optional: the deck is 16:9 and a portrait phone would render it
+  /* Landscape is not optional: the game is 16:9 and a portrait phone would render it
      about a centimetre tall. */
   #rotate {
     position: fixed; inset: 0; z-index: 40; display: none;
@@ -110,7 +110,7 @@
 <div id="rotate">
   <div class="phone"></div>
   <div class="title" style="font-size:19px">TURN YOUR DEVICE</div>
-  <div class="sub">the deck needs landscape</div>
+  <div class="sub">the ocean needs landscape</div>
 </div>
 
 <div id="boot">
@@ -120,12 +120,13 @@
 
 <div id="gate" hidden>
   <div class="title">POCKET ARK</div>
-  <div class="sub">A 2.5D HABITAT POOL ROGUELIKE</div>
+  <div class="sub">A COZY PIXEL-ART RESCUE ROGUELIKE</div>
   <div class="hint pulse">TAP TO BOARD</div>
   <div class="keys">
-    <b>mouse</b> — click an animal to take it as your cue, hold to charge, release to break<br>
-    <b>touch</b> — tap an animal to pick it, drag away to aim and load, lift to break<br>
-    A / D or wheel = english &nbsp;·&nbsp; R = re-rack &nbsp;·&nbsp; 1 / 2 = feed &nbsp;·&nbsp; M = mute &nbsp;·&nbsp; F = fullscreen
+    <b>the crook</b> — press on a stranded animal, drag AWAY to aim and wind up, let go<br>
+    <b>the deck</b> — click one you already carry, then click what is in the way: it opens it<br>
+    every flick and every animal you put down lets the water in another step<br>
+    1 / 2 / 3 = pick an option &nbsp;·&nbsp; ESC = cancel &nbsp;·&nbsp; M = mute &nbsp;·&nbsp; F = fullscreen
   </div>
 </div>
 

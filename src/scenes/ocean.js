@@ -285,12 +285,16 @@ export function makeOceanScene() {
     const edge = HORIZON + band;
     dashLine(g, 0, edge, W, edge, 'foam', 5, 4, Math.floor(t * 9));
     rect(g, 0, edge + 1, W, 1, mix(P.water0, P.ink, 0.4));
-    // the label rides just BELOW the edge, on the open-water side, so it never ends up
-    // printed across a destination card as the tide climbs
+    // The label rides below the edge, and is pushed clear of the destination cards --
+    // it printed itself neatly underneath the first card and read as "THE FLOO".
     const label = f > 0.86 ? 'THE FLOOD IS ON YOU' : 'THE FLOOD';
     const lw = textW(label, { font: 5 }) + 12;
-    wash(g, 8, edge + 3, lw, 11, 'ink', 0.66);
-    text(g, label, 14, edge + 5, f > 0.72 ? 'red2' : 'foam', { font: 5 });
+    const ly = Math.min(H - 120, Math.max(edge + 3, CARD_Y + CARD_H + 6));
+    wash(g, 8, ly, lw, 11, 'ink', 0.7);
+    rect(g, 8, ly, 2, 11, f > 0.72 ? 'red2' : 'foam');
+    text(g, label, 15, ly + 2, f > 0.72 ? 'red2' : 'foam', { font: 5 });
+    // and a tick on the edge line itself, so the label and the water are joined up
+    for (let y = ly; y > edge && y > ly - 40; y -= 3) px(g, 9, y, 'foam');
   }
 
   function drawHud(g) {
@@ -526,7 +530,10 @@ export function makeOceanScene() {
       if (hover >= 0 && hover !== was) Audio.sfx('hover');
       if (m.pressed && hover >= 0) choose(hover);
       for (let i = 0; i < 3; i++) if (Input.pressed('Digit' + (i + 1))) choose(i);
-      if (Input.pressed('Enter') || Input.pressed('Space')) choose(hover >= 0 ? hover : 0);
+      // Enter commits the card the cursor is ON, and nothing else does. It used to sail
+      // to the first destination on any Space or Enter, which meant a stray keypress --
+      // one left over from skipping a cutscene, say -- chose your route for you.
+      if (Input.pressed('Enter') && hover >= 0) choose(hover);
       // the boat idles along, because a boat parked in the middle of the ocean is dead
       boatX = BOAT_X + Math.sin(t * 0.35) * 10;
       boatY = BOAT_WL;

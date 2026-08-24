@@ -10,22 +10,37 @@ const CHROME = process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linu
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox', '--disable-dev-shm-usage', '--autoplay-policy=no-user-gesture-required'] });
 const errors = [];
 
-/** Click/skip through any dialogue until the deck scene is up. */
+/** Which scene is up, read off the debug shape every scene provides. */
+async function sceneKind(page) {
+  return page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
+    if (d.scriptId !== undefined) return 'cutscene';
+    if (d.rescue) return 'island';
+    if (d.encounter) return 'choice';
+    if (d.rects && d.rects.gates) return 'garden';
+    if (d.at && d.at.isles) return 'ocean';
+    if (d.showHelp !== undefined) return 'menu';
+    return 'other';
+  });
+}
+
+/** Tap/skip through any dialogue until the map is up. */
 async function skipDialogue(page, tries = 60) {
   for (let i = 0; i < tries; i++) {
-    const kind = await page.evaluate(() => {
-      const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
-      return d.phase !== undefined ? 'deck' : d.scriptId !== undefined ? 'cutscene' : 'other';
-    });
-    if (kind === 'deck') return true;
+    const kind = await sceneKind(page);
+    if (kind === 'ocean') return true;
+    // Escape leaves a script outright; the Space is only for the frame where a line is
+    // still typing. Both are checked against the CURRENT scene, so a press can never
+    // land on the map behind the dialogue and choose a route for us.
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(160);
-    await page.keyboard.press('Space');
-    await page.waitForTimeout(160);
+    await page.waitForTimeout(180);
+    if ((await sceneKind(page)) === 'cutscene') {
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(160);
+    }
   }
   return false;
 }
-
 
 async function run(label, viewport, isPortrait) {
   const ctx = await browser.newContext({ viewport, hasTouch: true, isMobile: true, deviceScaleFactor: 3 });
@@ -68,39 +83,86 @@ async function run(label, viewport, isPortrait) {
   await page.touchscreen.tap(b.x, b.y);
   await page.waitForTimeout(900);
   await page.screenshot({ path: `shots/mobile-${label}-prologue.png` });
-  if (!await skipDialogue(page)) { errors.push(`${label}: never reached the deck`); await ctx.close(); return; }
-  await page.waitForTimeout(1600);
+  if (!await skipDialogue(page)) { errors.push(`${label}: never reached the map`); await ctx.close(); return; }
+  await page.waitForTimeout(1400);
+  await page.screenshot({ path: `shots/mobile-${label}-ocean.png` });
 
-  const pts = await page.evaluate(() => {
+  // tap a destination card and get through whatever is on the way in
+  const card = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
+    const r = (d.rects.cards || []).filter(Boolean)[0];
+    if (!r) return null;
     const c = document.getElementById('game').getBoundingClientRect();
     const s = window.__ARK.app.scale;
-    const persp = (ty) => 1 - 0.17 * (1 - Math.max(-0.35, Math.min(1.35, ty / 116)));
-    const proj = (x, y) => ({ x: c.left + (396 + (x - 116) * 2 * persp(y)) * s, y: c.top + (104 + y * 1.24) * s });
-    const ball = d.world.balls.find((bb) => !bb.sunk);
-    const gate = d.world.gates[0];
-    return { ball: proj(ball.x, ball.y), gate: proj(gate.x, gate.y) };
+    return { x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h - 14) * s };
   });
-  await page.touchscreen.tap(pts.ball.x, pts.ball.y);
-  await page.waitForTimeout(300);
-  const sel = await page.evaluate(() => !!window.__ARK.app.scene.debug().selected);
+  if (!card) { errors.push(`${label}: no destination card to tap`); await ctx.close(); return; }
+  await page.touchscreen.tap(card.x, card.y);
+  await page.waitForTimeout(3400);
+  let kind = await sceneKind(page);
+  for (let i = 0; i < 40 && (kind === 'cutscene' || kind === 'choice'); i++) {
+    if (process.env.TRACE) console.log('   ', label, 'step', i, kind);
+    if (kind === 'choice') {
+      // TAP the option and then the way ashore: this is a touch test, so it is done by
+      // touching -- and it also proves the decision screen works with a finger
+      const target = await page.evaluate(() => {
+        const d = window.__ARK.app.scene.debug();
+        const r = d.taken >= 0 ? d.rects.go : (d.rects.cards || []).filter(Boolean)[0];
+        if (!r || !r.w) return null;
+        const c = document.getElementById('game').getBoundingClientRect();
+        const s = window.__ARK.app.scale;
+        return { x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s };
+      });
+      if (target) await page.touchscreen.tap(target.x, target.y);
+      await page.waitForTimeout(600);
+    } else {
+      // ESC leaves a script outright. Tapping through eleven typed lines needs more than
+      // twenty taps and the loop ran out of them before it ever reached the island.
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(260);
+    }
+    kind = await sceneKind(page);
+  }
+  if (kind !== 'island') { errors.push(`${label}: tapping a card led to "${kind}"`); await ctx.close(); return; }
+  await page.waitForTimeout(900);
 
-  const dx = pts.gate.x - pts.ball.x, dy = pts.gate.y - pts.ball.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const far = { x: pts.ball.x + (dx / len) * 150, y: pts.ball.y + (dy / len) * 150 };
+  // the whole game is one gesture: touch an animal, drag AWAY, lift. Prove it on glass.
+  const pts = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    const e = d.rescue.strand.find((x) => x.state === 'ashore');
+    if (!e) return null;
+    const p = d.at(e.ball.x, e.ball.y);
+    const c = document.getElementById('game').getBoundingClientRect();
+    const s = window.__ARK.app.scale;
+    return { x: c.left + p.x * s, y: c.top + p.y * s, shots: d.rescue.shots };
+  });
+  if (!pts) { errors.push(`${label}: nobody ashore to flick`); await ctx.close(); return; }
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts.ball.x, y: pts.ball.y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts.x, y: pts.y }] });
   for (let i = 1; i <= 8; i++) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: pts.ball.x + (far.x - pts.ball.x) * i / 8, y: pts.ball.y + (far.y - pts.ball.y) * i / 8 }] });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: pts.x + (i / 8) * 150, y: pts.y }],
+    });
     await page.waitForTimeout(45);
   }
   await page.screenshot({ path: `shots/mobile-${label}-aiming.png` });
-  const charging = await page.evaluate(() => { const d = window.__ARK.app.scene.debug(); return +d.charge.toFixed(2); });
+  const wound = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return d.aim ? +d.aim.power.toFixed(2) : null;
+  });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await page.waitForTimeout(3500);
-  const after = await page.evaluate(() => { const d = window.__ARK.app.scene.debug(); return { phase: d.phase, shots: d.run.stats.shotsTaken, potted: d.run.stats.potted, score: d.run.score, fps: window.__ARK.app.fps }; });
-  console.log(`${label}: tap-selected=${sel} drag-charge=${charging} -> ${JSON.stringify(after)}`);
-  await page.screenshot({ path: `shots/mobile-${label}-deck.png` });
+  await page.waitForTimeout(3200);
+  const after = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return {
+      shots: d.rescue.shots, saved: d.rescue.rescued.length, lost: d.rescue.drowned.length,
+      tide: +d.rescue.tide.toFixed(2), fps: window.__ARK.app.fps,
+    };
+  });
+  if (after.shots <= pts.shots) errors.push(`${label}: a touch drag did not flick an animal`);
+  console.log(`${label}: wound=${wound} -> ${JSON.stringify(after)}`);
+  await page.screenshot({ path: `shots/mobile-${label}-rescue.png` });
   await ctx.close();
 }
 

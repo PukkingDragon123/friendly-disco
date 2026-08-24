@@ -41,6 +41,7 @@ const M = {};
     ['blinds', '../src/data/blinds.js'], ['cargo', '../src/data/cargo.js'],
     ['table', '../src/render/table.js'], ['scoring', '../src/game/scoring.js'],
     ['run', '../src/game/run.js'], ['flood', '../src/game/flood.js'],
+    ['eden', '../src/data/eden.js'],
     ['story', '../src/data/story.js'],
   ];
   const broken = [];
@@ -470,6 +471,112 @@ if (section('physics') && M.physics) {
 }
 
 /* ------------------------------------------------------------------ scoring */
+
+if (section('eden') && M.eden && M.run) {
+  const E = M.eden, A = M.animals;
+  ok(Array.isArray(E.APPLES) && E.APPLES.length === 6, 'six apples', E.APPLES && E.APPLES.length);
+  // every apple's rarity table must be a real distribution, or rollBush silently skews
+  let badOdds = [];
+  for (const ap of E.APPLES) {
+    const sum = ['common', 'uncommon', 'rare', 'legendary'].reduce((a, k) => a + (ap.odds[k] || 0), 0);
+    if (Math.abs(sum - 1) > 1e-6) badOdds.push(`${ap.id}:${sum.toFixed(3)}`);
+    for (const k of Object.keys(ap.odds)) {
+      if (ap.odds[k] < 0 || ap.odds[k] > 1) badOdds.push(`${ap.id}.${k}`);
+    }
+    if (!M.palette.P[ap.color]) badOdds.push(`${ap.id}:colour ${ap.color}`);
+    if (!M.uikit.hasIcon(ap.icon)) badOdds.push(`${ap.id}:icon ${ap.icon}`);
+  }
+  ok(badOdds.length === 0, 'every apple is a real distribution in real palette keys', badOdds.join(','));
+  // the price ladder has to track the odds, or the expensive apples are a trap
+  const ev = (ap) => (ap.odds.uncommon || 0) + (ap.odds.rare || 0) * 3 + (ap.odds.legendary || 0) * 7;
+  ok(ev(E.APPLE_BY_ID.enchanted) > ev(E.APPLE_BY_ID.golden), 'enchanted beats golden on odds');
+  ok(ev(E.APPLE_BY_ID.golden) > ev(E.APPLE_BY_ID.plain), 'golden beats plain on odds');
+  ok(E.APPLE_BY_ID.cursed.price < E.APPLE_BY_ID.golden.price
+    && ev(E.APPLE_BY_ID.cursed) > ev(E.APPLE_BY_ID.plain),
+  'the cursed apple is cheap for good odds — that is what makes it a decision');
+
+  // a bush must always offer THREE choices, whatever the apple, or the reveal breaks
+  let short = 0, offTier = 0;
+  for (const ap of E.APPLES) {
+    for (let i = 0; i < 40; i++) {
+      const b = E.rollBush(M.rng.makeRng(`bush/${ap.id}/${i}`), ap.id, {});
+      if (b.choices.length !== 3) short++;
+      if (new Set(b.choices.map((c) => c.id)).size !== b.choices.length) short++;
+      if ((ap.odds[b.rarity] || 0) === 0) offTier++;
+    }
+  }
+  ok(short === 0, 'every bush offers three distinct animals', short);
+  ok(offTier === 0, 'a bush never rolls a tier its apple cannot produce', offTier);
+  // determinism, since the reveal can be re-opened before it is taken
+  const b1 = E.rollBush(M.rng.makeRng('same'), 'golden', {});
+  const b2 = E.rollBush(M.rng.makeRng('same'), 'golden', {});
+  ok(JSON.stringify(b1.choices.map((c) => c.id)) === JSON.stringify(b2.choices.map((c) => c.id)),
+    're-opening a bush shows the same three animals');
+  // the lure has to scale with what came out
+  const cheap = E.lureCost(E.APPLE_BY_ID.plain, A.ANIMAL_BY_ID.chicken);
+  const dear = E.lureCost(E.APPLE_BY_ID.enchanted, A.ANIMAL_BY_ID.phoenix);
+  ok(dear > cheap, 'a legendary out of an enchanted apple costs more to lure', `${cheap} vs ${dear}`);
+
+  // ---- blessings
+  ok(E.BLESSINGS.length >= 15, 'a real tarot spread', E.BLESSINGS.length);
+  let badB = [];
+  for (const b of E.BLESSINGS) {
+    if (typeof b.apply !== 'function') badB.push(`${b.id}:apply`);
+    if (!M.palette.P[b.color]) badB.push(`${b.id}:colour`);
+    if (!M.uikit.hasIcon(b.icon)) badB.push(`${b.id}:icon`);
+    if (!(b.price >= 3 && b.price <= 8)) badB.push(`${b.id}:price ${b.price}`);
+  }
+  ok(badB.length === 0, 'every blessing is applyable and drawable', badB.join(','));
+  ok(new Set(E.BLESSINGS.map((b) => b.id)).size === E.BLESSINGS.length, 'blessing ids unique');
+
+  // THE one-round guarantee: apply every blessing, end the blind, and nothing may survive
+  let leaked = [];
+  for (const b of E.BLESSINGS) {
+    const r = M.run.newRun('BLESS/' + b.id);
+    M.run.beginDraft(r);
+    M.run.commitDraft(r, [0, 1, 2, 5, 6, 8, 9, 11]);
+    M.run.takeBlessing(r, b);
+    M.run.startBlind(r);
+    const during = JSON.stringify(pickBless(r));
+    r.score = r.target + 5000;
+    M.run.endBlind(r);
+    M.run.advance(r);
+    M.run.startBlind(r);
+    const after = JSON.stringify(pickBless(r));
+    const clean = JSON.stringify(pickBless(M.run.newRun('clean')));
+    if (r.blessing !== null) leaked.push(`${b.id}:card`);
+    if (after !== clean && after !== during) leaked.push(`${b.id}:partial`);
+    if (after !== clean) leaked.push(`${b.id}:${after}`);
+  }
+  ok(leaked.length === 0, 'no blessing survives the round it was bought for', leaked.slice(0, 4).join(' '));
+
+  // a blessing must never throw, whatever state the run is in
+  let threw = 0;
+  for (const b of E.BLESSINGS) {
+    for (const junk of [{}, { caravan: [] }, { target: 0, shotsLeft: 0, money: 0 }]) {
+      try { b.apply(Object.assign({ log: [] }, junk)); } catch (e) { threw++; }
+    }
+  }
+  ok(threw === 0, 'no blessing throws on a malformed run', threw);
+
+  // ---- Adam and Eve's stall
+  const gr = M.relics.gardenRelics();
+  ok(gr.length >= 8, "the garden has its own stock", gr.length);
+  ok(M.relics.gardenRelics('adam').length >= 3 && M.relics.gardenRelics('eve').length >= 3,
+    'both of them are holding something');
+  const staff = M.relics.RELIC_BY_ID.shepherds_staff;
+  ok(!!staff, "the Shepherd's Staff exists");
+  ok(staff && /sheep/i.test(staff.desc) && /1\.5/.test(staff.desc) && /follow/i.test(staff.desc),
+    "the Staff's card states the multiplier AND the following", staff && staff.desc);
+  ok(gr.every((r) => r.desc && r.desc.length > 12),
+    'every garden relic prints what it does — that is the point of the stall');
+}
+
+function pickBless(run) {
+  const out = {};
+  for (const k of Object.keys(run)) if (k.indexOf('bless') === 0) out[k] = run[k];
+  return out;
+}
 
 if (section('draft') && M.run && M.animals) {
   const A = M.animals, R = M.run;

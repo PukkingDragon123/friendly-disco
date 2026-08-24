@@ -1,4 +1,4 @@
-// The relic layer: 47 joker-slot artefacts, each one a little patch on the scoring
+// The relic layer: 57 joker-slot artefacts, each one a little patch on the scoring
 // pipeline (DESIGN 9.5).
 //
 // WHY THE HOOKS LOOK SO PARANOID
@@ -774,6 +774,179 @@ export const RELICS = [
       },
     },
   },
+
+  /* ================================================== ADAM AND EVE'S GIFTS
+
+  The garden's stock. These are the relics the shop is BUILT around, so unlike the
+  general pool they are all legible from their own card and they all reward one
+  identifiable thing you can go and collect. Every one is scripture-shaped: a staff, a
+  fleece, a jawbone, a coat, a rib.
+
+  The Shepherd's Staff is the shape all of them follow -- a multiplier you can see
+  coming, plus a structural effect that changes how you shoot rather than just what you
+  score.
+  */
+  {
+    id: 'shepherds_staff', name: "Shepherd's Staff",
+    rarity: 'rare', price: 8, garden: 'adam',
+    desc: 'x1.5 Mult for each sheep berthed. When a sheep goes in, ANOTHER FOLLOWS IT.',
+    art: { icon: 'cue', bg: 'wood2', fg: 'bone' },
+    tags: ['scoring', 'structure', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        if (!isA(res, 'flock') && !sameAnimal(res.animal, 'sheep')
+          && !(res.animal && (res.animal.id === 'sheep' || res.animal.id === 'lamb'))) return;
+        res.xmult *= 1.5;
+        say(ctx, 'The flock follows', 'bone');
+      },
+      // the following: a sheep going in pulls the next one off the deck after it
+      onPot(pot, ctx) {
+        const a = pot && pot.animal;
+        if (!a || (a.id !== 'sheep' && a.id !== 'lamb')) return;
+        const st = stateOf(ctx);
+        st.follow = num(st.follow) + 1;
+        say(ctx, 'And another one follows!', 'bone');
+      },
+    },
+  },
+  {
+    id: 'golden_fleece', name: 'The Golden Fleece',
+    rarity: 'legendary', price: 10, garden: 'eve',
+    desc: 'Every wool-bearing animal aboard pays +$2 at the end of the round.',
+    art: { icon: 'star', bg: 'brass1', fg: 'gold' },
+    tags: ['economy', 'garden'],
+    hooks: {
+      onBlindEnd(ctx) {
+        const list = asAnimals(ctx && ctx.run ? ctx.run.caravan : null);
+        let n = 0;
+        for (const a of list) if (a.tags && (a.tags.indexOf('herd') >= 0 || a.id === 'sheep' || a.id === 'lamb')) n++;
+        if (n > 0) { pay(ctx, n * 2); say(ctx, `The fleece pays $${n * 2}`, 'gold'); }
+      },
+    },
+  },
+  {
+    id: 'jawbone', name: 'Jawbone of an Ass',
+    rarity: 'uncommon', price: 6, garden: 'adam',
+    desc: '+30 Chips for every RAIL the ball touched before it went in.',
+    art: { icon: 'bone', bg: 'wood1', fg: 'bone' },
+    tags: ['scoring', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        const b = num(res.ball && res.ball.bounces, 0);
+        if (b <= 0) return;
+        res.chips += b * 30;
+        if (b >= 3) say(ctx, `${b} rails!`, 'wood3');
+      },
+    },
+  },
+  {
+    id: 'coat_of_colours', name: 'Coat of Many Colours',
+    rarity: 'rare', price: 8, garden: 'eve',
+    desc: '+2 Mult for each DIFFERENT condition you have filled this round.',
+    art: { icon: 'gem', bg: 'purple0', fg: 'pink' },
+    tags: ['scoring', 'structure', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        const done = (ctx && ctx.run && ctx.run.scoredHabitatsThisBlind) || EMPTY;
+        const n = new Set(done).size;
+        if (n > 0) res.mult += n * 2;
+      },
+    },
+  },
+  {
+    id: 'widows_mite', name: "The Widow's Mite",
+    rarity: 'common', price: 3, garden: 'eve',
+    desc: 'While you are down to your last $3 or less, every animal gets x2 Mult.',
+    art: { icon: 'coin', bg: 'wood0', fg: 'brass2' },
+    tags: ['scoring', 'economy', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        const money = num(ctx && ctx.run ? ctx.run.money : 99, 99);
+        if (money <= 3) { res.xmult *= 2; say(ctx, 'All she had', 'brass3'); }
+      },
+    },
+  },
+  {
+    id: 'adams_rib', name: "Adam's Rib",
+    rarity: 'rare', price: 7, garden: 'adam',
+    desc: 'The FIRST animal you berth each round is copied: it scores twice.',
+    art: { icon: 'bone', bg: 'sand', fg: 'white' },
+    tags: ['scoring', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        if (!firstOfShot(res, ctx)) return;
+        const st = stateOf(ctx);
+        if (num(st.usedShot, -1) === num(ctx && ctx.shotIndex, 0)) return;
+        // only the first shot of the ROUND, tracked so a preview cannot claim it
+        if (num(st.round, -1) !== num(ctx && ctx.run ? ctx.run.blindIx : 0, 0)) {
+          res.chips *= 2;
+          res.mult *= 2;
+          say(ctx, 'Made from the same rib', 'white');
+        }
+      },
+      onShotEnd(ctx) {
+        const st = stateOf(ctx);
+        if (num(st.round, -1) !== num(ctx && ctx.run ? ctx.run.blindIx : 0, 0)) {
+          st.round = num(ctx && ctx.run ? ctx.run.blindIx : 0, 0);
+        }
+      },
+      onBlindStart(ctx) { stateOf(ctx).round = -1; },
+    },
+  },
+  {
+    id: 'burning_bush', name: 'The Burning Bush',
+    rarity: 'uncommon', price: 6, garden: 'adam',
+    desc: 'Animals berthed somewhere WARM get +60 Chips. The bush is not consumed.',
+    art: { icon: 'flame', bg: 'rust', fg: 'orange' },
+    tags: ['scoring', 'garden'],
+    hooks: {
+      onScoreAnimal(res) {
+        if (res.habitatId === 'warm' || res.habitatId === 'dusty') res.chips += 60;
+      },
+    },
+  },
+  {
+    id: 'olive_branch', name: 'The Olive Branch',
+    rarity: 'uncommon', price: 5, garden: 'eve',
+    desc: 'No animal aboard can be eaten by another. Interactions still pay.',
+    art: { icon: 'leaf', bg: 'moss', fg: 'green1' },
+    tags: ['interaction', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        if (Array.isArray(res.consumed) && res.consumed.length) {
+          res.consumed.length = 0;
+          say(ctx, 'Peace on the deck', 'green1');
+        }
+      },
+    },
+  },
+  {
+    id: 'manna_jar', name: 'A Jar of Manna',
+    rarity: 'common', price: 4, garden: 'eve',
+    desc: '+$1 for every animal berthed. It does not keep, so it pays immediately.',
+    art: { icon: 'hay', bg: 'sand', fg: 'white' },
+    tags: ['economy', 'garden'],
+    hooks: {
+      onScoreAnimal(res) { res.money += 1; },
+    },
+  },
+  {
+    id: 'seal_of_solomon', name: 'The Seal of Solomon',
+    rarity: 'legendary', price: 10, garden: 'adam',
+    desc: 'Every animal understands every berth: nothing is ever a WRONG berth again.',
+    art: { icon: 'key', bg: 'purple0', fg: 'gold' },
+    tags: ['structure', 'garden'],
+    hooks: {
+      onScoreAnimal(res, ctx) {
+        if (res.match === 'wrong') {
+          // undo the punishment the pipeline already applied, then treat it as content
+          res.chips = Math.max(res.chips, num(res.animal && res.animal.chips, 10));
+          res.mult += 2;
+          say(ctx, 'It listens to Solomon', 'gold');
+        }
+      },
+    },
+  },
 ];
 
 /* --------------------------------------------------------------- lookups */
@@ -785,6 +958,11 @@ export const RELIC_BY_ID = Object.freeze(
 /** Shop weighting per rarity, before o.rarityBoost tilts it. */
 export const RELIC_RARITY_WEIGHT = { common: 100, uncommon: 44, rare: 15, legendary: 3 };
 const RARITY_TIER = { common: 0, uncommon: 1, rare: 2, legendary: 3 };
+
+/** The garden's own stock: what Adam and Eve are holding out. */
+export function gardenRelics(who) {
+  return RELICS.filter((r) => (who ? r.garden === who : !!r.garden));
+}
 
 /** Every relic of a rarity — handy for crate contents in cargo.js. */
 export function relicsByRarity(rarity) { return RELICS.filter((r) => r.rarity === rarity); }

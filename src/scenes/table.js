@@ -303,7 +303,7 @@ export function makeTableScene() {
     pottedThisShot.push({ ball: e.ball, animalId: e.ball.animalId, gate });
     const s = gateScreen(gate);
     const hab = HABITAT_BY_ID[gate.habitatId];
-    const exact = animal && (animal.home === gate.habitatId || animal.id === 'chameleon');
+    const exact = animal && (likeness(animal, gate.habitatId) >= 0.999 || animal.id === 'chameleon');
 
     Audio.sfx('pocket_drop');
     Audio.sfx(exact ? 'pot_perfect' : 'pot_good', { delay: 0.06 });
@@ -321,7 +321,40 @@ export function makeTableScene() {
         try { relic.hooks.onPot({ ball: e.ball, animal, gate }, { run, relic, log: () => {} }); } catch (err) { /* isolated */ }
       }
     }
+    flockFollows(animal, gate);
   }
+
+  /**
+   * The Shepherd's Staff, made real.
+   *
+   * The card promises that when a sheep goes in another one follows, and a relic hook
+   * cannot deliver that -- hooks may only touch the numbers on the animal being scored,
+   * never the felt. So the staff sets a counter and the SCENE does the physical part:
+   * find another sheep still on the deck and walk it into the same berth, which lands
+   * it in this same shot's ledger and compounds with everything else in it.
+   */
+  function flockFollows(animal, gate) {
+    if (!animal || (animal.id !== 'sheep' && animal.id !== 'lamb')) return;
+    if (!run.relics.some((r) => r.id === 'shepherds_staff')) return;
+    const next = world.balls.find((b) => !b.sunk
+      && (b.animalId === 'sheep' || b.animalId === 'lamb'));
+    if (!next) return;
+    // walk it in: mark it sunk into the same gate and register the pot, so scoring sees
+    // two sheep in one shot and the flock rules fire on both
+    next.sunk = true;
+    next.sinkT = 0;
+    next.bounces = num0(next.bounces);
+    pottedThisShot.push({ ball: next, animalId: next.animalId, gate });
+    const gs = gateScreen(gate);
+    const ns = toScreen(next.x, next.y);
+    parts.emit('star', ns.x, ns.y, { count: 8, speed: 50, color: 'bone' });
+    parts.emit('feather', gs.x, gs.y, { count: 6, speed: 40, color: 'white' });
+    Juice.pop('AND ANOTHER!', gs.x, gs.y - 26, { color: 'bone', outline: 'ink' });
+    Audio.sfx('pot_good', { delay: 0.12 });
+    say("The flock follows the staff.", 2);
+  }
+
+  function num0(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
 
   function beginScoring() {
     const snapshot = {

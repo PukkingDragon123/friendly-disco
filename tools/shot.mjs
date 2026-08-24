@@ -21,7 +21,7 @@ const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 
 // run.js pulls in every data module, so only load it for the scenes that need it
-const NEEDS_RUN = ['table', 'shop', 'over', 'draft'];
+const NEEDS_RUN = ['table', 'shop', 'over', 'draft', 'eden'];
 void NEEDS_RUN;
 let newRun = () => ({}), startBlind = () => {}, advance = () => {};
 if (NEEDS_RUN.includes(which)) {
@@ -68,6 +68,24 @@ switch (which) {
     if (process.env.PICK) {
       const d = scene.debug();
       for (const i of process.env.PICK.split(',')) d.toggle(Number(i));
+    }
+    mouse(480, 300);
+    break;
+  }
+  case 'eden': {
+    const { makeEdenScene } = await import('../src/scenes/eden.js');
+    const R2 = await import('../src/game/run.js');
+    R2.beginDraft(run); R2.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
+    startBlind(run); run.money = Number(process.env.CASH || 26); advance(run);
+    scene = makeEdenScene();
+    scene.enter({ run, onDone: () => {} }, app);
+    if (process.env.BUSH) {
+      const d = scene.debug();
+      const ap = process.env.APPLE || 'golden';
+      d.basket.push(ap);
+      d.plant(Number(process.env.BUSH));
+      const rv = scene.debug().reveal;
+      if (rv && process.env.PHASE) { rv.phase = process.env.PHASE; rv.k = Number(process.env.PK || 0.6); }
     }
     mouse(480, 300);
     break;

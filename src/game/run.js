@@ -39,6 +39,27 @@ function baseRun(seed) {
 
     // --- loadout
     relics: [],
+    // the Cherubim's card, armed for the next blind only. The bless* fields are
+    // initialised HERE as well as in clearBlessing() so a fresh run and a run that has
+    // just finished a round have the identical shape -- otherwise "did the blessing
+    // leak" is not a question you can answer by comparing two runs.
+    blessing: null,
+    seenBlessings: [],
+    blessXMult: 1,
+    blessChips: 0,
+    blessInteract: 1,
+    blessRailMult: 0,
+    blessFloodGrace: 0,
+    blessAllHome: false,
+    blessFullPower: false,
+    blessDoubleMoney: false,
+    blessGild: false,
+    blessDeath: false,
+    blessNoPools: false,
+    blessTripleFirst: false,
+    blessClosedPay: false,
+    blessSunCoin: false,
+    blessOverflowPay: false,
     feeds: [],
     vouchers: [],
     cueUpgrades: [],
@@ -129,6 +150,41 @@ export function rollAssignment(run, rng, closed = []) {
   const assignment = {};
   GATE_LAYOUT.forEach((slot, i) => { assignment[slot] = shuffled[i % shuffled.length]; });
   return assignment;
+}
+
+/* -------------------------------------------------------------- blessings */
+
+// Every field a blessing may set. Listed once, in one place, because the whole
+// one-round guarantee rests on this list being complete.
+const BLESS_FIELDS = [
+  'blessXMult', 'blessChips', 'blessAllHome', 'blessInteract', 'blessFullPower',
+  'blessDoubleMoney', 'blessGild', 'blessFloodGrace', 'blessDeath', 'blessNoPools',
+  'blessTripleFirst', 'blessRailMult', 'blessClosedPay', 'blessSunCoin',
+  'blessOverflowPay',
+];
+
+/** Wipe last round's blessing effects. Called at the top of every blind. */
+export function clearBlessing(run) {
+  run.blessXMult = 1;
+  run.blessChips = 0;
+  run.blessInteract = 1;
+  run.blessRailMult = 0;
+  run.blessFloodGrace = 0;
+  for (const k of BLESS_FIELDS) {
+    if (typeof run[k] === 'boolean' || run[k] === undefined) run[k] = false;
+  }
+  run.blessXMult = 1;
+  run.blessChips = 0;
+  run.blessInteract = 1;
+  run.blessRailMult = 0;
+  run.blessFloodGrace = 0;
+}
+
+/** Take a blessing from the Cherubim. It arms for the NEXT blind and then expires. */
+export function takeBlessing(run, blessing) {
+  run.blessing = blessing || null;
+  if (blessing) run.seenBlessings = (run.seenBlessings || []).concat([blessing.id]);
+  return run.blessing;
 }
 
 /* ------------------------------------------------------------------ draft */
@@ -249,6 +305,22 @@ export function startBlind(run) {
   run.vitrine = {};
   run.feedChips = {};
   run.feedMult = {};
+
+  // --- the Cherubim's blessing: one round, then gone
+  //
+  // Every bless* field is cleared here and re-applied from the card, so a blessing can
+  // never leak into a second round and nothing in the card's apply() has to undo
+  // itself. That is what lets the blessings be as large as they are.
+  clearBlessing(run);
+  if (run.blessing && typeof run.blessing.apply === 'function') {
+    try {
+      run.blessing.apply(run);
+      run.log.push({ text: `${run.blessing.name} is upon you.`, color: run.blessing.color || 'ice' });
+    } catch (e) {
+      run.log.push({ text: 'The blessing does not take.', color: 'red2' });
+      void e;
+    }
+  }
   run.assignment = rollAssignment(run, rng, effect.closeHabitats || []);
 
   // caravan -> stash, then draw the opening hand
@@ -339,10 +411,19 @@ export function applyShot(run, resolved, potted) {
   }
 
   run.shotsLeft--;
-  // the Ziz spreads its wings and the water waits a shot
+  // Three things can stop the water for one shot: the Ziz's wings, the Hanged Man's
+  // blessing, and nothing else. Checked in that order because the Ziz is a permanent
+  // animal skill and the blessing is a consumable -- spending the consumable while a
+  // free hold was already available would be a bad trade made on the player's behalf.
   const held = Math.max(0, resolved.floodHeld || 0);
-  if (held > 0) run.log.push({ text: 'The Ziz holds the water', color: 'foam' });
-  else run.flood = Math.min(1, run.flood + (run.floodPerShot || 0.25));
+  if (held > 0) {
+    run.log.push({ text: 'The Ziz holds the water', color: 'foam' });
+  } else if (run.blessFloodGrace > 0) {
+    run.blessFloodGrace -= 1;
+    run.log.push({ text: 'The Hanged Man: the water waits.', color: 'water3' });
+  } else {
+    run.flood = Math.min(1, run.flood + (run.floodPerShot || 0.25));
+  }
 
   // The Tithe: a shot that scores too little costs you another one.
   // A value <= 1 is read as a FRACTION of the blind target per shot, so the boss keeps
@@ -372,7 +453,18 @@ export function endBlind(run) {
   const info = BLIND_KINDS.find((b) => b.key === currentKind(run)) || BLIND_KINDS[0];
   const shotBonus = Math.max(0, run.shotsLeft);
   const interest = Math.min(5, Math.floor(run.money / 5)) * Math.max(0, run.interest);
-  const reward = info.reward + shotBonus + interest;
+  let reward = info.reward + shotBonus + interest;
+
+  // Judgement pays out everything you scored past the target; the Hermit doubles the
+  // lot. Both are one-round blessings, so they only ever fire on the round they were
+  // bought for.
+  let overflow = 0;
+  if (run.blessOverflowPay) {
+    overflow = Math.max(0, Math.floor((run.score - run.target) / 250));
+    reward += overflow;
+  }
+  if (run.blessDoubleMoney) reward *= 2;
+
   run.money += reward;
   run.stats.blindsCleared++;
   run.stats.moneyEarned += reward;
@@ -383,7 +475,14 @@ export function endBlind(run) {
     }
   }
 
-  return { base: info.reward, shotBonus, interest, total: reward };
+  // the card is spent: it burns whether you cleared or not
+  if (run.blessing) {
+    run.log.push({ text: `${run.blessing.name} fades.`, color: 'grey2' });
+    run.blessing = null;
+  }
+  clearBlessing(run);
+
+  return { base: info.reward, shotBonus, interest, overflow, total: reward };
 }
 
 export function advance(run) {

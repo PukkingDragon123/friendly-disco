@@ -6,6 +6,7 @@
 import { newRun, advance, currentKind, peekBoss } from './run.js';
 import { makeMenuScene } from '../scenes/menu.js';
 import { makeTableScene } from '../scenes/table.js';
+import { makeEdenScene } from '../scenes/eden.js';
 import { makeShopScene } from '../scenes/shop.js';
 import { makeGameOverScene } from '../scenes/gameover.js';
 import { makeCutscene } from '../scenes/cutscene.js';
@@ -82,13 +83,25 @@ export function createRouter(app, o = {}) {
     },
 
     afterBlind() {
+      // Which stop you get depends on what you just beat. Small and big blinds tie up
+      // at Eden; clearing a BOSS earns the ante's supply run as well, so the freighter
+      // comes out to you with a crate before you go ashore. Two shops with different
+      // jobs: Eden sells choices, the freighter sells equipment.
+      const beat = currentKind(run);
       advance(run);
       if (run.won) { R.play(getScript('epilogue_win'), () => R.summary(true)); return; }
-      R.dock();
+      if (beat === 'boss') { R.freighter(); return; }
+      R.eden();
     },
 
-    dock() {
-      go(makeShopScene(), { run, onDone: () => R.intoBlind() }, 'curtain');
+    /** The supply run: a boat brings a crate out to the ark. Earned by beating a boss. */
+    freighter() {
+      go(makeShopScene(), { run, onDone: () => R.eden() }, 'curtain');
+    },
+
+    /** The Garden of Eden: the last dry ground, and every stall on it wants paying. */
+    eden() {
+      go(makeEdenScene(), { run, onDone: () => R.intoBlind() }, 'curtain');
     },
 
     summary(won) {

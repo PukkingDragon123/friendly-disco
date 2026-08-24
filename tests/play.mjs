@@ -131,6 +131,95 @@ function playDraft(app) {
   return 'boarded';
 }
 
+/**
+ * The garden. This is the one scene with a modal in it, so the bot's real job here is
+ * to prove the whole chain works from a click: buy an apple, plant it, sit through the
+ * shake, click the eye, and take one of the three.
+ */
+function playEden(app) {
+  const d0 = app.scene.debug();
+  snap('eden');
+  const money0 = d0.run.money;
+
+  // buy the cheapest apple we can afford
+  let bought = -1;
+  for (let i = 0; i < d0.apples.length; i++) {
+    if (d0.run.money >= d0.apples[i].price) {
+      const [ax, ay] = centre(d0.rects.apples[i]);
+      pressAt(ax, ay); tick(app, 2); releaseNow(); tick(app, 3);
+      if (app.scene.debug().basket.length) { bought = i; break; }
+    }
+  }
+  if (bought >= 0) {
+    if (app.scene.debug().run.money >= money0) errors.push('eden: apple was free');
+    // plant it in the first bush
+    const [bx, by] = centre(app.scene.debug().rects.bushes[0]);
+    pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 4);
+    let rv = app.scene.debug().reveal;
+    if (!rv) errors.push('eden: planting did not open a bush');
+    else {
+      // sit through the shake, then click the eye
+      tick(app, 80);
+      snap('eden-eye');
+      rv = app.scene.debug().reveal;
+      if (!rv || rv.phase !== 'eye') errors.push(`eden: expected the eye, got ${rv ? rv.phase : 'nothing'}`);
+      // the eye ignores a click until it has finished opening, on purpose -- so does
+      // the bot have to wait for it
+      tick(app, 40);
+      pressAt(480, 250); tick(app, 2); releaseNow(); tick(app, 50);
+      rv = app.scene.debug().reveal;
+      if (!rv || rv.phase !== 'choose') errors.push(`eden: expected a choice, got ${rv ? rv.phase : 'nothing'}`);
+      else {
+        snap('eden-choose');
+        const cr = app.scene.debug().rects.choices;
+        // Take the first one we can pay the lure on. Success is the reveal reaching
+        // 'done', NOT the caravan growing -- a poison apple boards one animal and
+        // drowns another, so the count is unchanged and that is correct.
+        let took = false;
+        for (let i = 0; i < cr.length; i++) {
+          if (!cr[i]) continue;
+          const [cx2, cy2] = centre(cr[i]);
+          pressAt(cx2, cy2); tick(app, 2); releaseNow(); tick(app, 6);
+          const now = app.scene.debug().reveal;
+          if (!now || now.phase === 'done') { took = true; break; }
+        }
+        // Not affording any lure is legitimate -- the apple stays in the bush. What
+        // must NOT happen is being trapped in the modal with no way out.
+        if (!took) {
+          const lr = app.scene.debug().rects.leave;
+          if (!lr || !lr.w) { errors.push('eden: no lure affordable and no way out of the modal'); }
+          else {
+            const [lx, ly] = centre(lr);
+            pressAt(lx, ly); tick(app, 2); releaseNow(); tick(app, 6);
+            if (app.scene.debug().reveal) errors.push('eden: LEAVE IT did not close the reveal');
+            const bs = app.scene.debug().bushes;
+            if (!bs.some(Boolean)) errors.push('eden: leaving lost the apple');
+          }
+        }
+      }
+      tick(app, 40);
+    }
+  }
+
+  // buy a blessing and a tool if we can, then cast off
+  const d1 = app.scene.debug();
+  for (let i = 0; i < d1.rects.cards.length; i++) {
+    if (d1.cards[i] && d1.run.money >= d1.cards[i].price && !d1.run.blessing) {
+      const [x2, y2] = centre(d1.rects.cards[i]);
+      pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
+    }
+  }
+  const d2 = app.scene.debug();
+  for (let i = 0; i < d2.rects.tools.length; i++) {
+    if (d2.tools[i] && d2.run.money >= d2.tools[i].price) {
+      const [x2, y2] = centre(d2.rects.tools[i]);
+      pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
+    }
+  }
+  const [sx2, sy2] = centre(app.scene.debug().rects.sail);
+  pressAt(sx2, sy2); tick(app, 2); releaseNow(); tick(app, 8);
+}
+
 function playDeck(app, log) {
   let guard = 0;
   while (guard++ < 400) {
@@ -269,7 +358,8 @@ for (let s = 0; s < SEEDS; s++) {
     const d = app.scene.debug ? app.scene.debug() : {};
     if (d.scriptId !== undefined) { playCutscene(app, d.scriptId); continue; }  // dialogue
     if (d.stock !== undefined) { playDraft(app); continue; }             // the ramp
-    if (d.rects && d.rects.crates) { playDock(app); continue; }         // dock
+    if (d.rects && d.rects.sail) { playEden(app); continue; }            // the garden
+    if (d.rects && d.rects.crates) { playDock(app); continue; }          // the freighter
     if (d.rects && d.rects.again) {                                      // summary
       outcome = d.won ? 'WON THE RUN' : `died on ante ${d.run.ante}`;
       snap('summary');

@@ -177,10 +177,16 @@ function runInteractions(res, s, entry) {
 
 function applyGain(res, rule, stacks, entry, matches, s) {
   const g = rule.gain || {};
-  const chips = num(g.chips) * stacks;
-  const mult = num(g.mult) * stacks;
-  const xm = Math.pow(num(g.xmult, 1), stacks);
-  const money = num(g.money) * stacks;
+  // The Lovers (a Cherubim blessing) doubles what animals get out of each other for
+  // one round. It scales the POSITIVE gains only -- doubling a debuff would turn a
+  // blessing into a trap, which is not what a card called The Lovers should do.
+  const lv = num(s && s.run ? s.run.blessInteract : 1, 1);
+  const boost = (v) => (v > 0 ? v * lv : v);
+  const chips = boost(num(g.chips)) * stacks;
+  const mult = boost(num(g.mult)) * stacks;
+  const xmRaw = num(g.xmult, 1);
+  const xm = Math.pow(xmRaw > 1 ? 1 + (xmRaw - 1) * lv : xmRaw, stacks);
+  const money = boost(num(g.money)) * stacks;
   if (!chips && !mult && xm === 1 && !money) return;
 
   res.chips += chips;
@@ -368,8 +374,14 @@ export function resolveShot(s) {
 
     // --- 1: how well the berth suits the animal. The chameleon likes everywhere.
     const isChameleon = animal.id === 'chameleon';
-    const aff = isChameleon ? 1 : (habitatId ? likeness(animal, habitatId) : 0);
-    const rank = isChameleon ? 0 : likeRank(animal, habitatId);
+    // A Cherubim blessing (The Hierophant, The World) can make every berth read as a
+    // favourite for one round. It is applied HERE rather than as a bonus later so the
+    // whole downstream pipeline -- match step, relic hooks, the readout's colour -- all
+    // agree about what happened.
+    const blessHome = !!run.blessAllHome;
+    const rawAff = isChameleon ? 1 : (habitatId ? likeness(animal, habitatId) : 0);
+    const aff = blessHome && habitatId ? 1 : rawAff;
+    const rank = isChameleon || (blessHome && habitatId) ? 0 : likeRank(animal, habitatId);
     const match = aff >= 0.999 ? MATCH.EXACT : aff > 0 ? MATCH.PARTIAL : MATCH.WRONG;
     if (match !== MATCH.EXACT) allExact = false;
 
@@ -403,6 +415,20 @@ export function resolveShot(s) {
         kind: 'buff', label: 'Well fed', color: 'green1',
         chips: fedC, mult: fedM, xmult: 1,
       });
+    }
+
+    // --- 2c: whatever the Cherubim sold you, for this round only
+    if (run.blessChips || run.blessRailMult) {
+      const bc = num(run.blessChips, 0);
+      const br = num(run.blessRailMult, 0) * num(pot.ball && pot.ball.bounces, 0);
+      if (bc || br) {
+        res.chips += bc;
+        res.mult += br;
+        entry.steps.push({
+          kind: 'buff', label: 'Blessing', color: 'ice',
+          chips: bc, mult: br, xmult: 1,
+        });
+      }
     }
 
     // --- 3: match modifier (+ habitat upgrade level)
@@ -516,6 +542,23 @@ export function resolveShot(s) {
       entry.steps.push({ kind: 'boss', label: 'ALREADY INSPECTED', color: 'red2', chips: lost, mult: 0, xmult: 1 });
     }
     if (habitatId) scoredHabitats.add(habitatId);
+
+    // --- 8b: the blessings that touch the whole animal, applied last so they multiply
+    // everything the round has built rather than being buried inside it
+    if (num(run.blessXMult, 1) !== 1) {
+      res.xmult *= num(run.blessXMult, 1);
+      entry.steps.push({
+        kind: 'buff', label: 'THE MAGICIAN', color: 'purple1',
+        chips: 0, mult: 0, xmult: num(run.blessXMult, 1),
+      });
+    }
+    if (run.blessSunCoin) res.money += 1;
+    if (run.blessTripleFirst && num(s.shotIndex, -1) === 0) {
+      res.xmult *= 3;
+      entry.steps.push({
+        kind: 'buff', label: 'THE TOWER', color: 'orange', chips: 0, mult: 0, xmult: 3,
+      });
+    }
 
     // --- 9: commit
     const finalChips = Math.max(0, Math.round(res.chips));

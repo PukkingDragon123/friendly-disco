@@ -9,6 +9,7 @@ import { P, col, mix } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, dashLine, disc, ring, ellipse, tri,
   dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp,
+  W, H,
 } from '../core/pixel.js';
 import { Input } from '../core/input.js';
 import { Juice, Ease, approach } from '../core/juice.js';
@@ -30,11 +31,11 @@ import {
   currentKind, caravanBreakdown,
 } from '../game/run.js';
 
-const HORIZON = 96;
+const HORIZON = 144;
 // Where the sea meets the dock. Everything below this is decking you are standing on —
 // the earlier layout put more water UNDER the pier, which made it read as a bridge.
-const PIER_Y = 232;
-const LAND_X = 154;              // where the crate is set down
+const PIER_Y = 348;
+const LAND_X = 231;              // where the crate is set down
 
 
 export function makeShopScene() {
@@ -70,6 +71,7 @@ export function makeShopScene() {
   let habitatRect = UI.rectOf(0, 0, 0, 0);
   let rerollRect = UI.rectOf(0, 0, 0, 0);
   let castRect = UI.rectOf(0, 0, 0, 0);
+  let pendingTip = null;      // a hover tooltip, held back until every card is painted
   const relicRects = [];
 
   /* ------------------------------------------------------------- helpers */
@@ -286,7 +288,7 @@ export function makeShopScene() {
       const want = Math.min(gotItems.length, Math.floor(seqT / per));
       while (revealIx < want) {
         const it = gotItems[revealIx];
-        const tx = it.kind === 'relic' ? 60 + run.relics.length * 14 : 320;
+        const tx = it.kind === 'relic' ? 90 + run.relics.length * 21 : W / 2;
         parts.emit(it.kind === 'money' ? 'coin' : 'chip', cratePos.x, cratePos.y, {
           count: 6, target: { x: tx, y: it.kind === 'relic' ? 8 : 40 },
           color: it.kind === 'money' ? 'brass3' : 'sky',
@@ -304,7 +306,7 @@ export function makeShopScene() {
   /* ---------------------------------------------------------------- draw */
 
   function draw(g) {
-    sea.draw(g, { x: 0, y: 0, w: 640, h: 360, horizonY: HORIZON, timeOfDay: 0.5, storm: 0.08, parallax: 0.7, reflect: true });
+    sea.draw(g, { x: 0, y: 0, w: W, h: H, horizonY: HORIZON, timeOfDay: 0.5, storm: 0.08, parallax: 0.7, reflect: true });
     drawPier(g);
     parts.draw(g, 'back');
 
@@ -316,27 +318,27 @@ export function makeShopScene() {
 
     if (msgT > 0) {
       const w = textW(msg) + 14;
-      rect(g, 320 - w / 2, 340, w, 12, 'ink');
-      frame(g, 320 - w / 2, 340, w, 12, 'brass1');
-      text(g, msg, 320, 343, 'bone', { center: true });
+      rect(g, W / 2 - w / 2 - 6, H - 26, w + 12, 18, 'ink');
+      frame(g, W / 2 - w / 2 - 6, H - 26, w + 12, 18, 'brass1');
+      text(g, msg, W / 2, H - 21, 'bone', { center: true, font: 5 });
     }
   }
 
   function drawPier(g) {
     // Decking in the foreground: plank seams spread apart toward the viewer, which is
     // the cheapest honest perspective cue there is.
-    const bottom = 360;
+    const bottom = H;
     for (let y = PIER_Y; y < bottom; y++) {
       const k = (y - PIER_Y) / (bottom - PIER_Y);
       const c = k < 0.04 ? 'wood4' : k < 0.12 ? 'wood3' : k < 0.55 ? 'wood2' : 'wood1';
-      rect(g, 0, y, 640, 1, c);
+      rect(g, 0, y, W, 1, c);
     }
     // board seams: spacing grows with depth
     let seam = PIER_Y + 6;
     let gap = 5;
     while (seam < bottom) {
-      rect(g, 0, Math.round(seam), 640, 1, 'wood1');
-      rect(g, 0, Math.round(seam) + 1, 640, 1, 'wood3');
+      rect(g, 0, Math.round(seam), W, 1, 'wood1');
+      rect(g, 0, Math.round(seam) + 1, W, 1, 'wood3');
       gap *= 1.32;
       seam += gap;
     }
@@ -347,12 +349,12 @@ export function makeShopScene() {
       line(g, x, PIER_Y, x - 26, bottom, 'wood1');
     }
     // the water's edge: a lip, a foam line, and shadow under the boards
-    rect(g, 0, PIER_Y, 640, 1, 'wood4');
-    rect(g, 0, PIER_Y - 1, 640, 1, 'foam');
-    for (let i = 0; i < 4; i++) dither(g, 0, PIER_Y - 2 - i, 640, 1, 'rgba(0,0,0,0)', 'foam', 6 - i * 2);
+    rect(g, 0, PIER_Y, W, 1, 'wood4');
+    rect(g, 0, PIER_Y - 1, W, 1, 'foam');
+    for (let i = 0; i < 4; i++) dither(g, 0, PIER_Y - 2 - i, W, 1, 'rgba(0,0,0,0)', 'foam', 6 - i * 2);
 
     // bollards along the edge, with a rope swagged between them
-    for (let x = 60; x < 640; x += 150) {
+    for (let x = 90; x < W; x += 225) {
       rect(g, x, PIER_Y - 9, 7, 10, 'grey0');
       rect(g, x, PIER_Y - 10, 7, 2, 'grey1');
       rect(g, x + 1, PIER_Y - 9, 1, 9, 'grey2');
@@ -428,49 +430,54 @@ export function makeShopScene() {
     const nb = nextBlindLabel();
 
     // header
-    UI.panel(g, 4, 18, 632, 22, { style: 'wood', shadow: true, rivets: true });
-    text(g, 'THE DOCK', 12, 22, 'brass3', { shadow: 'ink', font: 7 });
-    UI.divider(g, 74, 23, 2, { pip: false });
-    text(g, `NEXT — ANTE ${run.ante} ${nb.name.toUpperCase()}`, 92, 22, nb.color, { font: 3 });
-    text(g, `target ${nb.target}`, 92, 30, 'grey2', { font: 3 });
-    UI.moneyPill(g, 240, 23, run.money, {});
+    UI.panel(g, 6, 26, W - 12, 34, { style: 'wood', shadow: true, rivets: true });
+    text(g, 'THE SUPPLY RUN', 16, 32, 'brass3', { shadow: 'ink', font: 7 });
+    rect(g, 168, 32, 1, 22, 'wood0');
+    text(g, `NEXT — ANTE ${run.ante} ${nb.name.toUpperCase()}`, 180, 31, nb.color, { font: 5 });
+    text(g, `target ${nb.target}`, 180, 45, 'grey2', { font: 3 });
+    UI.moneyPill(g, 380, 34, run.money, {});
     const cb = caravanBreakdown(run);
-    text(g, `${cb.total} animals aboard`, 320, 22, 'bone', { font: 3 });
-    text(g, `${run.relics.length}/${run.relicSlots} relics · ${run.feeds.length}/2 feed`, 320, 30, 'grey2', { font: 3 });
-    text(g, run.seed, 630, 26, 'wood3', { font: 3, right: true });
+    text(g, `${cb.total} animals aboard`, 470, 31, 'bone', { font: 5 });
+    text(g, `${run.relics.length}/${run.relicSlots} relics · ${run.feeds.length}/2 feed`, 470, 45, 'grey2', { font: 3 });
+    text(g, run.seed, W - 12, 38, 'wood3', { font: 3, right: true });
 
     // ---- manifest board
-    UI.panel(g, 132, 46, 376, 12, { style: 'brass', corners: false });
-    text(g, 'CARGO MANIFEST — CHOOSE ONE', 320, 48, 'wood0', { font: 3, center: true });
+    UI.panel(g, 210, 66, W - 420, 18, { style: 'brass', corners: false });
+    text(g, 'CARGO MANIFEST — CHOOSE ONE', W / 2, 69, 'wood0', { font: 5, center: true });
 
     crateRects.length = 0;
-    const cw = 120, gap = 8;
-    const startX = 320 - ((manifest.length * cw + (manifest.length - 1) * gap) / 2);
+    const cw = 180, gap = 14;
+    const startX = W / 2 - ((manifest.length * cw + (manifest.length - 1) * gap) / 2);
     manifest.forEach((c, i) => {
       const x = Math.round(startX + i * (cw + gap));
-      const y = 62;
-      const r = UI.rectOf(x, y, cw, 168);
+      const y = 92;
+      const r = UI.rectOf(x, y, cw, 240);
       crateRects.push(r);
       const hov = UI.hover(r, m);
       const price = cratePrice(c, run);
       const afford = canAfford(run, price);
-      drawCrateCard(g, x, y, cw, 168, c, price, hov, afford);
+      drawCrateCard(g, x, y, cw, 240, c, price, hov, afford);
+      // The tooltip is DEFERRED: drawn inside the loop it landed under the next card
+      // along, which is how you get a card with two illegible letters showing on it.
       if (hov) {
-        UI.tooltip(g, x + cw + 4, y + 40, {
-          title: c.name, w: 130, color: UI.RARITY_COLOR[c.rarity] || 'grey2',
-          lines: (crateSummary(c) || []).concat([`arrives by ${(BOAT_CLASS[c.boat] || {}).name || c.boat}`]),
-        });
+        pendingTip = {
+          x: x + cw + 6, y: y + 60,
+          o: {
+            title: c.name, w: 190, color: UI.RARITY_COLOR[c.rarity] || 'grey2',
+            lines: (crateSummary(c) || []).concat([`arrives by ${(BOAT_CLASS[c.boat] || {}).name || c.boat}`]),
+          },
+        };
       }
     });
     if (!manifest.length) {
-      text(g, 'the board is bare — reroll or cast off', 320, 140, 'grey1', { font: 3, center: true });
+      text(g, 'the board is bare — reroll or cast off', W / 2, 200, 'grey1', { font: 5, center: true });
     }
 
     // ---- left stalls: chandler + feed
-    UI.panel(g, 4, 46, 122, 184, { style: 'wood', shadow: true, title: 'CHANDLER' });
+    UI.panel(g, 6, 66, 196, 266, { style: 'wood', shadow: true, title: 'CHANDLER' });
     cueRects.length = 0;
     cueOffers.forEach((c, i) => {
-      const r = UI.rectOf(10, 62 + i * 52, 110, 46);
+      const r = UI.rectOf(14, 90 + i * 74, 180, 66);
       cueRects.push(r);
       const hov = UI.hover(r, m);
       UI.card(g, r.x, r.y, r.w, r.h, {
@@ -484,19 +491,19 @@ export function makeShopScene() {
         });
       }
     });
-    UI.divider(g, 8, 160, 114, {});
-    text(g, 'FEED STORE', 12, 164, 'brass2', { font: 3 });
+    UI.divider(g, 12, 240, 184, {});
+    text(g, 'FEED STORE', 16, 244, 'brass2', { font: 3 });
     feedRects.length = 0;
     feedOffers.forEach((f, i) => {
-      const r = UI.rectOf(10, 174 + i * 27, 110, 24);
+      const r = UI.rectOf(14, 256 + i * 36, 180, 32);
       feedRects.push(r);
       const hov = UI.hover(r, m);
       rect(g, r.x, r.y, r.w, r.h, hov ? 'deep' : 'shadow');
       boxFrame(g, r.x, r.y, r.w, r.h, hov ? 'green1' : 'ink', 1);
-      UI.icon(g, f.icon || 'hay', r.x + 3, r.y + 3, { color: 'green1' });
-      text(g, f.name, r.x + 15, r.y + 3, 'bone', { font: 3 });
-      text(g, '$' + f.price, r.x + r.w - 4, r.y + 3, canAfford(run, f.price) ? 'brass3' : 'red2', { font: 3, right: true });
-      text(g, String(f.desc).slice(0, 26), r.x + 15, r.y + 12, 'grey2', { font: 3 });
+      UI.icon(g, f.icon || 'hay', r.x + 5, r.y + 5, { color: 'green1' });
+      text(g, f.name, r.x + 19, r.y + 4, 'bone', { font: 5 });
+      text(g, '$' + f.price, r.x + r.w - 5, r.y + 4, canAfford(run, f.price) ? 'brass3' : 'red2', { font: 5, right: true });
+      text(g, String(f.desc).slice(0, 34), r.x + 19, r.y + 19, 'grey2', { font: 3 });
       if (hov) {
         UI.tooltip(g, r.x + r.w + 4, r.y - 8, {
           title: f.name, w: 140, color: 'green1',
@@ -506,9 +513,10 @@ export function makeShopScene() {
     });
 
     // ---- right stalls: harbourmaster + habitat works + census
-    UI.panel(g, 514, 46, 122, 184, { style: 'wood', shadow: true, title: 'HARBOUR' });
+    const RX2 = W - 202;
+    UI.panel(g, RX2, 66, 196, 266, { style: 'wood', shadow: true, title: 'HARBOUR' });
     if (voucherOffer) {
-      voucherRect = UI.rectOf(520, 62, 110, 52);
+      voucherRect = UI.rectOf(RX2 + 8, 90, 180, 76);
       const hov = UI.hover(voucherRect, m);
       UI.card(g, voucherRect.x, voucherRect.y, voucherRect.w, voucherRect.h, {
         title: voucherOffer.name, lines: [voucherOffer.desc], icon: voucherOffer.icon || 'scroll',
@@ -516,52 +524,55 @@ export function makeShopScene() {
       });
     } else {
       voucherRect = UI.rectOf(0, 0, 0, 0);
-      text(g, 'no papers today', 575, 76, 'grey1', { font: 3, center: true });
+      text(g, 'no papers today', RX2 + 98, 116, 'grey1', { font: 5, center: true });
     }
 
-    UI.divider(g, 518, 118, 114, {});
-    text(g, 'HABITAT WORKS', 522, 122, 'brass2', { font: 3 });
+    UI.divider(g, RX2 + 6, 174, 184, {});
+    text(g, 'HABITAT WORKS', RX2 + 10, 178, 'brass2', { font: 3 });
     if (habitatOffer) {
-      habitatRect = UI.rectOf(520, 130, 110, 40);
+      habitatRect = UI.rectOf(RX2 + 8, 190, 180, 58);
       const hov = UI.hover(habitatRect, m);
       const hab = HABITAT_BY_ID[habitatOffer.habitat];
       rect(g, habitatRect.x, habitatRect.y, habitatRect.w, habitatRect.h, hov ? 'deep' : 'shadow');
       boxFrame(g, habitatRect.x, habitatRect.y, habitatRect.w, habitatRect.h, hov ? (hab ? hab.color : 'gold') : 'ink', 1);
-      if (hab) UI.icon(g, hab.icon, habitatRect.x + 4, habitatRect.y + 4, { color: hab.color });
-      text(g, habitatOffer.name, habitatRect.x + 16, habitatRect.y + 4, 'bone', { font: 3 });
-      wrap(habitatOffer.desc, 100, { font: 3 }).slice(0, 2).forEach((l, i) => text(g, l, habitatRect.x + 4, habitatRect.y + 15 + i * 6, 'grey2', { font: 3 }));
-      text(g, '$' + habitatOffer.price, habitatRect.x + habitatRect.w - 4, habitatRect.y + 4, canAfford(run, habitatOffer.price) ? 'brass3' : 'red2', { font: 3, right: true });
+      if (hab) UI.icon(g, hab.icon, habitatRect.x + 6, habitatRect.y + 5, { color: hab.color });
+      text(g, habitatOffer.name, habitatRect.x + 20, habitatRect.y + 5, 'bone', { font: 5 });
+      wrap(habitatOffer.desc, 170, { font: 3 }).slice(0, 3).forEach((l, i) => text(g, l, habitatRect.x + 6, habitatRect.y + 21 + i * 9, 'grey2', { font: 3 }));
+      text(g, '$' + habitatOffer.price, habitatRect.x + habitatRect.w - 5, habitatRect.y + 5, canAfford(run, habitatOffer.price) ? 'brass3' : 'red2', { font: 5, right: true });
     } else habitatRect = UI.rectOf(0, 0, 0, 0);
 
     // habitat levels strip
-    let hy = 176;
-    text(g, 'GATE LEVELS', 522, hy, 'brass2', { font: 3 });
-    hy += 8;
+    let hy = 258;
+    text(g, 'BERTH LEVELS', RX2 + 10, hy, 'brass2', { font: 3 });
+    hy += 10;
     HABITATS.forEach((h, i) => {
-      const lx = 520 + (i % 3) * 38, ly = hy + Math.floor(i / 3) * 12;
+      const lx = RX2 + 10 + (i % 3) * 60, ly = hy + Math.floor(i / 3) * 18;
       const lvl = habitatLevel(run, h.id);
       UI.icon(g, h.icon, lx, ly, { color: lvl > 0 ? h.color : 'grey0' });
-      text(g, lvl > 0 ? '+' + lvl : '·', lx + 11, ly + 2, lvl > 0 ? 'brass3' : 'grey0', { font: 3 });
+      text(g, lvl > 0 ? '+' + lvl : '·', lx + 12, ly + 1, lvl > 0 ? 'brass3' : 'grey0', { font: 5 });
     });
 
     // ---- bottom bar
-    UI.panel(g, 4, 300, 632, 34, { style: 'wood', shadow: true });
-    rerollRect = UI.rectOf(12, 306, 100, 22);
+    // every card is down now, so the held-back tooltip can go on top of all of them
+    if (pendingTip) { UI.tooltip(g, pendingTip.x, pendingTip.y, pendingTip.o); pendingTip = null; }
+
+    UI.panel(g, 6, H - 60, W - 12, 50, { style: 'wood', shadow: true });
+    rerollRect = UI.rectOf(16, H - 52, 150, 34);
     UI.button(g, rerollRect, 'REROLL', {
       state: canAfford(run, rerollCost) ? (UI.hover(rerollRect, m) ? 'hover' : 'idle') : 'disabled',
-      color: 'wood2', icon: 'dice', sub: '$' + rerollCost, small: true,
+      color: 'wood2', icon: 'dice', sub: '$' + rerollCost,
     });
-    castRect = UI.rectOf(520, 306, 108, 22);
+    castRect = UI.rectOf(W - 182, H - 52, 166, 34);
     UI.button(g, castRect, 'CAST OFF', {
       state: UI.hover(castRect, m) ? 'hover' : 'idle', color: 'green0', icon: 'anchor',
     });
     text(g, 'click a crate to buy it · right-click a relic to sell it · ENTER to cast off',
-      320, 314, 'wood3', { font: 3, center: true });
+      W / 2, H - 40, 'wood3', { font: 5, center: true });
 
     // A single row of the caravan, clear of the pier decking — it is what the crates
     // are for, so it belongs on screen while you are choosing one.
     const uniq = Array.from(new Set(run.caravan)).slice(0, 38);
-    text(g, 'ABOARD', 136, 234, 'brass2', { font: 3 });
+    text(g, 'ABOARD', 212, 352, 'brass2', { font: 5 });
     uniq.slice(0, 36).forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
@@ -575,36 +586,40 @@ export function makeShopScene() {
     UI.panel(g, x, y, w, h, { style: 'slate', shadow: true, corners: false });
     rect(g, x + 2, y + 2, w - 4, 2, rc);
 
-    // the crate itself, stencilled
-    const cx = x + w / 2, cy = y + 46;
-    const cs = 30;
+    // the crate itself, stencilled, at the card's new scale
+    const cx = x + w / 2, cy = y + 66;
+    const cs = 46;
     drawCrateArt(g, cx - cs, cy - cs / 2, cs * 2, cs, c, hov ? Math.round(Math.sin(t * 6) * 1) : 0);
 
-    text(g, c.name, cx, y + 74, 'white', { center: true, shadow: 'ink', font: 7 });
-    UI.starRow(g, cx - (UI.RARITY_STARS[c.rarity] || 1) * 4, y + 86, UI.RARITY_STARS[c.rarity] || 1, { color: rc });
+    text(g, c.name, cx, y + 106, 'white', { center: true, shadow: 'ink', font: 7 });
+    UI.starRow(g, cx - (UI.RARITY_STARS[c.rarity] || 1) * 7, y + 124, UI.RARITY_STARS[c.rarity] || 1,
+      { color: rc, scale: 2 });
 
     const lines = crateSummary(c) || [];
-    let ly = y + 100;
+    let ly = y + 144;
     for (const l of lines) {
-      for (const seg of wrap(String(l), w - 12, { font: 3 })) {
-        if (ly > y + h - 30) break;
-        text(g, '· ' + seg, x + 6, ly, 'grey2', { font: 3 });
-        ly += 7;
+      for (const seg of wrap(String(l), w - 16, { font: 5 })) {
+        if (ly > y + h - 54) break;
+        text(g, '· ' + seg, x + 8, ly, 'bone', { font: 5 });
+        ly += 13;
       }
     }
     if (c.blurb) {
-      wrap(c.blurb, w - 12, { font: 3 }).slice(0, 2).forEach((l, i) => text(g, l, x + 6, y + h - 28 + i * 6, 'grey1', { font: 3 }));
+      wrap(c.blurb, w - 16, { font: 3 }).slice(0, 3).forEach((l, i) => {
+        text(g, l, x + 8, y + h - 48 + i * 9, 'grey1', { font: 3 });
+      });
     }
 
-    UI.moneyPill(g, x + 5, y + h - 15, price, {});
+    UI.moneyPill(g, x + 7, y + h - 20, price, {});
     const bc = (BOAT_CLASS[c.boat] || {});
-    UI.icon(g, c.boat === 'zeppelin' ? 'cloud' : 'boat', x + w - 14, y + h - 14, { color: afford ? 'sky' : 'grey0' });
+    UI.icon(g, c.boat === 'zeppelin' ? 'cloud' : 'boat', x + w - 22, y + h - 20,
+      { color: afford ? 'sky' : 'grey0', scale: 2 });
     void bc;
     boxFrame(g, x, y, w, h, hov ? rc : 'ink', 2);
     if (!afford) {
       // a diagonal "beyond your means" hatch, not a grey-out — you can still read it
       for (let i = 0; i < h; i += 4) dither(g, x + 2, y + i, w - 4, 1, 'rgba(0,0,0,0)', 'ink', 8);
-      text(g, 'TOO DEAR', cx, y + h / 2 - 4, 'red2', { center: true, outline: 'ink' });
+      text(g, 'TOO DEAR', cx, y + h / 2 - 8, 'red2', { center: true, outline: 'ink', font: 7, scale: 2 });
     }
   }
 
@@ -633,9 +648,9 @@ export function makeShopScene() {
 
   function drawDelivery(g) {
     // dim the dockside furniture so the eye goes to the boat
-    wash(g, 0, 16, 640, 30, 'ink', 0.5);
-    text(g, 'INBOUND', 320, 20, 'brass3', { center: true, outline: 'ink', font: 7 });
-    text(g, crate ? crate.name : '', 320, 34, 'bone', { font: 3, center: true });
+    wash(g, 0, 24, W, 44, 'ink', 0.5);
+    text(g, 'INBOUND', W / 2, 28, 'brass3', { center: true, outline: 'ink', font: 7, scale: 2 });
+    text(g, crate ? crate.name : '', W / 2, 52, 'bone', { font: 5, center: true });
 
     if (boat) drawBoat(g, boat, t);
 
@@ -663,7 +678,7 @@ export function makeShopScene() {
 
       // the manifest of what you actually got
       const panelH = 24 + Math.min(gotItems.length, 6) * 11;
-      UI.panel(g, 396, 118, 210, panelH, { style: 'brass', shadow: true, title: 'UNLOADED' });
+      UI.panel(g, W / 2 - 158, 176, 316, panelH, { style: 'brass', shadow: true, title: 'UNLOADED' });
       gotItems.slice(0, 6).forEach((it, i) => {
         if (i >= revealIx) return;
         const iy = 136 + i * 11;
@@ -679,22 +694,22 @@ export function makeShopScene() {
         text(g, 'CLICK TO CONTINUE', 501, 122 + panelH + 6, 'white', { font: 3, center: true, outline: 'ink' });
       }
     } else if (crate) {
-      if (Math.floor(t * 3) % 2 === 0) text(g, 'CLICK TO HURRY', 320, 336, 'foam', { font: 3, center: true, outline: 'ink' });
+      if (Math.floor(t * 3) % 2 === 0) text(g, 'CLICK TO HURRY', W / 2, H - 24, 'foam', { font: 5, center: true, outline: 'ink' });
     }
   }
 
   /* ------------------------------------------------------------- ribbon */
 
   function drawRelicRibbon(g) {
-    rect(g, 0, 0, 640, 15, 'wood1');
-    rect(g, 0, 14, 640, 1, 'wood0');
-    rect(g, 0, 0, 640, 1, 'wood3');
+    rect(g, 0, 0, W, 22, 'wood1');
+    rect(g, 0, 21, W, 1, 'wood0');
+    rect(g, 0, 0, W, 1, 'wood3');
     text(g, 'RELICS', 4, 4, 'brass2', { font: 3 });
     relicRects.length = 0;
     let x = 34;
     for (const relic of run.relics) {
       const rc = UI.RARITY_COLOR[relic.rarity] || 'grey2';
-      const r = UI.rectOf(x, 2, 12, 11);
+      const r = UI.rectOf(x, 4, 18, 16);
       relicRects.push(r);
       rect(g, x, 2, 12, 11, 'ink');
       frame(g, x, 2, 12, 11, rc);

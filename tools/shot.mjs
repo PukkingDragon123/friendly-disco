@@ -136,17 +136,21 @@ switch (which) {
     const { rect, text } = await import('../src/core/pixel.js');
     const who = (process.env.WHO || 'golem,adam,eve,snake,noah,cherub').split(',');
     const which = (process.env.AN || 'cow,chicken,lion,elephant,penguin,octopus').split(',');
+    const _an = which;  void _an;
     const mode = process.env.MODE || 'folk';
     scene = {
       update() {},
       draw() {
-        rect(g, 0, 0, SW, SH, 'shadow');
+        // a MID-TONE ground, not a dark one: judging a sprite against near-black hides
+        // exactly the problem you are looking for, which is whether its shadow side
+        // separates from what it is standing on
+        for (let y = 0; y < SH; y++) rect(g, 0, y, SW, 1, y < SH / 2 ? 'leaf2' : 'sand');
         if (mode === 'folk') {
           // three at a time, whole, at 6x -- a figure cropped by its own frame tells you
           // nothing about its silhouette, which is the thing you are here to judge
           who.slice(0, 3).forEach((id, i) => {
             const x = 165 + i * 315;
-            rect(g, x - 150, 20, 300, 480, i % 2 ? 'deep' : 'ink');
+            rect(g, x - 150, 20, 300, 480, i % 2 ? 'leaf2' : 'sand');
             F.drawFolk(g, id, x, 480, 1.3, {
               scale: 8, mud: id === 'golem' ? 1 : 0, sparkle: id === 'cherub' ? 1 : 0,
             });
@@ -157,7 +161,7 @@ switch (which) {
             const a = A.ANIMAL_BY_ID[id];
             if (!a) return;
             const x = 80 + (i % 3) * 300, y = 130 + Math.floor(i / 3) * 250;
-            rect(g, x - 74, y - 84, 290, 240, i % 2 ? 'deep' : 'ink');
+            rect(g, x - 74, y - 84, 290, 240, i % 2 ? 'leaf2' : 'sand');
             S.drawAnimal(g, a, x + 60, y + 20, { scale: 6 });
             text(g, a.name.toUpperCase(), x + 60, y + 130, 'brass3', { font: 5, center: true });
           });

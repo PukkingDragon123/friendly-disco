@@ -75,12 +75,16 @@ export function orbShade(ramp, o = {}) {
     // the ground throws a little light back up under the shadow side
     const back = Math.max(0, -ny * 0.55 + nz * 0.2) * bounce;
     const v = lam + back;
-    if (v > 0.86) return ramp[n - 1];
-    if (v > 0.62) return ramp[Math.min(n - 1, n - 2)];
-    if (v > 0.32) return ramp[Math.max(0, n - 3)];
-    if (v > 0.02) return ramp[Math.max(0, n - 4)];
+    // The bands are weighted toward the LIT side on purpose. An even split puts half the
+    // ball in shadow, which is correct for a photograph and wrong for a cute sprite: at
+    // thirty pixels a half-dark ball reads as a bitten ball, especially when the shadow
+    // tone is close to the background.
+    if (v > 0.74) return ramp[n - 1];
+    if (v > 0.42) return ramp[Math.min(n - 1, n - 2)];
+    if (v > -0.06) return ramp[Math.max(0, n - 3)];
+    if (v > -0.44) return ramp[Math.max(0, n - 4)];
     // the shadow edge: a rim of reflected light keeps the silhouette from going flat
-    if (lam < -0.62 && nz < 0.42) return rim;
+    if (lam < -0.72 && nz < 0.40) return rim;
     return dark;
   };
 }
@@ -204,6 +208,22 @@ export function bline(b, x0, y0, x1, y1, key) {
   }
 }
 
+/** A filled triangle, in buffer space. */
+export function btri(b, x0, y0, x1, y1, x2, y2, key) {
+  const minX = Math.floor(Math.min(x0, x1, x2)), maxX = Math.ceil(Math.max(x0, x1, x2));
+  const minY = Math.floor(Math.min(y0, y1, y2)), maxY = Math.ceil(Math.max(y0, y1, y2));
+  const d = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+  if (Math.abs(d) < 1e-6) { bline(b, x0, y0, x1, y1, key); return; }
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const a = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / d;
+      const bb = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / d;
+      const c = 1 - a - bb;
+      if (a >= -0.02 && bb >= -0.02 && c >= -0.02) bset(b, x, y, key);
+    }
+  }
+}
+
 /* ------------------------------------------------------------------- outline
 
 The pass that makes all of it read. Every empty pixel with a filled neighbour becomes
@@ -212,9 +232,18 @@ growing it -- worth it on faces, too heavy on small details.
 */
 export function outline(b, key = 'ink', o = {}) {
   const add = [];
+  // `outside` restricts the contour to pixels beyond a circle. A layer that will be
+  // composited OVER another one must not outline its internal features: outlining a face
+  // layer everywhere drew a black ring round every eye and muzzle, and those rings landed
+  // on top of the body underneath. Only the parts that break the silhouette need it.
+  const out = o.outside;
   for (let y = 0; y < b.h; y++) {
     for (let x = 0; x < b.w; x++) {
       if (bfilled(b, x, y)) continue;
+      if (out) {
+        const dx = x - out.cx, dy = y - out.cy;
+        if (dx * dx + dy * dy < (out.r - 0.5) * (out.r - 0.5)) continue;
+      }
       if (bfilled(b, x - 1, y) || bfilled(b, x + 1, y)
         || bfilled(b, x, y - 1) || bfilled(b, x, y + 1)) add.push(x, y);
     }

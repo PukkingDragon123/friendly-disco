@@ -40,7 +40,8 @@ const M = {};
     ['interactions', '../src/data/interactions.js'], ['relics', '../src/data/relics.js'],
     ['blinds', '../src/data/blinds.js'], ['cargo', '../src/data/cargo.js'],
     ['table', '../src/render/table.js'], ['scoring', '../src/game/scoring.js'],
-    ['run', '../src/game/run.js'],
+    ['run', '../src/game/run.js'], ['flood', '../src/game/flood.js'],
+    ['story', '../src/data/story.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -469,6 +470,66 @@ if (section('physics') && M.physics) {
 }
 
 /* ------------------------------------------------------------------ scoring */
+
+if (section('flood') && M.flood) {
+  const F = M.flood;
+  // dry until the water is over the rail, then one pool per step, never a wall of them
+  ok(F.poolCount(0) === 0, 'no water on a dry deck');
+  ok(F.poolCount(0.1) === 0, 'still dry below the threshold');
+  let mono = true, last = -1;
+  for (let l = 0; l <= 1.0001; l += 0.02) {
+    const n = F.poolCount(l);
+    if (n < last) mono = false;
+    last = n;
+  }
+  ok(mono, 'pool count never goes back down');
+  ok(F.poolCount(1) <= 5, 'the felt is never wall-to-wall water', F.poolCount(1));
+  ok(F.stormStrength(0.4) === 0, 'no eye before halfway');
+  ok(F.stormStrength(1) > 0.99, 'the eye is fully open at maximum flood');
+
+  // determinism: the same (seed, level) must give the same water, or replays desync
+  const a1 = F.floodHazards('SEED-A', 0.7, {});
+  const a2 = F.floodHazards('SEED-A', 0.7, {});
+  const b1 = F.floodHazards('SEED-B', 0.7, {});
+  ok(JSON.stringify(a1) === JSON.stringify(a2), 'hazards are deterministic per seed');
+  ok(JSON.stringify(a1) !== JSON.stringify(b1), 'different seeds give different water');
+
+  // a pool that appears must not move when the next one appears
+  const p3 = F.floodHazards('SEED-A', 0.55, {}).pools[0];
+  const p4 = F.floodHazards('SEED-A', 0.75, {}).pools[0];
+  ok(Math.abs(p3.x - p4.x) < 1e-9 && Math.abs(p3.y - p4.y) < 1e-9, 'pool 1 stays put as the water rises');
+  ok(p4.rx > p3.rx, 'pools swell with the level');
+
+  // water must never plug a gate mouth: that would delete a berth, not tax a shot
+  const gates = M.table ? M.table.buildGates({ tl: 'warm', tm: 'frozen', tr: 'bushy', bl: 'briny', bm: 'dusty', br: 'tame' }, {}) : [];
+  let plugged = 0;
+  for (const g2 of gates) {
+    if (F.poolDepthAt(F.floodHazards('SEED-A', 1, {}), g2.x, g2.y) > 0.25) plugged++;
+  }
+  ok(plugged === 0, 'no surge pool swallows a gate mouth', plugged);
+
+  // and the hazards must actually slow a ball down
+  if (M.physics) {
+    // measure PATH LENGTH, not where it stopped -- a ball that banks off the far
+    // rail can come to rest right back where it started
+    const mk = (hz) => {
+      const w = M.physics.createWorld({});
+      const b = M.physics.addBall(w, { x: 30, y: M.physics.TABLE_H / 2, animalId: 'cow' });
+      M.physics.setHazards(w, hz);
+      M.physics.strike(w, b, 0, 0.75, 0);
+      let dist = 0, px2 = b.x, py2 = b.y;
+      for (let i = 0; i < 600 && !M.physics.isSettled(w); i++) {
+        M.physics.step(w, 1 / 60);
+        dist += Math.hypot(b.x - px2, b.y - py2);
+        px2 = b.x; py2 = b.y;
+      }
+      return dist;
+    };
+    const dry = mk(null);
+    const wet = mk({ pools: [{ x: 90, y: M.physics.TABLE_H / 2, rx: 30, ry: 20, depth: 1, seed: 0 }], storm: null });
+    ok(wet < dry * 0.85, 'standing water shortens a shot', `dry ${dry.toFixed(0)} wet ${wet.toFixed(0)}`);
+  }
+}
 
 if (section('scoring') && M.scoring && M.animals) {
   const S = M.scoring, A = M.animals;

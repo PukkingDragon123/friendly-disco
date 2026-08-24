@@ -36,6 +36,8 @@ export const TUNING = {
   maxPower: 1.6,       // cue upgrades push past 1.0; this is the hard ceiling
   rollA: 22,           // constant rolling deceleration (units/s^2) — the "it stops" term
   dragK: 0.5,          // linear drag (1/s) — takes the sting out of a big break
+  waterDrag: 5.2,      // extra drag multiplier at the deepest point of a surge pool
+  waterPull: 26,       // inward acceleration toward a pool's centre (units/s^2)
   stopSpeed: 0.6,      // below this a ball is parked (contract: resting when speed < 0.6)
   ballE: 0.94,         // ball-ball restitution (nearly elastic, still lossy)
   railE: 0.74,         // cushion restitution
@@ -98,6 +100,7 @@ export function createWorld(opts = {}) {
     driftX: num(o.driftX, 0),          // boss "the deck lists to starboard" acceleration
     driftY: num(o.driftY, 0),
     cue: null,                          // optional: this game has no dedicated cue ball
+    hazards: null,                      // {pools, storm} from game/flood.js, or null
     time: 0,
     shotId: 0,
     nextId: 1,
@@ -174,6 +177,16 @@ export function addBall(world, spec = {}) {
  * later edits to the render-side list cannot teleport a pocket mid-shot. Closed gates
  * (boss blinds seal habitats) are dropped: a sealed mouth must not swallow anything.
  */
+/**
+ * Install the flood's hazards. Null clears them. Kept as a setter so the caller
+ * cannot leave a half-built hazard object where the integrator will read it.
+ */
+export function setHazards(world, hazards) {
+  if (!world) return null;
+  world.hazards = hazards && (hazards.pools || hazards.storm) ? hazards : null;
+  return world.hazards;
+}
+
 export function setGates(world, gates) {
   if (!world) return [];
   const out = [];
@@ -221,6 +234,48 @@ function rollStep(b, h, world) {
   }
   vx += num(world.driftX, 0) * h;
   vy += num(world.driftY, 0) * h;
+
+  // --- standing water and the hurricane (game/flood.js supplies world.hazards)
+  const hz = world.hazards;
+  if (hz) {
+    // Inside a pool the felt might as well be mud: several times the drag, plus a
+    // gentle pull toward the middle, so a ball that dies in water dies IN the water.
+    if (hz.pools && hz.pools.length) {
+      for (const p of hz.pools) {
+        const dx = (b.x - p.x) / p.rx, dy = (b.y - p.y) / p.ry;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= 1) continue;
+        const deep = (1 - Math.sqrt(d2)) * p.depth;
+        const bog = 1 - Math.min(0.9, TUNING.waterDrag * deep * h);
+        vx *= bog; vy *= bog;
+        const ox = p.x - b.x, oy = p.y - b.y;
+        const od = hyp(ox, oy);
+        if (od > 0.01) {
+          const pull = TUNING.waterPull * deep * h;
+          vx += (ox / od) * pull;
+          vy += (oy / od) * pull;
+        }
+        break;                       // one pool's worth of misery per sub-step
+      }
+    }
+    // The eye drags everything near it around the spiral, and shoves outward at the
+    // very centre so nothing parks in the middle of the storm forever.
+    const st = hz.storm;
+    if (st && st.pull > 0) {
+      const dx = b.x - st.x, dy = b.y - st.y;
+      const d = hyp(dx, dy);
+      if (d < st.r && d > 0.01) {
+        const fall = 1 - d / st.r;
+        const tx = (-dy / d) * st.spin, ty = (dx / d) * st.spin;
+        const f = st.pull * fall * fall * h;
+        vx += tx * f; vy += ty * f;
+        const out = (1 - Math.min(1, d / (st.r * 0.28))) * st.pull * 0.4 * h;
+        if (out > 0) { vx += (dx / d) * out; vy += (dy / d) * out; }
+        if (hyp(vx, vy) >= TUNING.stopSpeed) b.resting = false;
+      }
+    }
+  }
+
   b.vx = vx; b.vy = vy;
   b.x += vx * h;
   b.y += vy * h;

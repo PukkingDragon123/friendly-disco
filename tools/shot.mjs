@@ -56,6 +56,7 @@ switch (which) {
     if (process.env.FLOOD) {
       const d = scene.debug();
       d.run.flood = Number(process.env.FLOOD);
+      if (d.syncHazards) d.syncHazards();
     }
     mouse(560, 130);
     break;

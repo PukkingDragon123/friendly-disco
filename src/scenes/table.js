@@ -23,6 +23,7 @@ import {
   createDeck, DECK, VIEW, toScreen, toTable, buildGates, gateScreen, ballPixelRadius, aimAngle,
 } from '../render/table.js';
 import * as PH from '../game/physics.js';
+import { floodHazards, inWater } from '../game/flood.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { HABITAT_BY_ID, likeness, likeRank } from '../data/habitats.js';
 import { resolveShot, previewPot } from '../game/scoring.js';
@@ -61,6 +62,8 @@ const CTRL_H = H - CTRL_Y - 4;
 export function makeTableScene() {
   let run = null, app = null, onExit = null;
   let world = null, deck = null, sea = null, parts = null;
+  let hazards = null;          // {pools, storm} from game/flood.js
+  let stormSeen = false;
   let phase = 'intro';
   let t = 0, phaseT = 0;
 
@@ -106,6 +109,58 @@ export function makeTableScene() {
     const eff = (run.blind && run.blind.effect) || {};
     world.friction = Math.max(0.2, eff.friction || 1);
     world.spinDrift = run.spinDrift || 1;
+    syncHazards();
+  }
+
+  /**
+   * Re-derive the water on the felt from the flood clock. Called whenever the level
+   * moves, so a pool appearing is always tied to a shot you took.
+   */
+  function syncHazards() {
+    const eff = (run.blind && run.blind.effect) || {};
+    const before = hazards ? hazards.pools.length : 0;
+    hazards = floodHazards(run.seed + '/' + run.ante + currentKind(run), run.flood || 0,
+      { rate: Math.max(0.6, eff.floodRate || 1) });
+    PH.setHazards(world, hazards);
+    if (hazards.pools.length > before) {
+      Audio.sfx('splash');
+      Juice.shake(3, 0.3);
+      say(hazards.pools.length === 1 ? 'Water breaks over the rail!' : 'Another surge floods the deck!', 2);
+    }
+    if (hazards.storm && !stormSeen) {
+      stormSeen = true;
+      Audio.sfx('boss_sting');
+      Juice.shake(6, 0.6);
+      Juice.flash('water3', 0.35, 0.4);
+      say('A hurricane opens on the deck!', 2.6);
+    }
+  }
+
+  /**
+   * Any animal left standing in water when the shot settles is washed back down into
+   * the hold. You keep the animal -- the flood costs you the tempo, which at four
+   * shots a blind is expensive enough.
+   */
+  function washSwamped() {
+    if (!hazards || !hazards.pools.length) return;
+    let n = 0;
+    for (const b of world.balls) {
+      if (b.sunk || b.swamped) continue;
+      if (!inWater(hazards, b.x, b.y)) continue;
+      b.swamped = true;
+      b.sunk = true;
+      b.sinkT = 1;
+      if (b.animalId) run.stash.push(b.animalId);
+      const ss = toScreen(b.x, b.y);
+      parts.emit('splash', ss.x, ss.y, { count: 16, speed: 90, color: 'water3', life: 0.7 });
+      parts.emit('ring', ss.x, ss.y, { count: 2, speed: 30, color: 'foam', life: 0.5 });
+      n++;
+    }
+    if (n > 0) {
+      Audio.sfx('splash');
+      Juice.shake(4, 0.35);
+      say(n === 1 ? 'Swept off the deck — back to the hold!' : `${n} washed back below deck!`, 2.4);
+    }
   }
 
   /** The Carousel: the gates shuffle round one seat between shots. */
@@ -329,6 +384,8 @@ export function makeTableScene() {
       Juice.flash('red1', 0.5, 0.5);
     } else {
       phase = 'aim'; phaseT = 0;
+      // the flood advanced inside applyShot, so the water on the felt moves with it
+      syncHazards();
       if ((run.blind.effect || {}).rotateGates) rotateAssignment();
       if (movesLeft(run) <= 1) Audio.music('deck_tense');
     }
@@ -523,7 +580,8 @@ export function makeTableScene() {
       }
       if (PH.isSettled(world)) {
         settleGrace -= dt;
-        if (settleGrace <= 0) beginScoring();
+        // the water takes its share before the ledger opens
+        if (settleGrace <= 0) { washSwamped(); beginScoring(); }
       } else settleGrace = 0.25;
       if (phaseT > 18) beginScoring();     // safety valve
       return;
@@ -623,7 +681,7 @@ export function makeTableScene() {
     drawAimLayer(g);
     deck.drawAnimals(g, world, { lookup, selected, still: phase === 'score' });
     deck.drawLight(g);
-    deck.drawFlood(g, fl);
+    deck.drawFlood(g, fl, { hazards });
     parts.draw(g, 'front');
     drawGateFronts(g, eff);
 
@@ -1210,6 +1268,8 @@ export function makeTableScene() {
         phase, charge, angle, spin, shotScore,
         run, world, deck, selected, handValue,
         rects: { rerack: rerackRect, feeds: feedRects },
+        hazards,
+        syncHazards,          // harnesses set run.flood directly, then re-derive the water
       };
     },
   };

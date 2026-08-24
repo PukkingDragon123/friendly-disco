@@ -551,52 +551,115 @@ export function createDeck(o = {}) {
      * cloth — a shallow sheet with reflections, so the threat is legible at a glance
      * rather than being a number in the corner.
      */
+    /**
+     * The flood, drawn ON THE FELT.
+     *
+     * There is no rising waterline any more. A blind's water arrives as standing pools
+     * broken over the rail and, past the halfway mark, as a hurricane eye spinning on
+     * the cloth. The camera is never covered: at maximum flood you can still see every
+     * animal, every berth and every inch of the table you have left to work with --
+     * there is just much less of it that behaves.
+     */
     drawFlood(g, level, o2 = {}) {
       const k = clamp(level, 0, 1);
-      if (k <= 0.001) return;
-      // the water starts below the hull and climbs to just over the near rail
-      const bottom = DECK.apronY + DECK.apron + 10;
-      const topAt = DECK.feltY + DECK.feltH * 0.52;
-      const wl = Math.round(lerp(bottom, topAt, Math.pow(k, 0.9)));
-      const wob = Math.sin(t * 2.2) * (0.6 + k * 1.6);
-
-      for (let y = wl; y < 360; y++) {
-        const d = (y - wl) / Math.max(1, 360 - wl);
-        const hw = (DECK.feltW / 2) * scaleAt(TABLE_H) + DECK.rail + 6;
-        const x0 = Math.round(VIEW.cx - hw), ww = Math.round(hw * 2);
-        // inside the hull the water is dark and still; outside it is open sea
-        const band = d < 0.12 ? 'water2' : d < 0.34 ? 'water1' : d < 0.7 ? 'water0' : 'deep';
-        dither(g, x0, y, ww, 1, band, 'water0', Math.round(d * 10));
-        // moving crests
-        if (((y + Math.floor(t * 26)) % 5) === 0) {
-          for (let cx2 = 0; cx2 < ww; cx2 += 22) {
-            const sx = Math.round(x0 + ((cx2 + t * 34) % ww) + Math.sin((cx2 + t * 40) * 0.06) * 3);
-            rect(g, sx, y, 6, 1, d < 0.4 ? 'foam' : 'water3');
+      const hz = o2.hazards;
+      // a swell rising against the OUTSIDE of the hull: the sea getting up, but never
+      // climbing over the camera
+      if (k > 0.05) {
+        const reach = Math.round(4 + k * 16);
+        for (let r = 0; r < DECK.feltH + DECK.rail; r += 1) {
+          const ty = r / VIEW.tilt;
+          const hw = (DECK.feltW / 2) * scaleAt(ty) + DECK.rail;
+          const y = DECK.feltY + r;
+          const depth = clamp(r / (DECK.feltH + DECK.rail), 0, 1);
+          const n = Math.round(reach * (0.35 + depth * 0.65));
+          for (let i = 0; i < n; i++) {
+            const ph = Math.sin(t * 2.1 + r * 0.09 + i * 0.5);
+            if (ph < 0.1) continue;
+            const c = i < 2 ? 'foam' : i < n * 0.5 ? 'water3' : 'water2';
+            px(g, VIEW.cx - hw - i, y, c);
+            px(g, VIEW.cx + hw + i, y, c);
           }
         }
       }
-      // the waterline itself: bright foam, and a wet stain on the timber above it
-      rect(g, 0, wl + Math.round(wob), 640, 1, 'foam');
-      rect(g, 0, wl + Math.round(wob) - 1, 640, 1, 'white');
-      for (let i = 1; i < 7; i++) {
-        dither(g, 0, wl + Math.round(wob) - 1 - i, 640, 1, 'rgba(0,0,0,0)', 'water1', 9 - i);
+      if (!hz) return;
+
+      // --- surge pools
+      for (const p of hz.pools || []) {
+        const c = toScreen(p.x, p.y);
+        const rx = Math.round(p.rx * VIEW.xs * c.s);
+        const ry = Math.round(p.ry * VIEW.tilt * 0.82);
+        // the body of water: dark, dithered, with the felt showing through the edge
+        ellipse(g, c.x, c.y, rx, ry, 'water0');
+        ellipse(g, c.x, c.y, Math.round(rx * 0.82), Math.round(ry * 0.82), 'water1');
+        for (let i = 0; i < 3; i++) {
+          dither(g, c.x - rx, c.y - ry + i * 2, rx * 2, 1, 'water1', 'water2', 4 + i * 2);
+        }
+        // wind ripples crossing it, so it is obviously liquid and obviously moving
+        for (let i = 1; i < ry * 2 - 1; i += 3) {
+          const yy = c.y - ry + i;
+          const t2 = 1 - Math.abs((i - ry) / ry);
+          const w2 = Math.round(rx * Math.sqrt(Math.max(0, t2)) * 0.92);
+          const off = Math.round(Math.sin(t * 2.6 + i * 0.5 + p.seed) * 3);
+          rect(g, c.x - w2 + off, yy, Math.max(2, w2), 1, 'water2');
+          if ((i + Math.floor(t * 9)) % 6 === 0) rect(g, c.x - w2 + off, yy, Math.min(7, w2), 1, 'water3');
+        }
+        // a bright rim of foam where the water meets dry cloth
+        ellipseFrame(g, c.x, c.y, rx, ry, 'water3');
+        for (let a = 0; a < 360; a += 24) {
+          const rad = (a * Math.PI) / 180;
+          if (Math.sin(t * 3 + rad * 2 + p.seed) < 0.15) continue;
+          px(g, c.x + Math.cos(rad) * rx, c.y + Math.sin(rad) * ry, 'foam');
+        }
+        // the reflection of the sky in it, low and stretched
+        wash(g, c.x - Math.round(rx * 0.5), c.y - Math.round(ry * 0.45), Math.round(rx * 0.7), 2, 'ice', 0.18);
       }
-      // spray along the line
-      for (let i = 0; i < 26; i++) {
-        const sx = ((i * 71 + Math.floor(t * 90)) % 640);
-        const sy = wl + Math.round(wob) - 2 - ((i * 37 + Math.floor(t * 130)) % Math.round(4 + k * 8));
-        px(g, sx, sy, i % 3 ? 'foam' : 'white');
-      }
-      // once it is on the cloth, sheet the felt and mirror the rail
-      if (wl < DECK.feltY + DECK.feltH) {
-        const from = Math.max(DECK.feltY, wl);
-        for (let y = from; y < DECK.feltY + DECK.feltH; y++) {
-          const row = y - DECK.feltY;
-          const hw = feltHalfAtRow(row);
-          wash(g, VIEW.cx - hw, y, hw * 2, 1, 'water1', 0.42);
-          if (((y + Math.floor(t * 18)) % 7) === 0) {
-            wash(g, VIEW.cx - hw, y, hw * 2, 1, 'foam', 0.16);
+
+      // --- the hurricane: a spiral on the cloth with a black eye
+      const st = hz.storm;
+      if (st) {
+        const c = toScreen(st.x, st.y);
+        const R = st.r * VIEW.xs * c.s;
+        const RY = st.r * VIEW.tilt * 0.82;
+        // A dark disc of churned water first, so the spiral has something to sit on
+        // and the eye reads as a hole rather than a smudge.
+        for (let i = 12; i >= 0; i--) {
+          const f = i / 12;
+          wash(g, c.x - R * f, c.y - RY * f, R * 2 * f, RY * 2 * f, 'water0', 0.055);
+        }
+        // five arms, swept by the spin, drawn as tapering bands
+        for (let arm = 0; arm < 5; arm++) {
+          const base = (arm / 5) * Math.PI * 2 + t * 1.5 * st.spin;
+          for (let s2 = 8; s2 < 100; s2 += 1) {
+            const f = s2 / 100;
+            const rad = base + f * 3.4 * st.spin;
+            const x = c.x + Math.cos(rad) * R * f;
+            const y = c.y + Math.sin(rad) * RY * f;
+            const th = f < 0.4 ? 3 : f < 0.75 ? 2 : 1;
+            const col2 = f < 0.32 ? 'foam' : f < 0.6 ? 'water3' : 'water2';
+            rect(g, x - (th >> 1), y - (th >> 1), th, th, col2);
+            // a trailing shadow on the inside edge gives the band depth
+            px(g, x - Math.cos(rad) * 2, y - Math.sin(rad) * 2 + 1, 'water0');
           }
+        }
+        // the eye: still, black, double-ringed, with a hard bright wall
+        ellipse(g, c.x, c.y, Math.round(R * 0.20), Math.round(RY * 0.20), 'night');
+        ellipse(g, c.x, c.y, Math.round(R * 0.13), Math.round(RY * 0.13), 'ink');
+        ellipseFrame(g, c.x, c.y, Math.round(R * 0.21), Math.round(RY * 0.21), 'white');
+        ellipseFrame(g, c.x, c.y, Math.round(R * 0.24), Math.round(RY * 0.24), 'foam');
+        ellipseFrame(g, c.x, c.y, Math.round(R * 0.34), Math.round(RY * 0.34), 'water3');
+        // spray flung off the rim
+        for (let i = 0; i < 26; i++) {
+          const rad = t * 2.4 * st.spin + (i / 26) * Math.PI * 2;
+          const f = 0.88 + ((i * 37 + Math.floor(t * 40)) % 14) / 56;
+          px(g, c.x + Math.cos(rad) * R * f, c.y + Math.sin(rad) * RY * f, i & 1 ? 'foam' : 'white');
+        }
+        // and the wind it is making, as streaks leaving the rim
+        for (let i = 0; i < 10; i++) {
+          const rad = -t * 1.1 * st.spin + (i / 10) * Math.PI * 2;
+          const x0 = c.x + Math.cos(rad) * R, y0 = c.y + Math.sin(rad) * RY;
+          const tx2 = -Math.sin(rad) * st.spin, ty2 = Math.cos(rad) * st.spin;
+          for (let j = 0; j < 7; j++) px(g, x0 + tx2 * j * 2, y0 + ty2 * j * 2, j < 3 ? 'water3' : 'water2');
         }
       }
       void o2;

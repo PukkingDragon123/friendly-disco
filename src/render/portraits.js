@@ -215,6 +215,301 @@ const PORTRAITS = {
     }
   },
 
+
+  // THE GOLEM: you. Not a person -- a thing made of river clay and told to work.
+  //
+  // The silhouette has to do the work here, because the whole figure is one colour
+  // family. So: shoulders far wider than the head, a hard dark gap where a neck would
+  // be, and a black outline pass around everything. Every golem story turns on the
+  // word written on the thing, so the brass brow plate is the brightest object in the
+  // frame and it breathes with the idle.
+  golem(g, x, y, w, h, t) {
+    vgrad(g, x, y, w, h, ['ink', 'shadow', 'wood0', 'wood1'], 3);
+    const cx = x + w / 2;
+    const baseY = y + h;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 1.4);
+
+    // clay dust still hanging in the air -- it was dug out of a riverbank an hour ago
+    for (let i = 0; i < 26; i++) {
+      const dx = x + ((i * 41 + Math.floor(t * 9)) % w);
+      const dy = y + h - ((i * 29 + Math.floor(t * 14)) % Math.round(h * 0.85));
+      px(g, dx, dy, i % 3 ? 'wood2' : 'sand');
+    }
+
+    const shW = Math.round(w * 0.40);          // half-width at the shoulders
+    const chH = Math.round(h * 0.40);
+    const chY = baseY - chH - Math.round(h * 0.06);
+    const hr = Math.max(4, Math.round(w * 0.15));
+    const hy = chY - hr - Math.round(h * 0.05);  // the gap IS the neck
+
+    // --- silhouette pass: everything again, one pixel out, in near-black. This is
+    // what stops the figure dissolving into the background.
+    const sil = (fn) => fn('ink');
+    for (const pass of [1, 0]) {
+      const o = pass;                            // 1 = outline pass, 0 = the real thing
+      const body = o ? 'ink' : 'wood2';
+      const litSide = o ? 'ink' : 'wood3';
+      const darkSide = o ? 'ink' : 'wood1';
+      // legs, planted wide
+      for (const side of [-1, 1]) {
+        rect(g, cx + side * Math.round(shW * 0.52) - Math.round(w * 0.08) - o,
+          baseY - Math.round(h * 0.13) - o, Math.round(w * 0.16) + o * 2, Math.round(h * 0.13) + o * 2, o ? 'ink' : 'wood1');
+        if (!o) {
+          rect(g, cx + side * Math.round(shW * 0.52) - Math.round(w * 0.08),
+            baseY - Math.round(h * 0.13), Math.round(w * 0.05), Math.round(h * 0.13), 'wood2');
+        }
+      }
+      // arms, hanging long the way a made thing's arms hang
+      for (const side of [-1, 1]) {
+        const ax = cx + side * (shW - Math.round(w * 0.03));
+        rect(g, ax - Math.round(w * 0.06) - o, chY + 2 - o, Math.round(w * 0.12) + o * 2,
+          Math.round(chH * 0.82) + o * 2, o ? 'ink' : (side < 0 ? 'wood2' : 'wood1'));
+        rect(g, ax - Math.round(w * 0.08) - o, chY + Math.round(chH * 0.82) - o,
+          Math.round(w * 0.16) + o * 2, Math.round(w * 0.12) + o * 2, o ? 'ink' : 'wood2');
+      }
+      // the chest slab: a trapezoid, wide at the shoulders
+      for (let i = 0; i < chH; i++) {
+        const f = i / chH;
+        const ww = Math.round(shW * (1 - f * 0.30));
+        rect(g, cx - ww - o, chY + i - (i === 0 ? o : 0), ww * 2 + o * 2, 1 + (i === chH - 1 ? o : 0), body);
+        if (!o) {
+          rect(g, cx - ww, chY + i, Math.max(1, Math.round(ww * 0.42)), 1, litSide);
+          rect(g, cx + Math.round(ww * 0.52), chY + i, Math.round(ww * 0.48), 1, darkSide);
+        }
+      }
+      // the head: a blunt block, narrower than the shoulders by a long way
+      rect(g, cx - hr - o, hy - hr - o, hr * 2 + o * 2, hr * 2 + Math.round(h * 0.04) + o * 2, body);
+      if (!o) {
+        rect(g, cx - hr, hy - hr, Math.round(hr * 0.75), hr * 2 + Math.round(h * 0.04), litSide);
+        rect(g, cx + Math.round(hr * 0.45), hy - hr, Math.round(hr * 0.55), hr * 2 + Math.round(h * 0.04), darkSide);
+      }
+    }
+    void sil;
+
+    // --- the seams: cracks in the clay with furnace light behind them
+    const seams = [[-0.5, 0.14], [0.24, 0.24], [-0.12, 0.44], [0.5, 0.5], [-0.34, 0.66]];
+    for (const [fx, fy] of seams) {
+      const sx = cx + Math.round(shW * fx), sy = chY + Math.round(chH * fy);
+      for (let i = 0; i < 7; i++) {
+        const yy = sy + Math.round(Math.sin(i * 1.2) * 2);
+        px(g, sx + i, yy, i & 1 ? 'amber' : 'orange');
+        px(g, sx + i, yy + 1, 'wood0');
+      }
+    }
+    // the heart-furnace showing through the chest, breathing
+    const fy2 = chY + Math.round(chH * 0.40);
+    disc(g, cx, fy2, Math.max(3, Math.round(w * 0.075 * pulse + 2)), 'orange');
+    disc(g, cx, fy2, Math.max(2, Math.round(w * 0.04)), 'amber');
+    disc(g, cx, fy2, 1, 'white');
+    for (let i = 0; i < 8; i++) {                 // light leaking up the chest
+      wash(g, cx - 6 + i, fy2 - 8 - i, 12 - i * 2, 1, 'orange', 0.09 * pulse);
+    }
+
+    // --- eye sockets: sunk, wide, and burning. Two pixels is a mouse; this is a golem.
+    for (const side of [-1, 1]) {
+      const ex = cx + side * Math.round(hr * 0.42);
+      rect(g, ex - 2, hy - 1, 4, 3, 'ink');
+      rect(g, ex - 2, hy - 1, 4, 2, pulse > 0.45 ? 'amber' : 'orange');
+      rect(g, ex - 1, hy - 1, 2, 1, 'white');
+      // a little glow spilling onto the cheek
+      wash(g, ex - 3, hy + 2, 6, 2, 'orange', 0.22);
+    }
+    // no mouth. A carved line where one would be.
+    rect(g, cx - Math.round(hr * 0.4), hy + Math.round(hr * 0.75), Math.round(hr * 0.8), 1, 'wood0');
+
+    // --- THE WORD: a brass plate driven into the brow. Take it out and this is mud.
+    const pw2 = Math.round(hr * 1.7), ph2 = Math.max(5, Math.round(hr * 0.62));
+    const py2 = hy - hr + 1;
+    rect(g, cx - pw2 / 2 - 1, py2 - 1, pw2 + 2, ph2 + 2, 'ink');
+    rect(g, cx - pw2 / 2, py2, pw2, ph2, 'brass1');
+    rect(g, cx - pw2 / 2, py2, pw2, 1, 'brass3');
+    rect(g, cx - pw2 / 2, py2 + ph2 - 1, pw2, 1, 'brass0');
+    // three chiselled strokes -- a word, unreadable on purpose
+    for (let i = 0; i < 3; i++) {
+      const gx2 = cx - pw2 / 2 + 2 + i * Math.round((pw2 - 3) / 3);
+      rect(g, gx2, py2 + 1, 1, ph2 - 2, pulse > 0.45 ? 'gold' : 'brass2');
+      px(g, gx2 + 1, py2 + 1 + (i % 2), pulse > 0.45 ? 'gold' : 'brass2');
+    }
+    // rivets holding the plate on
+    px(g, cx - pw2 / 2, py2 + 1, 'grey2');
+    px(g, cx + pw2 / 2 - 1, py2 + 1, 'grey2');
+
+    // --- weathering: chisel marks and a chipped shoulder, so someone MADE this
+    for (let i = 0; i < 18; i++) {
+      const mx = cx - shW + ((i * 23) % (shW * 2));
+      const my = chY + 2 + ((i * 17) % (chH - 4));
+      px(g, mx, my, i % 4 ? 'wood0' : 'wood3');
+    }
+    for (let i = 0; i < 4; i++) px(g, cx - shW + i, chY + i, 'ink');
+  },
+
+  // NOAH: six hundred years old, holding a hammer, entirely out of patience.
+  noah(g, x, y, w, h, t) {
+    vgrad(g, x, y, w, h, ['wood0', 'wood1', 'sand', 'sky'], 4);
+    const cx = x + w / 2, baseY = y + h;
+    // the half-built hull behind him: ribs and a ladder
+    for (let i = 0; i < 6; i++) {
+      const rx = x + 3 + i * Math.round(w / 6.5);
+      rect(g, rx, y + Math.round(h * 0.2), 2, Math.round(h * 0.8), 'wood1');
+    }
+    rect(g, x, y + Math.round(h * 0.34), w, 2, 'wood2');
+    rect(g, x, y + Math.round(h * 0.58), w, 2, 'wood2');
+    robe(g, cx, baseY, Math.round(w * 0.32), Math.round(h * 0.54), 'cloth1', 'cloth0', 'bone');
+    // a leather apron over the robe -- he is a shipwright before he is a prophet
+    rect(g, cx - Math.round(w * 0.16), baseY - Math.round(h * 0.44), Math.round(w * 0.32), Math.round(h * 0.3), 'wood2');
+    rect(g, cx - Math.round(w * 0.16), baseY - Math.round(h * 0.44), Math.round(w * 0.32), 1, 'wood3');
+    face(g, cx, y + Math.round(h * 0.32), Math.max(4, Math.round(w * 0.15)), 'sand', 'rust', 'bone', 'ink', t, true);
+    // a wide straw hat, because forty days of sun came before the forty of rain
+    const hy = y + Math.round(h * 0.32) - Math.round(w * 0.15);
+    // a wide woven brim -- forty days of sun came before the forty of rain
+    ellipse(g, cx, hy + 1, Math.round(w * 0.34) + 1, 5, 'ink');
+    for (let i = 0; i < 5; i++) {
+      ellipse(g, cx, hy - i, Math.round(w * 0.34) - i, 4 - Math.round(i * 0.5), i < 2 ? 'brass2' : 'brass1');
+    }
+    for (let i = -Math.round(w * 0.3); i < Math.round(w * 0.3); i += 4) px(g, cx + i, hy, 'brass3');
+    ellipse(g, cx, hy - 6, Math.round(w * 0.15), 5, 'brass1');
+    ellipse(g, cx, hy - 8, Math.round(w * 0.14), 3, 'brass2');
+    rect(g, cx - Math.round(w * 0.15), hy - 5, Math.round(w * 0.3), 2, 'wood1');
+    // the hammer, swinging on the idle
+    const sw = Math.sin(t * 1.9) * 3;
+    const hx2 = cx + Math.round(w * 0.28);
+    rect(g, hx2, y + Math.round(h * 0.42) + sw, 2, Math.round(h * 0.26), 'wood3');
+    rect(g, hx2 - 6, y + Math.round(h * 0.38) + sw, 14, 8, 'ink');
+    rect(g, hx2 - 5, y + Math.round(h * 0.38) + sw + 1, 12, 6, 'grey2');
+    rect(g, hx2 - 5, y + Math.round(h * 0.38) + sw + 1, 12, 2, 'ice');
+    rect(g, hx2 - 5, y + Math.round(h * 0.38) + sw + 5, 12, 2, 'grey0');
+  },
+
+  // THE SERPENT: the shopkeeper. Coiled in the branches, smiling, holding the stock.
+  snake(g, x, y, w, h, t) {
+    vgrad(g, x, y, w, h, ['cloth0', 'green0', 'green1', 'moss'], 4);
+    const cx = x + w / 2;
+    // the tree it lives in
+    rect(g, cx + Math.round(w * 0.22), y, Math.round(w * 0.14), h, 'wood1');
+    rect(g, cx + Math.round(w * 0.22), y, Math.round(w * 0.05), h, 'wood2');
+    for (let i = 0; i < 26; i++) {
+      const lx = x + ((i * 47) % w), ly = y + ((i * 31) % Math.round(h * 0.5));
+      ellipse(g, lx, ly, 3, 2, i % 3 ? 'green1' : 'green0');
+    }
+    // the coil: a body that winds down the frame, thickest in the middle
+    const sway = Math.sin(t * 1.1);
+    // A thick body: at 34 segments and 3px half-width it read as a dotted chain, so
+    // the coil is drawn twice -- an ink silhouette first, then the scales on top.
+    const SEG = 60;
+    for (const pass of [1, 0]) {
+      for (let i = 0; i < SEG; i++) {
+        const f = i / SEG;
+        const sx = cx + Math.sin(f * 6.4 + sway * 0.4) * (w * 0.24);
+        const sy = y + Math.round(h * 0.30) + f * h * 0.64;
+        const th = Math.round(5 + Math.sin(f * Math.PI) * 5) + pass;
+        if (pass) { rect(g, sx - th, sy - 1, th * 2, 4, 'ink'); continue; }
+        rect(g, sx - th, sy, th * 2, 3, 'green1');
+        rect(g, sx - th, sy, Math.max(1, Math.round(th * 0.7)), 3, 'foam');
+        rect(g, sx + Math.round(th * 0.4), sy, Math.round(th * 0.6), 3, 'green0');
+        // belly scales, in bands
+        if (i % 4 === 0) rect(g, sx - Math.round(th * 0.5), sy + 1, th, 1, 'moss');
+        if (i % 7 === 0) px(g, sx, sy, 'amber');
+      }
+    }
+    // the head, level with you, far too close
+    const hx3 = cx - Math.round(w * 0.14) + Math.round(sway * 2);
+    const hy3 = y + Math.round(h * 0.30);
+    ellipse(g, hx3, hy3, Math.round(w * 0.24) + 1, Math.round(w * 0.16) + 1, 'ink');
+    ellipse(g, hx3, hy3, Math.round(w * 0.23), Math.round(w * 0.15), 'green1');
+    ellipse(g, hx3 - 3, hy3 - 2, Math.round(w * 0.15), Math.round(w * 0.09), 'foam');
+    // a hood flared behind the skull
+    for (const side of [-1, 1]) {
+      ellipse(g, hx3 + Math.round(w * 0.1), hy3 + side * Math.round(w * 0.11),
+        Math.round(w * 0.1), Math.round(w * 0.06), 'green0');
+    }
+    // slit eyes with a gold ring -- the one honest thing about it
+    for (const side of [-1, 1]) {
+      const ex = hx3 + side * Math.round(w * 0.09);
+      disc(g, ex, hy3 - 3, 3, 'gold');
+      disc(g, ex, hy3 - 3, 2, 'amber');
+      rect(g, ex, hy3 - 5, 1, 5, 'ink');      // the slit
+      px(g, ex - 1, hy3 - 4, 'white');
+    }
+    // the smile, and the tongue
+    for (let i = -5; i <= 5; i++) {
+      px(g, hx3 + i, hy3 + Math.round(w * 0.07) + (Math.abs(i) > 3 ? -1 : 0), 'ink');
+      if (Math.abs(i) > 3) px(g, hx3 + i, hy3 + Math.round(w * 0.07) - 2, 'ink');   // upturned
+    }
+    if (((t * 1.6) % 2) < 0.5) {
+      const tl = Math.round(w * 0.1);
+      line(g, hx3, hy3 + Math.round(w * 0.06), hx3 - tl, hy3 + Math.round(w * 0.1), 'red2');
+      px(g, hx3 - tl - 1, hy3 + Math.round(w * 0.09), 'red2');
+      px(g, hx3 - tl - 1, hy3 + Math.round(w * 0.12), 'red2');
+    }
+    // an apple held out in the coil, bobbing
+    const ax2 = cx - Math.round(w * 0.28), ay2 = y + Math.round(h * 0.62) + Math.round(Math.sin(t * 2) * 2);
+    disc(g, ax2, ay2, Math.max(3, Math.round(w * 0.09)), 'red2');
+    disc(g, ax2 - 1, ay2 - 1, Math.max(1, Math.round(w * 0.04)), 'red1');
+    rect(g, ax2, ay2 - Math.round(w * 0.1), 1, 3, 'wood2');
+    ellipse(g, ax2 + 2, ay2 - Math.round(w * 0.1), 2, 1, 'green1');
+  },
+
+  // ADAM: the first one. Broad, plain, and holding out a gift he does not explain.
+  adam(g, x, y, w, h, t) {
+    vgrad(g, x, y, w, h, ['moss', 'green0', 'sand', 'gold'], 4);
+    const cx = x + w / 2, baseY = y + h;
+    // garden behind: tall grass
+    for (let i = 0; i < w; i += 3) {
+      const gh = 5 + ((i * 7) % 7);
+      rect(g, x + i, baseY - gh, 1, gh, i % 2 ? 'green1' : 'green0');
+    }
+    robe(g, cx, baseY, Math.round(w * 0.3), Math.round(h * 0.4), 'sand', 'rust', 'bone');
+    // bare chest above the wrap
+    rect(g, cx - Math.round(w * 0.16), baseY - Math.round(h * 0.62), Math.round(w * 0.32), Math.round(h * 0.24), 'sand');
+    rect(g, cx + Math.round(w * 0.04), baseY - Math.round(h * 0.62), Math.round(w * 0.12), Math.round(h * 0.24), mix(P.sand, P.rust, 0.3));
+    // the missing rib, drawn as a shadow line. He does not mention it.
+    for (let i = 0; i < 4; i++) px(g, cx + Math.round(w * 0.1) + i, baseY - Math.round(h * 0.52) + i, 'rust');
+    face(g, cx, y + Math.round(h * 0.28), Math.max(4, Math.round(w * 0.14)), 'sand', 'rust', 'wood1', 'ink', t, false);
+    // a fig leaf, held with dignity
+    const lx2 = cx - Math.round(w * 0.24);
+    ellipse(g, lx2, baseY - Math.round(h * 0.3), Math.round(w * 0.09), Math.round(h * 0.07), 'green1');
+    rect(g, lx2, baseY - Math.round(h * 0.3), 1, Math.round(h * 0.1), 'green0');
+    // and what he is offering: a shaped stone tool on his open palm
+    const gx = cx + Math.round(w * 0.26), gy = y + Math.round(h * 0.52) + Math.round(Math.sin(t * 1.3) * 2);
+    tri(g, gx, gy - 4, gx + 5, gy + 4, gx - 5, gy + 4, 'grey2');
+    tri(g, gx, gy - 3, gx + 3, gy + 3, gx - 1, gy + 3, 'ice');
+    for (let i = 0; i < 6; i++) px(g, gx - 5 + i * 2, gy + 5, 'wood2');
+  },
+
+  // EVE: the one who asked the question. Holds the apple like a piece of evidence.
+  eve(g, x, y, w, h, t) {
+    vgrad(g, x, y, w, h, ['moss', 'green1', 'pink', 'gold'], 4);
+    const cx = x + w / 2, baseY = y + h;
+    for (let i = 0; i < w; i += 3) {
+      const gh = 4 + ((i * 11) % 8);
+      rect(g, x + i, baseY - gh, 1, gh, i % 2 ? 'green1' : 'green0');
+    }
+    robe(g, cx, baseY, Math.round(w * 0.28), Math.round(h * 0.44), 'bone', 'grey1', 'white');
+    rect(g, cx - Math.round(w * 0.13), baseY - Math.round(h * 0.6), Math.round(w * 0.26), Math.round(h * 0.2), 'sand');
+    face(g, cx, y + Math.round(h * 0.28), Math.max(4, Math.round(w * 0.14)), 'sand', 'rust', 'wood2', 'ink', t, false);
+    // long hair either side, moving in the garden air
+    const sway2 = Math.sin(t * 1.2) * 1.5;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < Math.round(h * 0.34); i++) {
+        const hw2 = Math.round(w * 0.13) + Math.round(Math.sin(i * 0.3 + t) * 1.2);
+        rect(g, cx + side * hw2 + Math.round(sway2 * (i / (h * 0.34))), y + Math.round(h * 0.2) + i, 2, 1,
+          i % 5 === 0 ? 'wood3' : 'wood2');
+      }
+    }
+    // a crown of small flowers
+    for (let i = -3; i <= 3; i++) {
+      px(g, cx + i * 2, y + Math.round(h * 0.28) - Math.round(w * 0.15), i % 2 ? 'pink' : 'white');
+    }
+    // THE apple, held out at eye level
+    const ax3 = cx + Math.round(w * 0.26), ay3 = y + Math.round(h * 0.46) + Math.round(Math.sin(t * 1.6) * 2);
+    disc(g, ax3, ay3, Math.max(3, Math.round(w * 0.1)), 'red2');
+    disc(g, ax3 - 1, ay3 - 1, Math.max(1, Math.round(w * 0.04)), 'gold');
+    rect(g, ax3, ay3 - Math.round(w * 0.11), 1, 3, 'wood2');
+    ellipse(g, ax3 + 2, ay3 - Math.round(w * 0.11), 2, 1, 'green1');
+    // one bite already out of it
+    disc(g, ax3 + Math.round(w * 0.08), ay3 - 1, 2, 'moss');
+  },
+
   // The dove, for the ending.
   dove(g, x, y, w, h, t) {
     vgrad(g, x, y, w, h, ['water2', 'sky', 'ice', 'white'], 4);

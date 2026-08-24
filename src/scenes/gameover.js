@@ -1,6 +1,6 @@
 // Run summary — win or loss. Reads like a ship's log.
 
-import { rect, frame, text, textW, wash, clamp, lerp } from '../core/pixel.js';
+import { rect, frame, text, textW, wash, clamp, lerp, W, H } from '../core/pixel.js';
 import { Input } from '../core/input.js';
 import { Ease, approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
@@ -15,30 +15,34 @@ import { caravanBreakdown } from '../game/run.js';
 export function makeGameOverScene() {
   let run = null, won = false, onDone = null;
   let sea = null, parts = null, t = 0, kk = 0;
-  const again = UI.rectOf(226, 288, 188, 26);
+  const again = UI.rectOf(W / 2 - 140, H - 52, 280, 34);
 
   function draw(g) {
     sea.draw(g, {
-      x: 0, y: 0, w: 640, h: 360, horizonY: 150,
+      x: 0, y: 0, w: W, h: H, horizonY: 224,
       timeOfDay: won ? 0.2 : 0.78, storm: won ? 0 : 0.7, parallax: 0.6, reflect: true,
     });
-    wash(g, 0, 0, 640, 360, won ? 'gold' : 'ink', won ? 0.06 : 0.42);
+    wash(g, 0, 0, W, H, won ? 'gold' : 'ink', won ? 0.06 : 0.42);
     parts.draw(g, 'back');
 
     const k = Ease.outBack(clamp(kk, 0, 1));
-    const yy = Math.round(lerp(-70, 34, k));
+    const yy = Math.round(lerp(-100, 24, k));
     const s2 = run.stats;
 
     // --- headline
     const title = won ? 'THE ARK MAKES LANDFALL' : 'THE ARK IS LOST';
     // a scrim behind the headline: gold on a pale morning sky has no contrast
-    const tw = textW(title, { scale: 2 }) + 24;
-    wash(g, 320 - tw / 2, yy + 10, tw, 22, 'ink', 0.55);
-    text(g, title, 320, yy + 18, 'ink', { center: true, scale: 2 });
-    text(g, title, 320, yy + 16, won ? 'gold' : 'red2', { center: true, scale: 2, shadow: 'ink' });
-    text(g, won ? 'every habitat filled, every ante survived'
-      : `the water took you on ante ${Math.max(1, run.ante)}`,
-      320, yy + 38, 'bone', { font: 3, center: true });
+    const sub = won ? 'every animal in a berth it could live in, every ante survived'
+      : `the water took the deck on ante ${Math.max(1, run.ante)}`;
+    const tw = Math.max(textW(title, { scale: 3, font: 7 }), textW(sub, { font: 5 })) + 40;
+    // one scrim covering headline AND subtitle: the subtitle sits over pale morning
+    // sky on a win, and dark type on that has no contrast at all
+    wash(g, W / 2 - tw / 2, yy + 8, tw, 60, 'ink', 0.62);
+    rect(g, W / 2 - tw / 2, yy + 8, tw, 1, won ? 'brass1' : 'red0');
+    rect(g, W / 2 - tw / 2, yy + 67, tw, 1, won ? 'brass1' : 'red0');
+    text(g, title, W / 2, yy + 18, 'ink', { center: true, scale: 3, font: 7 });
+    text(g, title, W / 2, yy + 15, won ? 'gold' : 'red2', { center: true, scale: 3, font: 7, shadow: 'ink' });
+    text(g, sub, W / 2, yy + 52, 'bone', { font: 5, center: true, shadow: 'ink' });
 
     // --- the log: dark plates, because pale text on brass cannot be read
     const antes = won ? 8 : Math.max(0, run.ante - 1);
@@ -53,58 +57,66 @@ export function makeGameOverScene() {
       ['Money earned', '$' + s2.moneyEarned, 'brass3'],
       ['Crates unloaded', String(s2.cratesBought), 'sky'],
     ];
-    UI.panel(g, 34, yy + 52, 262, 124, { style: 'slate', shadow: true, title: "SHIP'S LOG" });
+    const LOG_X = 46, LOG_W = 400;
+    UI.panel(g, LOG_X, yy + 74, LOG_W, 190, { style: 'slate', shadow: true, title: "SHIP'S LOG" });
     rows.forEach((r, i) => {
-      const ry = yy + 62 + i * 12;
-      if (i % 2 === 0) rect(g, 38, ry - 1, 254, 11, 'deep');
-      text(g, r[0], 44, ry + 1, 'grey2', { font: 3 });
-      text(g, r[1], 288, ry - 1, r[2], { right: true, font: 3 });
+      const ry = yy + 90 + i * 19;
+      if (i % 2 === 0) rect(g, LOG_X + 4, ry - 2, LOG_W - 8, 18, 'deep');
+      text(g, r[0], LOG_X + 12, ry + 2, 'grey2', { font: 5 });
+      text(g, r[1], LOG_X + LOG_W - 12, ry, r[2], { right: true, font: 7 });
     });
 
     // --- census
-    UI.panel(g, 306, yy + 52, 300, 124, { style: 'slate', shadow: true, title: 'FINAL CARAVAN' });
+    const CEN_X = 460, CEN_W = W - CEN_X - 46;
+    UI.panel(g, CEN_X, yy + 74, CEN_W, 190, { style: 'slate', shadow: true, title: 'WHAT THEY WANTED' });
     const cb = caravanBreakdown(run);
     const homes = Object.keys(cb.byHome).sort((a, b) => cb.byHome[b] - cb.byHome[a]);
+    const maxN = Math.max(1, ...homes.map((h) => cb.byHome[h]));
     homes.slice(0, 9).forEach((hid, i) => {
       const hab = HABITAT_BY_ID[hid];
       if (!hab) return;
-      const cxx = 314 + (i % 2) * 148;
-      const cyy = yy + 62 + Math.floor(i / 2) * 12;
-      rect(g, cxx, cyy - 1, 142, 11, i % 4 < 2 ? 'deep' : 'shadow');
-      rect(g, cxx, cyy - 1, 2, 11, hab.color);
-      UI.icon(g, hab.icon, cxx + 4, cyy, { color: hab.accent || hab.color });
-      text(g, hab.name, cxx + 16, cyy + 1, 'bone', { font: 3 });
-      text(g, 'x' + cb.byHome[hid], cxx + 138, cyy + 1, 'white', { font: 3, right: true });
+      const cxx = CEN_X + 8;
+      const cyy = yy + 90 + i * 19;
+      const rw = CEN_W - 16;
+      rect(g, cxx, cyy - 2, rw, 18, i % 2 ? 'deep' : 'shadow');
+      rect(g, cxx, cyy - 2, 3, 18, hab.color);
+      UI.icon(g, hab.icon, cxx + 8, cyy + 1, { color: hab.accent || hab.color });
+      text(g, hab.name, cxx + 22, cyy + 2, 'bone', { font: 5 });
+      // a bar, so the shape of the caravan is legible at a glance
+      const bw = Math.round((rw - 150) * (cb.byHome[hid] / maxN));
+      rect(g, cxx + 96, cyy + 3, bw, 9, hab.color);
+      rect(g, cxx + 96, cyy + 3, bw, 2, 'white');
+      text(g, 'x' + cb.byHome[hid], cxx + rw - 8, cyy, 'white', { font: 7, right: true });
     });
-    text(g, `${cb.total} animals aboard`, 596, yy + 164, 'brass2', { font: 3, right: true });
+    text(g, `${cb.total} animals aboard`, CEN_X + CEN_W - 8, yy + 250, 'brass2', { font: 5, right: true });
 
     // --- relics
-    UI.panel(g, 34, yy + 182, 262, 46, { style: 'slate', shadow: true, corners: false });
-    text(g, 'RELICS CARRIED', 40, yy + 186, 'brass2', { font: 3 });
+    UI.panel(g, LOG_X, yy + 272, LOG_W, 72, { style: 'slate', shadow: true, corners: false });
+    text(g, 'RELICS CARRIED', LOG_X + 10, yy + 278, 'brass2', { font: 5 });
     if (run.relics.length) {
       run.relics.forEach((r, i) => {
-        const rx = 40 + i * 16, ry = yy + 196;
-        rect(g, rx, ry, 14, 14, 'ink');
-        frame(g, rx, ry, 14, 14, UI.RARITY_COLOR[r.rarity] || 'grey2');
-        UI.icon(g, (r.art && r.art.icon) || 'gem', rx + 3, ry + 3, { color: (r.art && r.art.fg) || 'brass3' });
+        const rx = LOG_X + 10 + (i % 12) * 32, ry = yy + 296 + Math.floor(i / 12) * 26;
+        rect(g, rx, ry, 26, 26, 'ink');
+        frame(g, rx, ry, 26, 26, UI.RARITY_COLOR[r.rarity] || 'grey2');
+        UI.icon(g, (r.art && r.art.icon) || 'gem', rx + 5, ry + 5, { color: (r.art && r.art.fg) || 'brass3', scale: 2 });
       });
     } else {
-      text(g, 'none — you played it bare', 40, yy + 200, 'grey1', { font: 3 });
+      text(g, 'none — you played it bare', LOG_X + 10, yy + 302, 'grey1', { font: 5 });
     }
 
     // --- the animals you saved
-    UI.panel(g, 306, yy + 182, 300, 46, { style: 'slate', shadow: true, corners: false });
-    text(g, 'ABOARD', 312, yy + 186, 'brass2', { font: 3 });
-    const uniq = Array.from(new Set(run.caravan)).slice(0, 46);
+    UI.panel(g, CEN_X, yy + 272, CEN_W, 72, { style: 'slate', shadow: true, corners: false });
+    text(g, 'ABOARD', CEN_X + 10, yy + 278, 'brass2', { font: 5 });
+    const uniq = Array.from(new Set(run.caravan)).slice(0, 60);
     uniq.forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
-      drawAnimalIcon(g, a, 318 + (i % 23) * 12, yy + 202 + Math.floor(i / 23) * 12, { scale: 1 });
+      drawAnimalIcon(g, a, CEN_X + 18 + (i % 20) * 20, yy + 300 + Math.floor(i / 20) * 20, { scale: 1 });
     });
 
-    const sw = textW('SEED  ' + run.seed, { font: 3 }) + 12;
-    wash(g, 320 - sw / 2, yy + 232, sw, 9, 'ink', 0.5);
-    text(g, 'SEED  ' + run.seed, 320, yy + 234, 'foam', { font: 3, center: true });
+    const sw = textW('SEED  ' + run.seed, { font: 5 }) + 20;
+    wash(g, W / 2 - sw / 2, H - 82, sw, 15, 'ink', 0.5);
+    text(g, 'SEED  ' + run.seed, W / 2, H - 79, 'foam', { font: 5, center: true });
     UI.button(g, again, 'BACK TO THE HARBOUR', {
       state: UI.hover(again, Input.mouse) ? 'hover' : 'idle', color: won ? 'brass1' : 'wood2',
     });
@@ -116,7 +128,7 @@ export function makeGameOverScene() {
     kk = approach(kk, 1, 3.4, dt);
     sea.update(dt);
     parts.update(dt);
-    if (won && t % 0.5 < dt) parts.emit('confetti', 60 + ((t * 137) % 520), -6, { count: 6, speed: 40, life: 3 });
+    if (won && t % 0.5 < dt) parts.emit('confetti', 60 + ((t * 137) % (W - 120)), -6, { count: 8, speed: 40, life: 3 });
     if ((Input.mouse.pressed && UI.hover(again, Input.mouse)) || Input.pressed('Enter')) {
       Audio.sfx('click');
       if (onDone) onDone();

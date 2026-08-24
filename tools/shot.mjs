@@ -163,11 +163,11 @@ switch (which) {
       draw() {
         rect(g, 0, 0, SW, SH, 'ink');
         PORTRAIT_IDS.forEach((id, i) => {
-          const x = 24 + i * 100, y = 60;
-          drawPortrait(g, id, x, y, 84, 120, 1.4 + i * 0.7, { color: 'red2', icon: 'skull' });
-          text(g, id, x + 42, y + 128, 'bone', { font: 3, center: true });
+          const x = 26 + (i % 6) * 155, y = 50 + Math.floor(i / 6) * 250;
+          drawPortrait(g, id, x, y, 132, 200, 1.4 + i * 0.7, { color: 'red2', icon: 'skull' });
+          text(g, id.toUpperCase(), x + 66, y + 208, 'bone', { font: 5, center: true });
         });
-        text(g, 'SPEAKERS', 320, 24, 'brass3', { font: 7, center: true });
+        text(g, 'SPEAKERS', SW / 2, 20, 'brass3', { font: 7, center: true });
       },
     };
     break;

@@ -1,6 +1,8 @@
 // Title screen. The ark drifts, animals bob on the deck, the sun goes down behind it.
 
-import { rect, frame, box, px, line, disc, ring, ellipse, text, textW, wrap, wash, clamp, lerp } from '../core/pixel.js';
+import {
+  rect, frame, box, px, line, disc, ring, ellipse, text, textW, wrap, wash, clamp, lerp, W, H,
+} from '../core/pixel.js';
 import { Input } from '../core/input.js';
 import { Juice, Ease, approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
@@ -22,88 +24,90 @@ export function makeMenuScene() {
   let logoK = 0;
 
   const btn = {
-    start: UI.rectOf(238, 252, 164, 26),
-    seed: UI.rectOf(238, 284, 164, 16),
-    help: UI.rectOf(238, 304, 78, 16),
-    mute: UI.rectOf(324, 304, 78, 16),
+    start: UI.rectOf(370, 366, 220, 38),
+    seed: UI.rectOf(370, 410, 220, 24),
+    help: UI.rectOf(370, 440, 106, 24),
+    mute: UI.rectOf(484, 440, 106, 24),
   };
 
   function draw(g) {
     // sky + sea, sun low and warm
-    sea.draw(g, { x: 0, y: 0, w: 640, h: 360, horizonY: 132, timeOfDay: 0.44, storm: 0.05, parallax: 1, reflect: true });
+    sea.draw(g, { x: 0, y: 0, w: W, h: H, horizonY: 198, timeOfDay: 0.44, storm: 0.05, parallax: 1, reflect: true });
 
     // --- the ark, drifting
     const bob = Math.sin(t * 0.7) * 2;
     const roll = Math.sin(t * 0.5 + 1) * 0.6;
-    drawArk(g, 320, 182 + bob, roll);
+    drawArk(g, W / 2, 262 + bob, roll);
 
     parts.draw(g, 'back');
 
     // --- logo
     const k = Ease.outBack(clamp(logoK, 0, 1));
-    const ly = lerp(-46, 46, k);
-    drawLogo(g, 320, ly);
+    const ly = lerp(-90, 62, k);
+    drawLogo(g, W / 2, ly);
 
     // --- menu plate
-    UI.panel(g, 230, 244, 180, 82, { style: 'wood', shadow: true });
+    UI.panel(g, 358, 352, 244, 128, { style: 'wood', shadow: true });
 
     const m = Input.mouse;
     UI.button(g, btn.start, 'NEW RUN', {
       state: UI.hover(btn.start, m) ? 'hover' : 'idle', color: 'green0', icon: 'boat',
     });
     UI.button(g, btn.seed, editing ? seed + '_' : 'SEED  ' + seed, {
-      state: editing ? 'down' : UI.hover(btn.seed, m) ? 'hover' : 'idle', color: 'wood2', small: true,
+      state: editing ? 'down' : UI.hover(btn.seed, m) ? 'hover' : 'idle', color: 'wood2',
     });
-    UI.button(g, btn.help, 'HOW TO', { state: UI.hover(btn.help, m) ? 'hover' : 'idle', color: 'wood2', small: true });
+    UI.button(g, btn.help, 'HOW TO', { state: UI.hover(btn.help, m) ? 'hover' : 'idle', color: 'wood2' });
     UI.button(g, btn.mute, Audio.muted ? 'SOUND OFF' : 'SOUND ON', {
-      state: UI.hover(btn.mute, m) ? 'hover' : 'idle', color: Audio.muted ? 'grey0' : 'wood2', small: true,
+      state: UI.hover(btn.mute, m) ? 'hover' : 'idle', color: Audio.muted ? 'grey0' : 'wood2',
     });
 
-    text(g, 'a 2.5D habitat pool roguelike', 320, 332, 'foam', { font: 3, center: true });
-    text(g, 'sink every animal into the biome it calls home', 320, 342, 'water3', { font: 3, center: true });
+    text(g, 'a 2.5D berth-trait pool roguelike', W / 2, 496, 'foam', { font: 5, center: true });
+    text(g, 'Noah built the ark. The animals will not board. You are the golem.',
+      W / 2, 512, 'water3', { font: 5, center: true });
 
     parts.draw(g, 'front');
     if (showHelp) drawHelp(g);
   }
 
   function drawLogo(g, cx, y) {
-    const w = 250, h = 74;
+    const w = 420, h = 124;
     const x = cx - w / 2;
     UI.panel(g, x, y, w, h, { style: 'wood', shadow: true, rivets: true });
     // brass sign plate inside the timber
     UI.panel(g, x + 8, y + 6, w - 16, h - 14, { style: 'brass', inset: true, corners: false });
 
     // stacked wordmark: engraved dark, then the face, so it reads as struck metal
-    text(g, 'POCKET', cx, y + 12, 'wood0', { center: true, scale: 2 });
-    text(g, 'POCKET', cx, y + 11, 'brass3', { center: true, scale: 2, shadow: 'wood1' });
-    text(g, 'ARK', cx, y + 30, 'wood0', { center: true, scale: 4 });
-    text(g, 'ARK', cx, y + 28, 'white', { center: true, scale: 4, shadow: 'brass1' });
+    text(g, 'POCKET', cx, y + 18, 'wood0', { center: true, scale: 3, font: 7 });
+    text(g, 'POCKET', cx, y + 16, 'brass3', { center: true, scale: 3, font: 7, shadow: 'wood1' });
+    text(g, 'ARK', cx, y + 50, 'wood0', { center: true, scale: 6 });
+    text(g, 'ARK', cx, y + 47, 'white', { center: true, scale: 6, shadow: 'brass1' });
 
     // a dark strip behind the strapline — engraved brass on brass is unreadable
-    const sw = textW('SIX GATES · EIGHT ANTES · ONE ARK', { font: 3 }) + 12;
-    rect(g, cx - sw / 2, y + h - 17, sw, 9, 'wood0');
-    rect(g, cx - sw / 2, y + h - 17, sw, 1, 'brass1');
-    text(g, 'SIX GATES · EIGHT ANTES · ONE ARK', cx, y + h - 15, 'brass3', { font: 3, center: true });
+    const strap = 'SIX BERTHS · EIGHT ANTES · ONE ARK';
+    const sw = textW(strap, { font: 5 }) + 22;
+    rect(g, cx - sw / 2, y + h - 26, sw, 15, 'wood0');
+    rect(g, cx - sw / 2, y + h - 26, sw, 1, 'brass1');
+    text(g, strap, cx, y + h - 23, 'brass3', { font: 5, center: true });
 
     // a cue and a ball, crossed like a crest, on the timber shoulders
     for (const side of [-1, 1]) {
-      const sx = cx + side * (w / 2 - 6);
-      for (let i = 0; i < 12; i++) px(g, sx - side * i, y + 16 + i, 'wood0');
-      disc(g, sx - side * 12, y + 29, 3, 'bone');
-      px(g, sx - side * 13, y + 28, 'white');
+      const sx = cx + side * (w / 2 - 8);
+      for (let i = 0; i < 20; i++) px(g, sx - side * i, y + 24 + i, 'wood0');
+      disc(g, sx - side * 20, y + 46, 5, 'bone');
+      px(g, sx - side * 22, y + 44, 'white');
     }
 
     // two animals peeking over the top edge of the sign
     ['penguin', 'fox'].forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
-      const ax = i === 0 ? cx - w / 2 + 16 : cx + w / 2 - 16;
-      drawAnimal(g, a, ax, y - 3 + Math.round(Math.sin(t * 2 + i * 2) * 1), { scale: 1, flip: i === 1 });
+      const ax = i === 0 ? cx - w / 2 + 26 : cx + w / 2 - 26;
+      drawAnimal(g, a, ax, y - 6 + Math.round(Math.sin(t * 2 + i * 2) * 2), { scale: 1, flip: i === 1 });
     });
   }
 
   function drawArk(g, cx, cy, roll) {
-    const w = 250, h = 26;
+    const w = 400, h = 42;
     const y = Math.round(cy);
     // hull
     for (let i = 0; i < h; i++) {
@@ -159,7 +163,7 @@ export function makeMenuScene() {
   }
 
   function drawHelp(g) {
-    wash(g, 0, 0, 640, 360, 'ink', 0.72);
+    wash(g, 0, 0, W, H, 'ink', 0.72);
     UI.panel(g, 60, 30, 520, 300, { style: 'paper', shadow: true, title: 'THE KEEPER\'S MANUAL' });
     const lines = [
       ['THE JOB', 'brass3'],
@@ -184,7 +188,7 @@ export function makeMenuScene() {
       ['Eight antes. Three blinds each. The last one always bites back.', 'red1'],
     ];
     lines.forEach((l, i) => text(g, l[0], 76, 52 + i * 12, l[1], { font: l[1] === 'brass3' ? 5 : 3 }));
-    text(g, 'CLICK ANYWHERE TO CLOSE', 320, 314, 'grey0', { font: 3, center: true });
+    text(g, 'CLICK ANYWHERE TO CLOSE', W / 2, H - 34, 'grey0', { font: 5, center: true });
   }
 
   function update(dt) {

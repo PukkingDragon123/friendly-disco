@@ -168,8 +168,32 @@ function backdrop() {
     ellipse(b, 470 + ((i % 2) * 7), rivY + 1 + i * 4, 6, 2, 'stone3');
   }
 
+  // GRASS STROKES first, in quantity: the layer that stops a lawn reading as felt. A
+  // field with only flowers on it is a flat colour with confetti scattered over it.
+  for (let i = 0; i < 2600; i++) {
+    const x = (i * 149) % W;
+    const y = rivY + 26 + ((i * 97) % (H - rivY - 30));
+    const k = ((i * 31) % 100) / 100;
+    const base = y < H * 0.72 ? P.leaf1 : P.moss;
+    rect(b, x, y, 1 + Math.round(k * 3), 1, mix(base, k < 0.5 ? P.ink : P.leaf3, 0.08 + k * 0.07));
+  }
+  // a mown path from the gate down through the beds, so the garden has a route in it
+  for (let y = rivY + 24; y < H; y++) {
+    const f = (y - rivY - 24) / (H - rivY - 24);
+    const cx2 = 738 - f * 300 + Math.sin(f * 5) * 18;
+    const half = 9 + f * 7;
+    for (let dx = -half; dx <= half; dx++) {
+      const t = Math.abs(dx) / half;
+      if (t > 1) continue;
+      px(b, Math.round(cx2 + dx), y,
+        t > 0.8 ? mix(P.leaf1, P.clay1, 0.35) : t > 0.4 ? mix(P.moss, P.clay1, 0.3) : mix(P.clay1, P.moss, 0.45));
+    }
+    if (y % 5 === 0) px(b, Math.round(cx2 - half), y, 'leaf3');
+    if (y % 7 === 2) px(b, Math.round(cx2 + half), y, 'leaf2');
+  }
+
   // flowers and tufts, thicker than any island
-  for (let i = 0; i < 760; i++) {
+  for (let i = 0; i < 900; i++) {
     const x = (i * 137) % W;
     const y = rivY + 30 + ((i * 89) % (H - rivY - 34));
     const k = (i * 29) % 12;

@@ -78,6 +78,34 @@ function brushed(g, x, y, w, h, s) {
   for (let j = 0; j < h; j++) if (j % 4 === 1) rect(g, x, y + j, w, 1, s.mid);
 }
 
+/**
+ * PLANK SEAMS. A wood panel wants to look built, not textured: a groove every eight or
+ * ten rows with a lit lip under it reads as boards, and boards are most of what makes a
+ * farming-game frame feel warm rather than generic.
+ */
+function planks(g, x, y, w, h, s) {
+  for (let j = 9; j < h - 4; j += 10) {
+    rect(g, x + 2, y + j, w - 4, 1, s.edge);
+    rect(g, x + 2, y + j + 1, w - 4, 1, s.top);
+    // a peg at each end of every board
+    px(g, x + 5, y + j - 3, s.trim);
+    px(g, x + w - 6, y + j - 3, s.trim);
+  }
+}
+
+/**
+ * A DECKLE EDGE. Real paper does not end in a straight line, and one irregular pixel
+ * along a parchment card is the cheapest possible signal that it is paper.
+ */
+function deckle(g, x, y, w, h, s) {
+  for (let i = 3; i < w - 3; i++) {
+    if (hash2(i, 0, 91) > 0.62) { px(g, x + i, y + 2, s.top); px(g, x + i, y + h - 3, s.bot); }
+  }
+  for (let j = 3; j < h - 3; j++) {
+    if (hash2(0, j, 93) > 0.62) { px(g, x + 2, y + j, s.top); px(g, x + w - 3, y + j, s.bot); }
+  }
+}
+
 /* ---------------------------------------------------------------- panel cache
 
 A panel is completely determined by its style, size and flags: the wood grain, the
@@ -149,9 +177,15 @@ function paintPanel(g, x, y, w, h, o = {}) {
     box(g, x, y, w, h, s.fill, 2);
     // inset plates hold icons and readouts; texture would fight what sits on them
     if (!o.inset && w > 10 && h > 10) {
-      if (o.style === 'wood' || o.style === undefined) grain(g, x + 2, y + 2, w - 4, h - 4, s);
-      else if (o.style === 'paper') speckle(g, x + 2, y + 2, w - 4, h - 4);
-      else if (o.style === 'brass') brushed(g, x + 2, y + 2, w - 4, h - 4, s);
+      if (o.style === 'wood' || o.style === undefined) {
+        grain(g, x + 2, y + 2, w - 4, h - 4, s);
+        // only on panels tall enough to have boards. A seam every ten rows through a
+        // forty-six pixel HUD strip runs straight through the text on it.
+        if (h > 64) planks(g, x, y, w, h, s);
+      } else if (o.style === 'paper') {
+        speckle(g, x + 2, y + 2, w - 4, h - 4);
+        deckle(g, x, y, w, h, s);
+      } else if (o.style === 'brass') brushed(g, x + 2, y + 2, w - 4, h - 4, s);
     }
   } else {
     wash(g, x, y, w, h, 'water0', 0.55);
@@ -172,13 +206,25 @@ function paintPanel(g, x, y, w, h, o = {}) {
     rect(g, x + w - 2, y + 2, 1, h - 4, s.bot);
   }
   boxFrame(g, x, y, w, h, s.edge, 2);
+  // a second, carved line inset from the first: one frame is a box, two is a FRAME, and
+  // that is most of the difference between a UI rectangle and a cozy wooden board
+  if (o.carve !== false && w > 20 && h > 16) {
+    boxFrame(g, x + 3, y + 3, w - 6, h - 6, s.bot, 1);
+    rect(g, x + 4, y + 4, w - 8, 1, s.top);
+  }
 
-  // brass corner brackets
+  // brass corner plates: a bracket with a rivet in it, which reads at a glance as
+  // hardware rather than as four stray pixels
   if (o.corners !== false && w > 16 && h > 12) {
-    for (const [cx, cy, dx, dy] of [[x + 2, y + 2, 1, 1], [x + w - 3, y + 2, -1, 1], [x + 2, y + h - 3, 1, -1], [x + w - 3, y + h - 3, -1, -1]]) {
-      rect(g, Math.min(cx, cx + dx * 4), cy, 4, 1, s.trim);
-      rect(g, cx, Math.min(cy, cy + dy * 4), 1, 4, s.trim);
-      px(g, cx, cy, s.bright);
+    for (const [cx, cy, dx, dy] of [
+      [x + 2, y + 2, 1, 1], [x + w - 3, y + 2, -1, 1],
+      [x + 2, y + h - 3, 1, -1], [x + w - 3, y + h - 3, -1, -1],
+    ]) {
+      rect(g, Math.min(cx, cx + dx * 5), cy, 5, 1, s.trim);
+      rect(g, cx, Math.min(cy, cy + dy * 5), 1, 5, s.trim);
+      rect(g, Math.min(cx, cx + dx * 3), cy + dy, 3, 1, s.bright);
+      rect(g, cx + dx, Math.min(cy, cy + dy * 3), 1, 3, s.bright);
+      px(g, cx + dx * 2, cy + dy * 2, s.edge);
     }
   }
   if (o.rivets && w > 40) {

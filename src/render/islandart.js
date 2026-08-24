@@ -16,6 +16,9 @@
 
 import { P, col, mix } from '../core/palette.js';
 import { makeCanvas, rect, px, line, disc, ellipse, tri, wash, clamp } from '../core/pixel.js';
+import {
+  makeBuf, bset, brect, bline, btri, orb, blob, limb, orbShade, outline, flush,
+} from './pixbuf.js';
 
 const H2 = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
 
@@ -108,6 +111,104 @@ export function drawIslandFar(g, island, x, y, w, h, t = 0, o = {}) {
   weather(g, island, x, y - h, w, h, t, o.weatherAmt !== undefined ? o.weatherAmt : 1);
 }
 
+/* --------------------------------------------------------------- stamps
+
+Scenery items are painted into a small pixbuf, OUTLINED, and blitted onto the backdrop.
+That gets every tree and rock its own dark contour -- the thing that makes a piece of
+scenery read as an object rather than as a smudge of a similar colour -- without
+outlining the sky and the sea along with it.
+*/
+
+function stamp(g, x, y, w, h, paint) {
+  const buf = makeBuf(w, h);
+  paint(buf);
+  outline(buf, 'ink');
+  flush(buf, g, Math.round(x), Math.round(y));
+}
+
+/**
+ * A tree: a tapering trunk with bark, then overlapping canopy orbs with a lit crown and
+ * a shadowed underside. A stick with an ellipse on top is a lollipop; what makes a tree
+ * is the canopy having a TOP and a BOTTOM.
+ */
+function treeStamp(g, x, base, th, tw, ramp, o = {}) {
+  const w = Math.round(tw * 2 + 6), h = Math.round(th + tw + 8);
+  const cx = Math.round(w / 2), by = h - 3;
+  stamp(g, x - cx, base - by, w, h, (b) => {
+    const trunkW = Math.max(2, Math.round(tw * 0.22));
+    for (let i = 0; i < th; i++) {
+      const f = i / th;
+      const ww = Math.max(2, Math.round(trunkW * (1 - f * 0.35)));
+      const lean = Math.round((o.lean || 0) * f * f);
+      brect(b, cx - Math.floor(ww / 2) + lean, by - i, ww, 1, 'bark');
+      bset(b, cx - Math.floor(ww / 2) + lean, by - i, 'wood2');
+      if (i % 5 === 0) bset(b, cx + Math.ceil(ww / 2) - 1 + lean, by - i, 'wood0');
+    }
+    // roots
+    bset(b, cx - trunkW, by, 'bark'); bset(b, cx + trunkW, by, 'bark');
+    const topY = by - th;
+    const lobes = o.lobes || 5;
+    for (let i = 0; i < lobes; i++) {
+      const a = -Math.PI / 2 + (i - (lobes - 1) / 2) * (1.9 / lobes);
+      const d = tw * (i === Math.floor(lobes / 2) ? 0.2 : 0.62);
+      orb(b, cx + Math.cos(a) * d + (o.lean || 0), topY + Math.sin(a) * d * 0.5,
+        tw * (0.5 + (i % 2) * 0.12), orbShade(ramp));
+    }
+    // the sun on the crown, and the shade under the skirt
+    for (let i = 0; i < Math.round(tw); i++) {
+      bset(b, cx - tw * 0.5 + i + (o.lean || 0), topY - tw * 0.5 + Math.abs(i - tw * 0.5) * 0.3,
+        ramp[ramp.length - 1]);
+    }
+  });
+}
+
+/** A bush: three overlapping domes with a dark base. */
+function bushStamp(g, x, base, r, ramp) {
+  const w = Math.round(r * 3.2), h = Math.round(r * 2.4);
+  stamp(g, x - w / 2, base - h + 2, w, h, (b) => {
+    const cx = Math.round(w / 2), by = h - 3;
+    for (const [ox, sc] of [[-r * 0.6, 0.72], [r * 0.6, 0.66], [0, 0.95]]) {
+      orb(b, cx + ox, by - r * sc * 0.7, r * sc, orbShade(ramp));
+    }
+    for (let i = 0; i < 5; i++) bset(b, cx - r + i * r * 0.5, by - r * 1.3, ramp[ramp.length - 1]);
+  });
+}
+
+/** A rock: a lumpy shaded stone with facets. */
+function rockStamp(g, x, base, r, ramp) {
+  const w = Math.round(r * 2.6), h = Math.round(r * 2.2);
+  stamp(g, x - w / 2, base - h + 3, w, h, (b) => {
+    const cx = Math.round(w / 2), cy = h - r - 2;
+    orb(b, cx, cy, r, orbShade(ramp), { squashY: 0.85 });
+    bline(b, cx - r * 0.3, cy - r * 0.4, cx + r * 0.5, cy + r * 0.3, ramp[0]);
+    bline(b, cx - r * 0.6, cy + r * 0.2, cx, cy + r * 0.5, ramp[0]);
+    for (let i = 0; i < 3; i++) bset(b, cx - r * 0.5 + i, cy - r * 0.7, ramp[ramp.length - 1]);
+  });
+}
+
+/** A pine: stacked tiers, which is the only conifer shape that reads at this size. */
+function pineStamp(g, x, base, th, tw) {
+  const w = Math.round(tw * 2 + 6), h = Math.round(th + 8);
+  stamp(g, x - w / 2, base - h + 3, w, h, (b) => {
+    const cx = Math.round(w / 2), by = h - 4;
+    brect(b, cx - 1, by - 4, 3, 6, 'wood1');
+    const tiers = 4;
+    for (let k = 0; k < tiers; k++) {
+      const f = k / (tiers - 1);
+      const ty = by - 4 - f * (th - 6);
+      const twid = tw * (1 - f * 0.7);
+      for (let i = 0; i <= twid * 2; i++) {
+        const dx = i - twid;
+        const hgt = Math.round((1 - Math.abs(dx) / Math.max(1, twid)) * th * 0.22) + 1;
+        for (let j = 0; j < hgt; j++) {
+          bset(b, cx + dx, ty - j, dx < 0 ? 'leaf2' : dx < twid * 0.4 ? 'leaf1' : 'leaf0');
+        }
+      }
+    }
+    bset(b, cx, by - th, 'leaf3');
+  });
+}
+
 /* --------------------------------------------------------------- the scenery */
 
 function scenery(b, island, cx, base, w, h, sc) {
@@ -120,66 +221,112 @@ function scenery(b, island, cx, base, w, h, sc) {
       case 'hills':
         for (let i = 0; i < 3; i++) {
           const hx = cx + (H2(seed + i) - 0.5) * w * 0.6;
-          ellipse(b, hx, base - h * 0.35, w * 0.16, h * 0.16, mix(P[G[1]], P.ink, 0.15));
+          const hr = w * (0.13 + H2(seed + i * 3) * 0.06);
+          // a lit crown and a shaded skirt: a flat ellipse is a stain
+          // widest at the BASE. Taking the width from sqrt(1-f^2) with f running from the
+          // top down builds the dome upside down, and three upside-down domes on a
+          // horizon look like a row of satellite dishes.
+          const hb = base - h * 0.28;
+          for (let y = 0; y < hr * 0.8; y++) {
+            const f = 1 - y / (hr * 0.8);
+            const ww = Math.round(hr * Math.sqrt(Math.max(0, 1 - f * f)));
+            rect(b, hx - ww, hb - hr * 0.8 + y, ww * 2, 1,
+              f > 0.7 ? mix(P[G[1]], P.white, 0.12) : f > 0.3 ? P[G[1]] : mix(P[G[1]], P.ink, 0.18));
+          }
         }
         break;
       case 'wall': {
         // a dry stone wall running across the slope: one course of stones with a
         // capstone line. The old version was seven tall posts, which read as a fence
         // grid laid over the hill rather than a wall standing on it.
-        const wy = Math.round(base - h * 0.22);
+        // built out of STONES, in two courses, with capstones and a shadow at its foot.
+        // One grey bar with speckles on it read as a kerb.
+        const wy = Math.round(base - h * 0.24);
         const ww = Math.round(w * 0.62), wx = Math.round(cx - ww / 2);
-        rect(b, wx, wy, ww, 3 * sc, 'stone1');
-        rect(b, wx, wy, ww, 1, 'stone3');
-        for (let i = 0; i < Math.round(ww / 5); i++) {
-          px(b, wx + 2 + i * 5, wy + 1 + (i % 2), 'stone0');
-          px(b, wx + 4 + i * 5, wy + 2, 'stone2');
-        }
-        rect(b, wx, wy + 3 * sc, ww, 1, mix(P[G[0]], P.ink, 0.35));
+        const wh = Math.max(5, 4 * sc);
+        stamp(b, wx, wy - 2, ww, wh + 4, (bb) => {
+          for (let course = 0; course < 2; course++) {
+            const cy2 = 2 + course * Math.round(wh / 2);
+            for (let i = 0; i < Math.round(ww / 6); i++) {
+              const sx2 = (course % 2 ? 3 : 0) + i * 6;
+              const sw = 5 + (i % 2);
+              const sh = Math.max(2, Math.round(wh / 2) - 1);
+              for (let yy = 0; yy < sh; yy++) {
+                for (let xx = 0; xx < sw; xx++) {
+                  const t = yy / sh;
+                  bset(bb, sx2 + xx, cy2 + yy,
+                    t < 0.3 ? 'stone3' : t < 0.7 ? 'stone2' : 'stone1');
+                }
+              }
+              bset(bb, sx2, cy2, 'stone4');
+            }
+          }
+          for (let i = 0; i < ww; i += 4) brect(bb, i, 0, 3, 2, 'stone3');
+        });
+        rect(b, wx, wy + wh + 2, ww, 1, mix(P[G[0]], P.ink, 0.4));
         break;
       }
-      case 'tree': case 'olives':
+      case 'tree': case 'olives': {
+        const olive = name === 'olives';
         for (let i = 0; i < 4; i++) {
-          const tx = cx + (H2(seed + i * 3) - 0.5) * w * 0.7;
-          const ty = base - h * (0.2 + H2(seed + i) * 0.3);
-          rect(b, tx, ty, Math.max(1, sc), h * 0.14, 'bark');
-          for (let j = 0; j < 6; j++) {
-            ellipse(b, tx + (H2(seed + i * 9 + j) - 0.5) * w * 0.1, ty - h * 0.04 * j * 0.6,
-              w * 0.06, h * 0.05, j < 2 ? 'leaf1' : j < 4 ? 'leaf2' : 'leaf3');
-          }
+          const tx = cx + (H2(seed + i * 3) - 0.5) * w * 0.72;
+          const th = h * (0.17 + H2(seed + i) * 0.13);
+          treeStamp(b, tx, base - h * 0.04, th, Math.max(5, w * 0.075),
+            olive ? ['leaf0', 'leaf1', 'moss', 'leaf3'] : ['leaf0', 'leaf1', 'leaf2', 'leaf3'],
+            { lean: (H2(seed + i * 7) - 0.5) * 4, lobes: olive ? 4 : 5 });
         }
         break;
+      }
       case 'bigtrees': case 'pines': case 'deadtrees': {
-        const dead = name === 'deadtrees';
-        const pine = name === 'pines';
         for (let i = 0; i < 5; i++) {
-          const tx = cx + (H2(seed + i * 5) - 0.5) * w * 0.8;
-          const th = h * (0.4 + H2(seed + i) * 0.35);
-          rect(b, tx, base - th, Math.max(1, sc * 2), th, dead ? 'wood1' : 'bark');
-          if (dead) {
-            for (const s2 of [-1, 1]) line(b, tx, base - th + 3, tx + s2 * w * 0.05, base - th - 3, 'wood1');
-          } else if (pine) {
-            for (let j = 0; j < 4; j++) {
-              const cw = w * (0.11 - j * 0.02);
-              tri(b, tx - cw, base - th + j * th * 0.24 + th * 0.2, tx + cw,
-                base - th + j * th * 0.24 + th * 0.2, tx, base - th + j * th * 0.24 - th * 0.02,
-                j % 2 ? 'leaf1' : 'cloth1');
-            }
+          const tx = cx + (H2(seed + i * 5) - 0.5) * w * 0.82;
+          const th = h * (0.3 + H2(seed + i) * 0.28);
+          if (name === 'pines') {
+            pineStamp(b, tx, base - h * 0.03, th, Math.max(4, w * 0.06));
+          } else if (name === 'deadtrees') {
+            // bare: a leaning trunk and three broken limbs. No canopy, so the SHAPE has
+            // to carry it, and a straight pole carries nothing.
+            const bw = Math.round(w * 0.16), bh = Math.round(th + 10);
+            stamp(b, tx - bw / 2, base - bh, bw, bh, (bb) => {
+              const bcx = Math.round(bw / 2), bby = bh - 3;
+              const lean = (H2(seed + i * 11) - 0.5) * 5;
+              for (let k = 0; k < th; k++) {
+                const f = k / th;
+                brect(bb, bcx + Math.round(lean * f * f), bby - k, 2, 1, k % 6 === 0 ? 'wood0' : 'wood1');
+              }
+              for (let k = 0; k < 3; k++) {
+                const f = 0.45 + k * 0.2;
+                const sgn = k % 2 ? 1 : -1;
+                limb(bb, bcx + lean * f * f, bby - th * f,
+                  bcx + lean + sgn * bw * 0.4, bby - th * f - 6 - k * 2,
+                  1.4, 0.8, ['wood0', 'wood1', 'wood2']);
+              }
+            });
           } else {
-            for (let j = 0; j < 7; j++) {
-              ellipse(b, tx + (H2(seed + i * 7 + j) - 0.5) * w * 0.14, base - th - h * 0.02 + j * -h * 0.03,
-                w * 0.09, h * 0.06, j < 2 ? 'leaf0' : j < 5 ? 'leaf1' : 'leaf2');
-            }
+            treeStamp(b, tx, base - h * 0.03, th, Math.max(7, w * 0.1),
+              ['cloth0', 'leaf0', 'leaf1', 'leaf3'],
+              { lean: (H2(seed + i * 13) - 0.5) * 6, lobes: 5 });
           }
         }
         break;
       }
       case 'cactus':
         for (let i = 0; i < 4; i++) {
-          const tx = cx + (H2(seed + i * 4) - 0.5) * w * 0.7;
-          const th = h * 0.16;
-          rect(b, tx, base - th, Math.max(2, sc * 2), th, 'green0');
-          rect(b, tx - w * 0.03, base - th * 0.7, w * 0.03, Math.max(1, sc), 'green0');
+          const tx = cx + (H2(seed + i * 4) - 0.5) * w * 0.72;
+          const th = Math.max(10, h * 0.2);
+          const cw = Math.round(w * 0.11), chh = Math.round(th + 8);
+          stamp(b, tx - cw / 2, base - chh, cw, chh, (bb) => {
+            const bcx = Math.round(cw / 2), bby = chh - 3;
+            limb(bb, bcx, bby, bcx, bby - th, 2.6, 2.2, ['green0', 'moss', 'leaf2']);
+            orb(bb, bcx, bby - th, 2.4, orbShade(['green0', 'moss', 'leaf2']));
+            // one arm up, one out: a bare column is a post
+            limb(bb, bcx, bby - th * 0.6, bcx - cw * 0.28, bby - th * 0.6, 1.8, 1.5,
+              ['green0', 'moss', 'leaf2']);
+            limb(bb, bcx - cw * 0.28, bby - th * 0.6, bcx - cw * 0.28, bby - th * 0.85,
+              1.6, 1.3, ['green0', 'moss', 'leaf2']);
+            for (let k = 0; k < th; k += 3) bset(bb, bcx - 1, bby - k, 'leaf2');
+            for (let k = 2; k < th; k += 5) bset(bb, bcx + 1, bby - k, 'green0');
+          });
         }
         break;
       case 'dunes':
@@ -325,6 +472,18 @@ function scenery(b, island, cx, base, w, h, sc) {
         px(b, ex + 1, ey - 3, 'bone');
         break;
       }
+      case 'rocks':
+        for (let i = 0; i < 5; i++) {
+          rockStamp(b, cx + (H2(seed + i * 3) - 0.5) * w * 0.9, base - h * 0.02,
+            Math.max(2, w * (0.02 + H2(seed + i) * 0.03)), ['stone0', 'stone1', 'stone2', 'stone3']);
+        }
+        break;
+      case 'scrub':
+        for (let i = 0; i < 6; i++) {
+          bushStamp(b, cx + (H2(seed + i * 5) - 0.5) * w * 0.9, base - h * 0.02,
+            Math.max(2, w * (0.018 + H2(seed + i) * 0.022)), ['leaf0', 'leaf1', 'leaf2', 'leaf3']);
+        }
+        break;
       default: break;
     }
   }
@@ -484,77 +643,141 @@ function groundDetail(b, island, y0, w, h) {
   let seedN = 7;
   for (let i = 0; i < island.id.length; i++) seedN += island.id.charCodeAt(i) * (i + 5);
 
-  // big soft patches of a neighbouring tone: the thing that stops it reading as one
-  // colour, and the cheapest texture there is
-  for (let i = 0; i < 16; i++) {
+  // 1. BROAD PATCHES. Faint on purpose -- any stronger and a patch reads as a stain or a
+  // shadow cast by nothing, which is worse than a flat field.
+  for (let i = 0; i < 22; i++) {
     const px2 = H2(seedN + i * 3) * w;
     const py2 = y0 + H2(seedN + i * 5) * band;
-    const rw = 30 + H2(seedN + i * 7) * 90;
-    const rh = 4 + H2(seedN + i * 11) * 10;
-    // kept faint on purpose: any stronger and a patch reads as a stain or a shadow
-    // cast by nothing, which is worse than a flat field
-    const tone = mix(P[G[i % G.length]], i % 3 ? P.ink : P.white, 0.045 + H2(seedN + i) * 0.035);
+    const rw = 26 + H2(seedN + i * 7) * 90;
+    const rh = 4 + H2(seedN + i * 11) * 11;
+    const tone = mix(P[G[i % G.length]], i % 3 ? P.ink : P.white, 0.045 + H2(seedN + i) * 0.04);
     ellipse(b, px2, py2, rw, rh, tone);
   }
 
-  const biome = island.biome;
-  const n = Math.round((w * band) / 620);
-  for (let i = 0; i < n; i++) {
+  // 2. GRASS STROKES. The layer that actually kills the billiard-cloth look: hundreds of
+  // one and two pixel horizontal marks, a shade either side of the ground tone. A field
+  // with only tufts on it is a flat colour with confetti.
+  const strokes = Math.round((w * band) / 190);
+  for (let i = 0; i < strokes; i++) {
     const x = Math.round(H2(seedN + i * 13) * w);
     const y = Math.round(y0 + H2(seedN + i * 17) * band);
     const k = H2(seedN + i * 19);
+    const len = 1 + Math.round(k * 3);
+    const base = P[G[Math.min(G.length - 1, Math.floor((y - y0) / band * G.length))]];
+    rect(b, x, y, len, 1, mix(base, k < 0.5 ? P.ink : P.white, 0.07 + k * 0.06));
+  }
+
+  // 3. A WORN PATH from the shore inland, so the field has a direction and a landmark
+  {
+    const py = y0 + band * 0.55;
+    for (let x = 0; x < w; x++) {
+      const wob = Math.sin(x * 0.012 + seedN) * band * 0.14 + Math.sin(x * 0.05) * 2;
+      // narrow, muted, and with grass breaking through it. At six pixels of saturated
+      // clay it read as a racetrack painted across the field.
+      const half = 3 + Math.sin(x * 0.02 + 1) * 1.4;
+      for (let dy = -half; dy <= half; dy++) {
+        const t = Math.abs(dy) / half;
+        if (t > 1) continue;
+        const c = t > 0.7 ? mix(P[G[0]], P.clay1, 0.45)
+          : t > 0.35 ? mix(P.clay1, P[G[0]], 0.35) : mix(P.clay2, P[G[0]], 0.2);
+        px(b, x, Math.round(py + wob + dy), c);
+      }
+      if (x % 13 === 0) px(b, x, Math.round(py + wob), mix(P.clay3, P[G[0]], 0.3));
+      if (x % 5 === 2) px(b, x, Math.round(py + wob - half), P[G[0]]);
+      if (x % 9 === 4) px(b, x, Math.round(py + wob + half), P[G[1]]);
+    }
+  }
+
+  // 4. THE BIOME'S OWN LITTER, in quantity
+  const biome = island.biome;
+  const n = Math.round((w * band) / 420);
+  for (let i = 0; i < n; i++) {
+    const x = Math.round(H2(seedN + i * 23) * w);
+    const y = Math.round(y0 + 4 + H2(seedN + i * 29) * (band - 6));
+    const k = H2(seedN + i * 31);
     switch (biome) {
       case 'grassland': case 'jungle': case 'sacred':
-        // tufts: three blades leaning the same way
         for (let j = 0; j < 3; j++) {
-          rect(b, x + j, y - (j === 1 ? 3 : 2), 1, j === 1 ? 3 : 2, k < 0.5 ? 'leaf3' : 'leaf1');
+          rect(b, x + j, y - (j === 1 ? 4 : 2), 1, j === 1 ? 4 : 2, k < 0.5 ? 'leaf3' : 'leaf1');
         }
-        if (k > 0.94) { px(b, x + 1, y - 4, 'gold'); px(b, x, y - 3, 'white'); }
+        if (k > 0.9) {
+          const c = k > 0.97 ? 'white' : k > 0.94 ? 'gold' : 'pink';
+          px(b, x + 1, y - 5, c); px(b, x, y - 4, c); px(b, x + 2, y - 4, c);
+          px(b, x + 1, y - 3, 'gold');
+        }
         break;
       case 'desert':
-        // wind ripples, and the odd pebble
-        rect(b, x, y, 5 + Math.round(k * 7), 1, mix(P.sand, P.ink, 0.13));
-        if (k > 0.9) { px(b, x, y - 1, 'stone2'); px(b, x + 1, y - 1, 'stone1'); }
+        rect(b, x, y, 5 + Math.round(k * 9), 1, mix(P.sand, P.ink, 0.12));
+        if (k > 0.88) { px(b, x, y - 1, 'stone2'); px(b, x + 1, y - 1, 'stone1'); px(b, x, y, 'stone0'); }
         break;
       case 'swamp':
-        if (k > 0.6) { ellipse(b, x, y, 4, 2, 'water0'); px(b, x, y, 'leaf2'); }
-        else rect(b, x, y - 3, 1, 3, 'moss');
+        if (k > 0.55) {
+          ellipse(b, x, y, 4, 2, 'water0');
+          ellipse(b, x, y - 1, 3, 1, 'water1');
+          px(b, x, y - 1, 'leaf2');
+        } else {
+          for (let j = 0; j < 5; j++) px(b, x + (j % 2), y - j, j > 2 ? 'leaf2' : 'moss');
+        }
         break;
       case 'snow':
-        if (k > 0.75) { rect(b, x, y, 4, 1, 'white'); px(b, x + 4, y + 1, 'snow0'); }
-        else px(b, x, y, 'ice');
+        if (k > 0.7) { rect(b, x, y, 5, 1, 'white'); rect(b, x + 1, y + 1, 3, 1, 'snow0'); }
+        else if (k > 0.3) px(b, x, y, 'ice');
+        else { px(b, x, y, 'snow0'); px(b, x + 1, y, 'white'); }
         break;
       case 'volcano':
-        if (k > 0.86) { px(b, x, y, 'lava1'); px(b, x + 1, y, 'lava0'); }
-        else { rect(b, x, y, 2 + Math.round(k * 3), 1, 'ash'); px(b, x, y, 'stone0'); }
+        if (k > 0.9) { px(b, x, y, 'lava1'); px(b, x + 1, y, 'lava0'); px(b, x, y - 1, 'lava2'); }
+        else { rect(b, x, y, 2 + Math.round(k * 4), 1, 'ash'); px(b, x, y, 'stone0'); }
         break;
       case 'ruins':
-        // flagstones, half swallowed
-        if (k > 0.62) {
-          rect(b, x, y, 10, 6, mix(P.stone2, P.ink, 0.12));
-          rect(b, x, y, 10, 1, 'stone3');
-          rect(b, x, y + 5, 10, 1, 'stone0');
-        } else px(b, x, y, 'moss');
+        if (k > 0.6) {
+          rect(b, x, y, 11, 7, mix(P.stone2, P.ink, 0.1));
+          rect(b, x, y, 11, 1, 'stone3');
+          rect(b, x, y + 6, 11, 1, 'stone0');
+          rect(b, x + 10, y, 1, 7, 'stone0');
+          if (k > 0.85) px(b, x + 3, y + 3, 'moss');
+        } else { px(b, x, y, 'moss'); px(b, x + 1, y + 1, 'leaf1'); }
         break;
       case 'coral':
-        if (k > 0.7) { ellipse(b, x, y, 3, 2, 'coral1'); px(b, x, y - 1, 'coral0'); }
-        else rect(b, x, y, 6, 1, 'foam');
+        if (k > 0.72) {
+          ellipse(b, x, y, 3, 2, 'coral0');
+          px(b, x, y - 1, 'coral1'); px(b, x - 1, y, 'coral1');
+        } else rect(b, x, y, 6, 1, 'foam');
         break;
       case 'storm':
-        rect(b, x, y, 3 + Math.round(k * 4), 1, k > 0.5 ? 'stone1' : 'ash');
-        if (k > 0.93) px(b, x, y - 1, 'water3');
+        rect(b, x, y, 3 + Math.round(k * 5), 1, k > 0.5 ? 'stone1' : 'ash');
+        if (k > 0.9) { px(b, x, y - 1, 'water3'); px(b, x + 1, y, 'water2'); }
         break;
       case 'mountain':
-        if (k > 0.7) { px(b, x, y, 'stone3'); px(b, x + 1, y + 1, 'stone1'); }
-        else rect(b, x, y, 4, 1, mix(P.stone2, P.ink, 0.2));
+        if (k > 0.7) { px(b, x, y, 'stone3'); px(b, x + 1, y + 1, 'stone1'); px(b, x - 1, y + 1, 'stone2'); }
+        else rect(b, x, y, 4, 1, mix(P.stone2, P.ink, 0.18));
         break;
       default:
         px(b, x, y, mix(P[G[0]], P.white, 0.1));
         break;
     }
   }
-  // and a shoreline of wet sand along the very bottom, so the field has a lip
-  for (let y = h - 4; y < h; y++) rect(b, 0, y, w, 1, y === h - 4 ? 'sand' : mix(P.sand, P.ink, 0.3));
+
+  // 5. A FEW REAL OBJECTS, so the eye has something to land on
+  const objs = Math.max(3, Math.round(w / 150));
+  for (let i = 0; i < objs; i++) {
+    const x = 30 + H2(seedN + i * 37) * (w - 60);
+    const y = y0 + band * (0.18 + H2(seedN + i * 41) * 0.7);
+    const k = H2(seedN + i * 43);
+    if (biome === 'desert' || biome === 'mountain' || biome === 'volcano' || biome === 'storm') {
+      rockStamp(b, x, y, 3 + k * 4, ['stone0', 'stone1', 'stone2', 'stone3']);
+    } else if (biome === 'snow') {
+      rockStamp(b, x, y, 3 + k * 3, ['snow0', 'snow1', 'white', 'white']);
+    } else if (biome === 'coral') {
+      rockStamp(b, x, y, 2 + k * 3, ['coral0', 'coral1', 'pink', 'white']);
+    } else {
+      bushStamp(b, x, y, 3 + k * 4, ['leaf0', 'leaf1', 'leaf2', 'leaf3']);
+    }
+  }
+
+  // 6. and a lip of wet sand along the very bottom, so the field has an edge
+  for (let y = h - 4; y < h; y++) {
+    rect(b, 0, y, w, 1, y === h - 4 ? 'sand' : mix(P.sand, P.ink, 0.3));
+  }
 }
 
 export function clearIslandCache() { farCache.clear(); backCache.clear(); }

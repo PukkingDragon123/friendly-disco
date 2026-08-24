@@ -269,19 +269,48 @@ function scenery(b, island, cx, base, w, h, sc) {
         }
         break;
       case 'coralheads':
-        for (let i = 0; i < 6; i++) {
-          const bx = cx + (H2(seed + i * 3) - 0.5) * w * 0.85;
-          disc(b, bx, base - h * 0.06, Math.max(2, w * 0.05), i % 2 ? 'coral0' : 'coral1');
+        // heads, not beach balls: smaller, shaded, and clustered along the waterline
+        for (let i = 0; i < 9; i++) {
+          const bx = cx + (H2(seed + i * 3) - 0.5) * w * 0.9;
+          const by = base - 2 - H2(seed + i * 5) * h * 0.05;
+          const cr = Math.max(2, w * (0.014 + H2(seed + i * 7) * 0.014));
+          disc(b, bx, by, cr, 'coral0');
+          disc(b, bx, by - cr * 0.3, cr * 0.7, 'coral1');
+          px(b, bx - cr * 0.3, by - cr * 0.5, 'white');
+          for (let k = 0; k < 3; k++) px(b, bx - cr + k * cr, by + cr * 0.6, 'coral0');
         }
         break;
       case 'palms':
+        // a leaning trunk and a FAN of fronds. Straight one-pixel lines with five wires
+        // off the top read as an aerial, not a tree.
         for (let i = 0; i < 3; i++) {
           const tx = cx + (i - 1) * w * 0.28;
-          const th = h * 0.4;
-          for (let y = 0; y < th; y++) px(b, tx + Math.round(Math.sin(y * 0.1) * 2), base - y, 'bark');
-          for (let a = -2; a <= 2; a++) {
-            line(b, tx, base - th, tx + a * w * 0.09, base - th + Math.abs(a) * h * 0.04 - h * 0.04, 'leaf2');
+          // clamped against the WIDTH too: at backdrop scale h is the island's whole
+          // height, and a trunk that tall with narrow fronds reads as a fishing rod
+          const th = Math.max(8, Math.min(h * 0.42, w * 0.24));
+          const lean = (H2(seed + i) - 0.5) * w * 0.06;
+          for (let y = 0; y < th; y++) {
+            const f = y / th;
+            const px2 = tx + Math.round(lean * f * f);
+            rect(b, px2, base - y, 2, 1, y % 4 === 0 ? 'wood2' : 'bark');
+            px(b, px2, base - y, 'wood3');
           }
+          const topX = tx + Math.round(lean), topY = base - th;
+          for (let k = -2; k <= 2; k++) {
+            const dx = k * w * 0.06, dy = -th * 0.34 + Math.abs(k) * th * 0.3;
+            // sampled densely: seven points across fifty pixels is a dotted line, and a
+            // dotted line off the top of a pole is an aerial
+            for (let j = 0; j <= 20; j++) {
+              const f = j / 20;
+              const fx = topX + dx * f;
+              const fy = topY + dy * f + f * f * th * 0.22;
+              rect(b, fx, fy, 2, f < 0.5 ? 2 : 1, f < 0.3 ? 'leaf2' : 'leaf1');
+              if (f > 0.2) px(b, fx, fy - 1, 'leaf3');
+            }
+          }
+          // and the coconuts
+          px(b, topX - 1, topY + 2, 'wood1');
+          px(b, topX + 2, topY + 3, 'wood1');
         }
         break;
       case 'reeds': case 'flowers': {
@@ -295,9 +324,11 @@ function scenery(b, island, cx, base, w, h, sc) {
         break;
       }
       case 'lilies': case 'stillwater': case 'sandbar': case 'shoals':
+        // low and narrow, along the waterline. Wide bars at h*0.04 cut straight across
+        // whatever else the island had standing there.
         for (let i = 0; i < 5; i++) {
-          ellipse(b, cx + (H2(seed + i) - 0.5) * w * 0.8, base - h * 0.04,
-            w * 0.07, Math.max(1, h * 0.02), name === 'lilies' ? 'leaf2' : 'foam');
+          ellipse(b, cx + (H2(seed + i) - 0.5) * w * 0.8, base - 1 - (i % 2),
+            w * 0.05, 1, name === 'lilies' ? 'leaf2' : 'foam');
         }
         break;
       case 'obsidian': case 'rubblefield': case 'bones':

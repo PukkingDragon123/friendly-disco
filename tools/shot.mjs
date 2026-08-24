@@ -37,6 +37,7 @@ switch (which) {
     const { makeMenuScene } = await import('../src/scenes/menu.js');
     scene = makeMenuScene();
     scene.enter({ onStart: () => {} }, app);
+    if (process.env.HELP) scene.debug().help(true);
     mouse(320, 224);
     break;
   }

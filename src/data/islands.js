@@ -131,7 +131,7 @@ export const ISLANDS = [
     name: 'The Bright Shallows',
     biome: 'coral',
     blurb: 'Ankle-deep and beautiful, until the channel drops away.',
-    ground: ['water3', 'coral1', 'foam'],
+    ground: ['water3', 'foam', 'sand'],
     rock: ['sand', 'stone3', 'cream'], relief: 0.3, steep: 0.22,
     sky: ['ice', 'foam', 'white'],
     scenery: ['coralheads', 'palms', 'sandbar', 'shoals'],

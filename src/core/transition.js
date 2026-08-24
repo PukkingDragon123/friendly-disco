@@ -6,11 +6,10 @@
 // (baking a deck, rolling a manifest) lands behind the cover instead of hitching.
 
 import { P, col, mix } from '../core/palette.js';
-import { rect, px, line, disc, ellipse, tri, dither, wash, text, clamp, lerp } from './pixel.js';
+import { rect, px, line, disc, ellipse, tri, dither, wash, text, clamp, lerp, W, H } from './pixel.js';
 
 export const KINDS = ['wave', 'light', 'iris', 'clouds', 'curtain'];
 
-const W = 640, H = 360;
 
 /** cover(p): 0 at the edges of the transition, 1 at the fully-covered midpoint. */
 function coverage(p) { return p < 0.5 ? p * 2 : (1 - p) * 2; }

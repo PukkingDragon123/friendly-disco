@@ -2,7 +2,7 @@
 // and a tiny tween runner. Every scene draws inside applyCamera/restore and finishes
 // with drawOverlay, so juice composites uniformly.
 
-import { rect, text, wash, clamp } from './pixel.js';
+import { rect, text, wash, clamp, W, H } from './pixel.js';
 import { col } from './palette.js';
 
 export const Ease = {
@@ -143,21 +143,21 @@ export const Juice = {
       // cheap chromatic fringe: two 1px offset colour bars at the screen edges
       const k = chromaT / chromaDur;
       const m = Math.max(1, Math.round(chromaMag * k));
-      wash(g, 0, 0, m, 360, 'red2', 0.25 * k);
-      wash(g, 640 - m, 0, m, 360, 'teal', 0.25 * k);
+      wash(g, 0, 0, m, H, 'red2', 0.25 * k);
+      wash(g, W - m, 0, m, H, 'teal', 0.25 * k);
     }
     if (flashT > 0 && flashCol) {
       const k = flashT / flashDur;
-      wash(g, 0, 0, 640, 360, flashCol, flashA * k);
+      wash(g, 0, 0, W, H, flashCol, flashA * k);
     }
     if (vignetteAmt > 0) {
       const n = Math.round(10 * vignetteAmt);
       for (let i = 0; i < n; i++) {
         const a = 0.05 * vignetteAmt * (1 - i / n);
-        wash(g, 0, i, 640, 1, 'ink', a);
-        wash(g, 0, 359 - i, 640, 1, 'ink', a);
-        wash(g, i, 0, 1, 360, 'ink', a);
-        wash(g, 639 - i, 0, 1, 360, 'ink', a);
+        wash(g, 0, i, W, 1, 'ink', a);
+        wash(g, 0, H - 1 - i, W, 1, 'ink', a);
+        wash(g, i, 0, 1, H, 'ink', a);
+        wash(g, W - 1 - i, 0, 1, H, 'ink', a);
       }
     }
   },

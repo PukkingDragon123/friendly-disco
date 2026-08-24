@@ -624,7 +624,7 @@ if (section('render') && M.pixel) {
   const { Input } = await import('../src/core/input.js');
   const { Juice } = await import('../src/core/juice.js');
   for (const [name, path, factory, argsFor] of scenes) {
-    const cv = new SoftCanvas(640, 360);
+    const cv = new SoftCanvas(960, 540);
     const g = cv.getContext('2d');
     const app = { g, canvas: cv, scale: 1, time: 0, frame: 0, push() {}, pop() {}, replace() {}, fit() {}, fps: 60 };
     try {

@@ -11,8 +11,12 @@
 import { col, mix, alpha as pAlpha } from './palette.js';
 import { FONT5, FONT3, FONT7 } from '../render/font.js';
 
-export const W = 640;
-export const H = 360;
+// 960x540: 1.5x the old frame, so x2 lands exactly on 1920x1080. The extra pixels go
+// into DETAIL rather than into fitting more on screen — the deck is a larger fraction of
+// the frame than it was, animals are baked at 32px instead of 20, and the body face is
+// the 7x9 rather than the 5x7. Net effect: zoomed in and sharper at the same time.
+export const W = 960;
+export const H = 540;
 
 const R = Math.round;
 

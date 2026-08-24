@@ -10,8 +10,8 @@
 //     screenY = oy + ty * tilt - tz * zs
 //
 // Balls are also drawn at scaleAt(), so an animal at the far rail is genuinely smaller.
-// A ball of radius 5.2 units renders at ~10px near the viewer, which is half of
-// SPRITE_SIZE (20) — animal sprites drop onto balls at scale 1.
+// The scale invariant: BALL_R * VIEW.xs must equal SPRITE_SIZE / 2, so an animal sprite
+// drops onto a ball at scale 1 with no resampling. 5.2 * 3 = 15.6 ~= 32 / 2.
 //
 // The static layers (felt, timber, gate mouths) are BAKED once with the perspective
 // already in them, so a frame costs two blits plus the live glows and animals.
@@ -27,21 +27,21 @@ import { drawAnimal, drawAnimalShadow } from './sprites.js';
 import { TABLE_W, TABLE_H, BALL_R } from '../game/physics.js';
 
 export const VIEW = {
-  ox: 164,      // screen x of table-unit x=0 at the NEAR rail
-  oy: 104,      // screen y of table-unit y=0
-  xs: 2,        // horizontal units -> pixels at the near rail
-  tilt: 1.24,   // vertical units -> pixels (2 * 0.62 foreshortening)
-  zs: 2,        // height units -> pixels
+  ox: 132,      // screen x of table-unit x=0 at the NEAR rail
+  oy: 130,      // screen y of table-unit y=0
+  xs: 3,        // horizontal units -> pixels at the near rail
+  tilt: 2,      // vertical units -> pixels (3 * 0.67 foreshortening)
+  zs: 3,        // height units -> pixels
   persp: 0.17,  // how much narrower the far rail is
 };
 VIEW.cx = VIEW.ox + (TABLE_W / 2) * VIEW.xs;
 
 export const DECK = {
   feltY: VIEW.oy,
-  feltW: TABLE_W * VIEW.xs,             // 464 at the near rail
-  feltH: Math.round(TABLE_H * VIEW.tilt), // 144
-  rail: 13,
-  apron: 14,
+  feltW: TABLE_W * VIEW.xs,             // 696 at the near rail
+  feltH: Math.round(TABLE_H * VIEW.tilt), // 232
+  rail: 17,
+  apron: 18,
 };
 DECK.feltX = VIEW.cx - DECK.feltW / 2;
 DECK.x = Math.round(DECK.feltX - DECK.rail);

@@ -31,7 +31,7 @@ export function installDom(o = {}) {
     querySelector: () => null, textContent: '', innerHTML: '', hidden: false,
   });
 
-  const main = mkCanvas(o.w || 640, o.h || 360);
+  const main = mkCanvas(o.w || 960, o.h || 540);
 
   g.document = {
     createElement: (t) => (t === 'canvas' ? mkCanvas() : el()),

@@ -20,7 +20,7 @@ const SEEDS = Number(process.argv[2]) || 3;
 const SHOTS = process.argv.includes('--shots');
 const VERBOSE = process.argv.includes('--verbose');
 
-const cv = new SoftCanvas(640, 360);
+const cv = new SoftCanvas(960, 540);
 const g = cv.getContext('2d');
 const DT = 1 / 60;
 

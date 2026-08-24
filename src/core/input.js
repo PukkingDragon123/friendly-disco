@@ -5,7 +5,7 @@
 
 export const Input = {
   mouse: {
-    x: 320, y: 180, px: 320, py: 180, dx: 0, dy: 0,
+    x: 480, y: 270, px: 480, py: 270, dx: 0, dy: 0,
     down: false, pressed: false, released: false,
     rightDown: false, rightPressed: false, wheel: 0, inside: false,
     downX: 0, downY: 0, dragDist: 0,
@@ -24,8 +24,8 @@ export const Input = {
       const r = canvas.getBoundingClientRect();
       const s = getScale ? getScale() : 1;
       const m = this.mouse;
-      m.x = Math.max(0, Math.min(639, (e.clientX - r.left) / s));
-      m.y = Math.max(0, Math.min(359, (e.clientY - r.top) / s));
+      m.x = Math.max(0, Math.min(959, (e.clientX - r.left) / s));
+      m.y = Math.max(0, Math.min(539, (e.clientY - r.top) / s));
     };
 
     canvas.addEventListener('mousemove', (e) => { map(e); this.mouse.inside = true; });
@@ -56,8 +56,8 @@ export const Input = {
       const r = canvas.getBoundingClientRect();
       const s = getScale ? getScale() : 1;
       const m = this.mouse;
-      m.x = Math.max(0, Math.min(639, (t.clientX - r.left) / s));
-      m.y = Math.max(0, Math.min(359, (t.clientY - r.top) / s));
+      m.x = Math.max(0, Math.min(959, (t.clientX - r.left) / s));
+      m.y = Math.max(0, Math.min(539, (t.clientY - r.top) / s));
     };
     canvas.addEventListener('touchstart', (e) => {
       this.touch = true; tmap(e);

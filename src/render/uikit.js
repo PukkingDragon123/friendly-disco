@@ -10,6 +10,7 @@ import {
   dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp,
 } from '../core/pixel.js';
 import { Juice } from '../core/juice.js';
+import { W as SCREEN_W, H as SCREEN_H } from '../core/pixel.js';
 
 export const RARITY_COLOR = { common: 'grey2', uncommon: 'sky', rare: 'purple1', legendary: 'gold' };
 export const RARITY_STARS = { common: 1, uncommon: 2, rare: 3, legendary: 4 };
@@ -338,9 +339,9 @@ export function tooltip(g, x, y, o = {}) {
   const w = Math.min(230, Math.max(o.w || 120, textW(o.title || '', { font: 7 }) + 14));
   const h = 8 + (o.title ? 12 : 0) + lines.length * 7;
   let px0 = Math.round(x), py0 = Math.round(y);
-  if (px0 + w > 638) px0 = 638 - w;
+  if (px0 + w > SCREEN_W - 2) px0 = SCREEN_W - 2 - w;
   if (px0 < 2) px0 = 2;
-  if (py0 + h > 358) py0 = 358 - h;
+  if (py0 + h > SCREEN_H - 2) py0 = SCREEN_H - 2 - h;
   if (py0 < 2) py0 = 2;
   const c = o.color || 'brass3';
 

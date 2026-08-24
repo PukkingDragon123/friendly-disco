@@ -13,7 +13,8 @@ const out = process.argv[3] || `/tmp/shot-${which}.png`;
 const frames = Number(process.argv[4] || 40);
 const scale = Number(process.argv[5] || 2);
 
-const cv = new SoftCanvas(640, 360);
+const { W: SW, H: SH } = await import('../src/core/pixel.js');
+const cv = new SoftCanvas(SW, SH);
 const g = cv.getContext('2d');
 
 const { Input } = await import('../src/core/input.js');
@@ -104,7 +105,7 @@ switch (which) {
     scene = {
       update(dt) { sea2.update(dt); deck.update(dt); ps.update(dt); },
       draw() {
-        sea2.draw(g, { x: 0, y: 0, w: 640, h: 360, horizonY: 96, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
+        sea2.draw(g, { x: 0, y: 0, w: SW, h: SH, horizonY: 96, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
         deck.drawBase(g);
         deck.drawGates(g, { highlight: 'farm' });
         if (aim) deck.drawAim(g, aim, { r: sel.r });
@@ -159,7 +160,7 @@ switch (which) {
     scene = {
       update() {},
       draw() {
-        rect(g, 0, 0, 640, 360, 'ink');
+        rect(g, 0, 0, SW, SH, 'ink');
         PORTRAIT_IDS.forEach((id, i) => {
           const x = 24 + i * 100, y = 60;
           drawPortrait(g, id, x, y, 84, 120, 1.4 + i * 0.7, { color: 'red2', icon: 'skull' });
@@ -177,16 +178,17 @@ switch (which) {
     const { HABITAT_BY_ID } = await import('../src/data/habitats.js');
     scene = {
       draw() {
-        rect(g, 0, 0, 640, 360, 'deep');
+        rect(g, 0, 0, SW, SH, 'deep');
+        const COLS = 18, CW = 52, CH = 62;
         ANIMALS.forEach((a, i) => {
-          const x = 22 + (i % 16) * 39, y = 30 + Math.floor(i / 16) * 44;
+          const x = 30 + (i % COLS) * CW, y = 46 + Math.floor(i / COLS) * CH;
           const hab = HABITAT_BY_ID[a.home];
-          rect(g, x - 18, y - 16, 36, 40, 'shadow');
-          rect(g, x - 18, y - 16, 36, 1, hab ? hab.color : 'grey0');
+          rect(g, x - 25, y - 26, 50, 58, 'shadow');
+          rect(g, x - 25, y - 26, 50, 2, hab ? hab.color : 'grey0');
           drawAnimal(g, a, x, y, { scale: 1 });
-          text(g, a.name.slice(0, 9), x, y + 14, 'bone', { font: 3, center: true });
+          text(g, a.name.slice(0, 11), x, y + 22, 'bone', { font: 3, center: true });
         });
-        text(g, `${ANIMALS.length} ANIMALS`, 320, 8, 'gold', { center: true });
+        text(g, `${ANIMALS.length} ANIMALS`, SW / 2, 10, 'gold', { center: true, font: 7 });
       },
       update() {},
     };
@@ -197,7 +199,7 @@ switch (which) {
     const { rect, text } = await import('../src/core/pixel.js');
     scene = {
       draw() {
-        rect(g, 0, 0, 640, 360, 'deep');
+        rect(g, 0, 0, SW, SH, 'deep');
         ['wood', 'brass', 'slate', 'paper', 'glass'].forEach((s, i) => {
           UI.panel(g, 8 + i * 126, 8, 118, 64, { style: s, title: s.toUpperCase(), shadow: true });
         });
@@ -211,7 +213,7 @@ switch (which) {
         UI.chipPill(g, 210, 150, 4210, {}); UI.multPill(g, 280, 150, 12, {}); UI.moneyPill(g, 340, 150, 27, {});
         UI.ribbon(g, 210, 168, 180, 'BOSS BLIND', { color: 'red2' });
         UI.starRow(g, 210, 186, 4, {});
-        UI.tooltip(g, 410, 116, { title: 'Tooltip', lines: ['clamped inside', 'the 640x360 frame'], color: 'teal', w: 130 });
+        UI.tooltip(g, 410, 116, { title: 'Tooltip', lines: ['clamped inside', `the ${SW}x${SH} frame`], color: 'teal', w: 130 });
         (UI.ICONS || []).forEach((n, i) => {
           UI.icon(g, n, 10 + (i % 40) * 15, 240 + Math.floor(i / 40) * 15, { color: 'brass3' });
         });
@@ -247,7 +249,7 @@ switch (which) {
     scene = {
       update() {},
       draw() {
-        rect(g, 0, 0, 640, 360, 'ink');
+        rect(g, 0, 0, SW, SH, 'ink');
         const rows = [
           'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
           'abcdefghijklmnopqrstuvwxyz',

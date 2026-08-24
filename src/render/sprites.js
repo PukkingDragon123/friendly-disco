@@ -1,25 +1,27 @@
-// Procedural animal sprite factory.
+// Animals. Every one of them is a BALL.
 //
-// Rewritten for the 960x540 frame. The old 20px version was a shaded sphere with a face
-// painted on it — the only silhouette that reads at that size. At 32px there is room for
-// an actual creature, and a BODY plus a separate HEAD is what makes a pixel animal read
-// as an animal rather than as a marble:
+// That is the design, not a shortcut. A sphere with two dot eyes is the most reliably
+// cute shape in pixel art, it survives being drawn at sixteen pixels, and it is honest
+// about the physics: these things roll around a level and bounce off rocks.
 //
-//        ears/horns          rows  0..8
-//        head (r 7)          rows  5..19
-//        body (9 x 7 oval)   rows 15..29
-//        legs                rows 27..31
-//        tail / wing         either flank
+// What stops ninety balls being ninety marbles is that the species lives entirely in
+// what BREAKS THE SILHOUETTE -- ears, horns, a tail, a wing, a shell, quills, a beak.
+// Anything that stays inside the circle is invisible and does not count as a feature.
 //
-// A recipe (DESIGN.md 9.3) is baked ONCE into a 32x32 offscreen canvas and memoised, so
-// an animal still costs one drawImage per frame. Two rules keep 90 recipes from turning
-// into 90 blobs:
-//   1. every feature has to break the silhouette somewhere — a shape that stays inside
-//      the body is invisible at any size;
-//   2. patterns are evaluated in a tilted spherical frame, so stripes and bands bend
-//      around the body instead of lying on it like a decal.
+// The sprite is baked in three layers so it can move without re-baking:
 //
-// Light is from the upper left throughout.
+//     BACK          tail, wing, shell, quills -- whatever sits BEHIND the ball
+//     BODY[phase]   the shaded sphere and its pattern, at 8 rotations
+//     FRONT[mood]   ears, eyes, nose -- everything that must stay upright
+//
+// Three, not two, because the first version folded the back features into the front
+// layer and a sea turtle's shell ended up painted over its own face.
+//
+// The body spins as the animal rolls. The face never does, because a cute face that
+// rotates away from the camera stops being cute. Wet sheen, water drips, rain hits and
+// squash-on-impact are live pixels on top, so none of them costs a bake.
+//
+// Light is from the upper left throughout, in every sprite in the game.
 
 import { P, col, mix } from '../core/palette.js';
 import { makeCanvas, disc, ellipse, ellipseFrame, rect, px, line, tri, ring } from '../core/pixel.js';
@@ -29,15 +31,9 @@ export const ICON_SIZE = 16;
 
 const R = Math.round;
 
-// --- anatomy, in sprite-local pixels
+// --- geometry, in sprite-local pixels. The ball is centred and nearly fills the box.
 const CX = 16;
-const BODY_Y = 21, BODY_RX = 9, BODY_RY = 7;
-const HEAD_Y = 12, HEAD_R = 7;
-const EYE_Y = HEAD_Y - 1, EYE_DX = 3;
-const FACE_Y = HEAD_Y + 3;
-const LEG_Y = BODY_Y + BODY_RY - 1;
 const MIR = CX * 2;                       // mirror axis: x -> MIR - x
-const CACHE_CAP = 700;
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -152,332 +148,143 @@ function colourSet(rc, tone) {
   };
 }
 
-/* ---------------------------------------------------------------- shading */
+/* ==================================================================== the ball
+
+Every animal is a BALL. That is not a shortcut, it is the design: a sphere with two dot
+eyes is the most reliably cute shape in pixel art, it reads at any size, and it is
+honest about the physics -- these things literally roll around a level.
+
+What keeps ninety balls from being ninety marbles is that the SPECIES lives entirely in
+what breaks the silhouette. Ears, horns, a tail, a wing, a shell, quills, a beak: all of
+it pokes out past the circle. Nothing that stays inside the ball counts as a feature.
+
+Two bakes per animal, both memoised:
+
+    BODY[phase]  the shaded sphere and its pattern, at 8 rotations
+    FACE[mood]   eyes, nose, ears, tail, wings -- everything that must stay upright
+
+Drawing is body-blit + face-blit. The body spins as the animal rolls; the face never
+does, because a cute face that rotates away from the camera stops being cute. Live pixels
+on top handle wet sheen, drips and rain, which are the only per-frame work.
+*/
+
+const PHASES = 8;                       // rotations of the body pattern
+const BALL_R = 13;                      // the sphere, in sprite-local pixels
+const EYE_Y = CX + 1;                   // eyes sit just below the middle: cuter
+const EYE_DX = 4;
+
+/** Light direction, normalised. Upper-left, and the same for every sprite in the game. */
+const LX = -0.55, LY = -0.62, LZ = 0.56;
 
 /**
- * A shaded oval. Four tones plus a rim, lit from the upper left, with the terminator
- * computed from a real surface normal so body and head shade consistently.
+ * The shaded sphere.
+ *
+ * A real normal per pixel, so the terminator curves the way a ball's does and the two
+ * bakes (body here, face later) agree about where the light is. Five tones plus a bounce
+ * light along the lower right, which is what stops a shaded circle looking like a
+ * gradient-filled circle.
  */
-function shadedOval(b, cx, cy, rx, ry, C, o = {}) {
-  const lx = -0.5, ly = -0.6;
-  for (let dy = -ry; dy <= ry; dy++) {
-    for (let dx = -rx; dx <= rx; dx++) {
-      const n = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
-      if (n > 1) continue;
-      const nz = Math.sqrt(Math.max(0, 1 - n));
-      const nx = dx / rx, ny = dy / ry;
-      const lam = -(nx * lx + ny * ly) + nz * 0.5;
-      const edge = Math.sqrt(n);
+function ballBody(b, rc, C, phase) {
+  const r = BALL_R;
+  const spin = (phase / PHASES) * Math.PI * 2;
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      const d2 = x * x + y * y;
+      if (d2 > r * r) continue;
+      const nx = x / r, ny = y / r;
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      const lam = nx * LX + ny * LY + nz * LZ;
+      // bounce light: a weak second source from below-right, unshadowed
+      const bounce = Math.max(0, nx * 0.5 + ny * 0.55) * 0.5;
       let c;
-      if (edge > 0.88 && lam < 0.5) c = C.rim;
-      else if (lam > 1.0) c = C.hi;
-      else if (lam > 0.76) c = C.light;
-      else if (lam > 0.4) c = C.body;
-      else if (lam > 0.14) c = C.shade;
-      else c = C.deep;
-      // belly: the lower third of the body picks up the pale underside
-      if (o.belly && dy > ry * 0.25 && Math.abs(nx) < 0.72) {
-        const t = (dy - ry * 0.25) / (ry * 0.75);
-        if (t > 0.35) c = mix(C.belly, c, 0.28);
-      }
-      px(b, cx + dx, cy + dy, c);
+      if (lam > 0.82) c = C.hi;
+      else if (lam > 0.52) c = C.light;
+      else if (lam > 0.12) c = C.body;
+      else if (lam > -0.28) c = C.shade;
+      else c = bounce > 0.3 ? mix(C.shade, C.rim, 0.4) : C.deep;
+      if (lam <= 0.12 && bounce > 0.42) c = mix(c, C.light, 0.28);
+      px(b, CX + x, CX + y, c);
     }
   }
+  // the belly: a lit patch low and central, so the ball has a front
+  for (let y = 3; y <= r - 1; y++) {
+    const halfW = Math.round(Math.sqrt(Math.max(0, (r - 2) * (r - 2) - y * y)) * 0.72);
+    for (let x = -halfW; x <= halfW; x++) {
+      const fall = 1 - Math.abs(x) / Math.max(1, halfW);
+      if (fall < 0.25) continue;
+      px(b, CX + x, CX + y, mix(C.belly, C.body, 0.35 * (1 - fall)));
+    }
+  }
+  ballPattern(b, rc, C, spin, r);
+  // specular kiss, last so nothing paints over it
+  px(b, CX - 5, CX - 6, C.WH);
+  px(b, CX - 4, CX - 6, C.hi);
+  px(b, CX - 5, CX - 5, C.hi);
 }
 
-/* ---------------------------------------------------------------- patterns */
-
-const TILT = 0.45, CT = Math.cos(TILT), ST = Math.sin(TILT);
-
-/** Pattern pass, masked to the body oval and bent around its curvature. */
-function patternPass(b, rc, C) {
+/**
+ * The pattern, wrapped onto the sphere and rotated by `spin`.
+ *
+ * Everything is evaluated in spherical coordinates (u = longitude, v = latitude) rather
+ * than in screen space, so a stripe bends around the ball and a spot squashes toward the
+ * edge. That single detail is the difference between a patterned sphere and a decal.
+ */
+function ballPattern(b, rc, C, spin, r) {
   const kind = rc.pattern || 'none';
   if (kind === 'none') return;
-  const rx = BODY_RX, ry = BODY_RY;
-  for (let dy = -ry; dy <= ry; dy++) {
-    for (let dx = -rx; dx <= rx; dx++) {
-      const n = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
-      if (n > 0.94) continue;
-      const nx = dx / rx, ny = dy / ry;
-      const nz = Math.sqrt(Math.max(0, 1 - n));
-      // rotate the normal toward the viewer so bands wrap instead of lying flat
-      const u = Math.atan2(nx, nz * CT - ny * ST);
-      const v = Math.asin(clampN(ny * CT + nz * ST));
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y > (r - 1) * (r - 1)) continue;
+      const nx = x / r, ny = y / r;
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      if (nz < 0.12) continue;                    // the rim is too foreshortened
+      const u = Math.atan2(nx, nz) + spin;        // longitude, spun by the roll
+      const v = Math.asin(Math.max(-1, Math.min(1, ny)));
       let on = false;
       switch (kind) {
-        case 'stripes': on = Math.sin(u * 5.2) > 0.32; break;
-        case 'bands': on = Math.sin(v * 6.5) > 0.3; break;
-        case 'spots': on = (Math.sin(u * 4.4) * Math.cos(v * 5.2)) > 0.55; break;
-        case 'freckles': on = (Math.sin(u * 9) * Math.cos(v * 8.4)) > 0.72; break;
-        case 'patches': on = (Math.sin(u * 2.1 + 1.1) * Math.cos(v * 2.4)) > 0.18; break;
-        case 'scales': on = ((Math.floor(u * 6) + Math.floor(v * 7)) & 1) === 0 && nz > 0.35; break;
-        case 'plates': on = Math.sin(v * 5) > 0.55 && nz > 0.3; break;
-        case 'wool': on = (Math.sin(u * 8.5) + Math.cos(v * 9.5)) > 0.85; break;
-        default: on = false;
+        case 'stripes': on = Math.sin(u * 4.5) > 0.42; break;
+        case 'bands': on = Math.sin(v * 7 + 0.6) > 0.35; break;
+        case 'spots': on = Math.sin(u * 3.2) * Math.cos(v * 3.4) > 0.62; break;
+        case 'patches': on = Math.sin(u * 1.7 + 1.1) * Math.cos(v * 1.9) > 0.28; break;
+        case 'freckles': on = Math.sin(u * 9.5) * Math.cos(v * 8.5) > 0.74; break;
+        case 'scales': on = Math.sin(u * 8) + Math.cos(v * 9) > 1.18; break;
+        case 'plates': on = Math.sin(v * 5.5) > 0.62 || Math.sin(u * 2.4) > 0.86; break;
+        case 'wool': on = Math.sin(u * 6.5) * Math.sin(v * 6) > 0.18; break;
+        default: break;
       }
       if (!on) continue;
-      // keep the pattern out of the darkest terminator so it never muddies
-      const lam = -(nx * -0.5 + ny * -0.6) + nz * 0.5;
-      if (lam < 0.2) continue;
-      px(b, CX + dx, BODY_Y + dy, lam > 0.8 ? mix(C.pat, C.WH, 0.28) : C.pat);
+      // pattern respects the light, or it flattens the ball it is painted on
+      const lam = nx * LX + ny * LY + nz * LZ;
+      px(b, CX + x, CX + y, lam > 0.5 ? mix(C.pat, C.WH, 0.22) : lam > 0 ? C.pat : mix(C.pat, C.IK, 0.35));
+    }
+  }
+  // wool gets a fluffed edge, because sheep are a silhouette not a texture
+  if (kind === 'wool') {
+    for (let a = 0; a < 360; a += 26) {
+      const rad = (a * Math.PI) / 180;
+      disc(b, CX + Math.cos(rad) * (r - 1), CX + Math.sin(rad) * (r - 1), 2,
+        Math.sin(rad + spin) > 0 ? C.light : C.body);
     }
   }
 }
-function clampN(v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
-/* -------------------------------------------------------------------- legs */
+/* ------------------------------------------------------------------- features
 
-function legs(b, rc, C) {
-  const kind = rc.face === 'beak' ? 'bird' : rc.extra === 'flipper' || rc.extra === 'gill' ? 'none' : 'four';
-  if (kind === 'none') return;
-  if (kind === 'bird') {
-    for (const side of [-1, 1]) {
-      const x = CX + side * 3;
-      rect(b, x, LEG_Y, 1, 4, C.beak);
-      rect(b, x - 1, LEG_Y + 4, 3, 1, C.beak);
-      px(b, x, LEG_Y + 3, mix(C.beak, C.IK, 0.4));
-    }
-    return;
-  }
-  // four stubby legs, the far pair a shade darker
-  for (const [dx, far] of [[-6, 1], [-2, 0], [2, 0], [6, 1]]) {
-    const x = CX + dx;
-    const h = far ? 3 : 4;
-    rect(b, x - 1, LEG_Y, 2, h, far ? C.shade : C.body);
-    rect(b, x - 1, LEG_Y + h - 1, 2, 1, far ? C.deep : C.shade);
-    if (!far) px(b, x - 1, LEG_Y, C.light);
-  }
-}
+Everything here has to cross the circle's edge. The order is back-to-front: things behind
+the ball, then the ball's own edge details, then the face on top.
+*/
 
-/* -------------------------------------------------------------------- ears */
-
-function ears(b, rc, C) {
-  const k = rc.ears || 'round';
-  const y = HEAD_Y - HEAD_R;
-  switch (k) {
-    case 'none': break;
-    case 'round':
-      for (const side of [-1, 1]) {
-        const x = CX + side * 5;
-        disc(b, x, y + 1, 3, C.body);
-        disc(b, x, y + 1, 1, C.earIn);
-        px(b, x - side, y - 1, C.light);
-      }
-      break;
-    case 'pointy':
-      mtri(b, CX - 4, y + 4, CX - 7, y - 5, CX - 1, y + 1, C.body);
-      mtri(b, CX - 4, y + 3, CX - 6, y - 2, CX - 2, y + 1, C.earIn);
-      break;
-    case 'long':
-      for (const side of [-1, 1]) {
-        const x = CX + side * 4;
-        rect(b, x - 1, y - 9, 3, 11, C.body);
-        rect(b, x, y - 8, 1, 8, C.earIn);
-        rect(b, x - 1, y - 9, 3, 1, C.light);
-      }
-      break;
-    case 'tiny':
-      for (const side of [-1, 1]) disc(b, CX + side * 4, y + 2, 2, C.body);
-      break;
-    case 'tuft':
-      for (const side of [-1, 1]) {
-        const x = CX + side * 5;
-        disc(b, x, y + 1, 3, C.body);
-        for (let i = 0; i < 4; i++) px(b, x + side * (i - 1), y - 2 - (i & 1), C.shade);
-      }
-      break;
-    case 'horn':
-      // thick at the skull, thinning as it sweeps out — a horn, not a wire
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 8; i++) {
-          const x = CX + side * (3 + Math.round(i * 0.7));
-          const w = i < 3 ? 3 : i < 6 ? 2 : 1;
-          rect(b, side < 0 ? x - w + 1 : x, y - 1 - i, w, 2, i > 5 ? C.horn : mix(C.horn, C.shade, 0.35));
-          if (i < 4) px(b, side < 0 ? x - w + 1 : x + w - 1, y - 1 - i, mix(C.horn, C.WH, 0.3));
-        }
-        px(b, CX + side * 8, y - 9, C.WH);
-      }
-      break;
-    case 'antler':
-      // main beam two pixels thick so it reads as bone, then three tines off it
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 9; i++) {
-          const x = CX + side * (3 + (i >> 1));
-          rect(b, side < 0 ? x - 1 : x, y - i, 2, 1, i > 6 ? C.horn : mix(C.horn, C.shade, 0.25));
-        }
-        for (const [ty, len] of [[3, 3], [6, 3], [8, 2]]) {
-          for (let j = 1; j <= len; j++) {
-            px(b, CX + side * (3 + (ty >> 1) + j), y - ty - j, C.horn);
-          }
-          px(b, CX + side * (3 + (ty >> 1) + len), y - ty - len, C.WH);
-        }
-      }
-      break;
-    case 'crest':
-      for (let i = 0; i < 5; i++) {
-        const h = 3 + Math.round(Math.sin((i / 4) * Math.PI) * 4);
-        rect(b, CX - 4 + i * 2, y - h + 1, 2, h, i & 1 ? C.pat : C.light);
-      }
-      break;
-    case 'fin':
-      mtri(b, CX - 2, y + 2, CX - 8, y - 4, CX - 1, y - 3, C.light);
-      mline(b, CX - 6, y - 2, CX - 3, y + 1, C.shade);
-      break;
-    case 'frill':
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 7; i++) {
-          const h = 6 - Math.abs(i - 3);
-          rect(b, CX + side * (5 + i), y + 1 + Math.round(i * 0.6), 1, h, i & 1 ? C.body : C.shade);
-        }
-      }
-      break;
-    case 'shell':
-      for (let i = 0; i < 3; i++) ellipseFrame(b, CX, y + 4, 8 - i * 2, 4 - i, i ? C.pat : C.light);
-      break;
-    default: break;
-  }
-}
-
-/* -------------------------------------------------------------------- face */
-
-function face(b, rc, C) {
-  const k = rc.face || 'muzzle';
-  // eyes first, so a muzzle can overlap them
-  eyes(b, rc, C);
-  switch (k) {
-    case 'muzzle':
-      ellipse(b, CX, FACE_Y + 1, 4, 3, C.muz);
-      px(b, CX, FACE_Y, C.IK); px(b, CX - 1, FACE_Y, C.IK); px(b, CX + 1, FACE_Y, C.IK);
-      line(b, CX, FACE_Y + 1, CX, FACE_Y + 3, C.shade);
-      mline(b, CX - 1, FACE_Y + 3, CX - 3, FACE_Y + 2, C.shade);
-      break;
-    case 'snout':
-      ellipse(b, CX, FACE_Y + 2, 3, 3, C.muz);
-      ellipse(b, CX, FACE_Y + 3, 2, 1, C.nose);
-      px(b, CX - 1, FACE_Y + 3, C.IK); px(b, CX + 1, FACE_Y + 3, C.IK);
-      break;
-    case 'beak':
-      tri(b, CX - 3, FACE_Y, CX + 3, FACE_Y, CX, FACE_Y + 5, C.beak);
-      line(b, CX - 2, FACE_Y + 1, CX + 2, FACE_Y + 1, mix(C.beak, C.IK, 0.4));
-      px(b, CX, FACE_Y + 4, mix(C.beak, C.IK, 0.5));
-      break;
-    case 'trunk':
-      for (let i = 0; i < 9; i++) {
-        const w = 3 - Math.round(i / 4);
-        rect(b, CX - Math.round(w / 2) + Math.round(Math.sin(i * 0.5) * 1.2), FACE_Y + i, w, 1, i & 1 ? C.body : C.shade);
-      }
-      break;
-    case 'flat':
-      ellipse(b, CX, FACE_Y + 1, 4, 2, C.muz);
-      mpx(b, CX - 1, FACE_Y + 1, C.IK);
-      break;
-    case 'whiskers':
-      ellipse(b, CX, FACE_Y + 1, 3, 2, C.muz);
-      px(b, CX, FACE_Y, C.nose);
-      for (const dy of [0, 2]) {
-        mline(b, CX - 3, FACE_Y + dy, CX - 8, FACE_Y + dy - 1, C.bone);
-      }
-      break;
-    case 'tusk':
-      ellipse(b, CX, FACE_Y + 1, 4, 3, C.muz);
-      px(b, CX, FACE_Y, C.IK);
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 5; i++) px(b, CX + side * (3 + Math.round(i * 0.3)), FACE_Y + 2 + i, C.horn);
-      }
-      break;
-    case 'mandible':
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 4; i++) px(b, CX + side * (2 + i), FACE_Y + 1 + Math.round(i * 0.7), C.rim);
-        px(b, CX + side * 5, FACE_Y + 4, C.rim);
-      }
-      break;
-    default: break;
-  }
-}
-
-function eyes(b, rc, C) {
-  const st = rc.eyeStyle || 'dot';
-  const blink = rc.__blink;
-  if (blink) {
-    for (const side of [-1, 1]) rect(b, CX + side * EYE_DX - 1, EYE_Y, 3, 1, C.rim);
-    return;
-  }
-  switch (st) {
-    case 'dot':
-      for (const side of [-1, 1]) {
-        rect(b, CX + side * EYE_DX - 1, EYE_Y - 1, 2, 2, C.eye);
-        px(b, CX + side * EYE_DX - 1, EYE_Y - 1, C.WH);
-      }
-      break;
-    case 'wide':
-      for (const side of [-1, 1]) {
-        disc(b, CX + side * EYE_DX, EYE_Y, 2, C.WH);
-        px(b, CX + side * EYE_DX, EYE_Y, C.eye);
-        px(b, CX + side * EYE_DX, EYE_Y + 1, C.eye);
-        px(b, CX + side * EYE_DX - 1, EYE_Y - 1, C.WH);
-      }
-      break;
-    case 'sleepy':
-      for (const side of [-1, 1]) {
-        rect(b, CX + side * EYE_DX - 2, EYE_Y, 4, 1, C.eye);
-        px(b, CX + side * EYE_DX - 2, EYE_Y - 1, C.eye);
-      }
-      break;
-    case 'angry':
-      for (const side of [-1, 1]) {
-        rect(b, CX + side * EYE_DX - 1, EYE_Y, 2, 2, C.eye);
-        line(b, CX + side * (EYE_DX - 2), EYE_Y - 2, CX + side * (EYE_DX + 2), EYE_Y - 1, C.rim);
-      }
-      break;
-    case 'sparkle':
-      for (const side of [-1, 1]) {
-        disc(b, CX + side * EYE_DX, EYE_Y, 2, C.eye);
-        px(b, CX + side * EYE_DX - 1, EYE_Y - 1, C.WH);
-        px(b, CX + side * EYE_DX + 1, EYE_Y + 1, C.WH);
-      }
-      break;
-    case 'goggle':
-      for (const side of [-1, 1]) {
-        ring(b, CX + side * EYE_DX, EYE_Y, 2, C.rim);
-        px(b, CX + side * EYE_DX, EYE_Y, C.eye);
-      }
-      rect(b, CX - 1, EYE_Y, 2, 1, C.rim);
-      break;
-    default: break;
-  }
-}
-
-/* ------------------------------------------------------------------- extra */
-
-function extra(b, rc, C) {
-  const k = rc.extra || 'none';
-  switch (k) {
-    case 'none': break;
-    case 'mane':
-      for (let a = 0; a < 360; a += 11) {
-        const rad = (a * Math.PI) / 180;
-        const r0 = HEAD_R + 1, r1 = HEAD_R + 4 + (a % 33 === 0 ? 1 : 0);
-        for (let r = r0; r < r1; r++) {
-          px(b, CX + Math.cos(rad) * r, HEAD_Y + Math.sin(rad) * r * 0.95, r > r0 + 1 ? C.pat : C.shade);
-        }
-      }
-      break;
-    case 'wing':
-      for (const side of [-1, 1]) {
-        for (let i = 0; i < 9; i++) {
-          const h = 7 - Math.round(i * 0.7);
-          rect(b, CX + side * (BODY_RX - 1 + i), BODY_Y - 4 + Math.round(i * 0.4), 1, h, i < 3 ? C.light : i < 6 ? C.body : C.pat);
-        }
-      }
-      break;
+/** Behind the ball: tails, wings, plumes, fins, shells, quills, humps. */
+function backFeatures(b, rc, C) {
+  const r = BALL_R;
+  switch (rc.extra) {
     case 'tail': {
-      // an S that lifts off the rump then flicks up, with a tuft on the end. A straight
-      // diagonal here read as a pool cue laid across the animal.
+      // an S that lifts off the flank and flicks up, with a tuft
       let tx = 0, ty = 0;
-      for (let i = 0; i < 10; i++) {
-        const t = i / 9;
-        tx = CX + BODY_RX - 2 + Math.round(Math.sin(t * 2.1) * 7);
-        ty = BODY_Y - 2 - Math.round(t * t * 9);
+      for (let i = 0; i < 9; i++) {
+        const f = i / 8;
+        tx = CX + r - 3 + Math.round(Math.sin(f * 2.1) * 8);
+        ty = CX + 2 - Math.round(f * f * 11);
         rect(b, tx, ty, 2, 2, i > 6 ? C.light : C.body);
         px(b, tx, ty + 1, C.shade);
       }
@@ -485,269 +292,563 @@ function extra(b, rc, C) {
       px(b, tx, ty - 1, C.light);
       break;
     }
-    case 'shell':
-      for (let i = 0; i < 4; i++) {
-        ellipseFrame(b, CX, BODY_Y - 1, BODY_RX - i * 2, BODY_RY - i, i & 1 ? C.pat : mix(C.pat, C.light, 0.4));
+    case 'wing':
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 10; i++) {
+          const h = 9 - Math.round(i * 0.7);
+          rect(b, CX + side * (r - 2 + i) - (side < 0 ? 1 : 0), CX - 5 + Math.round(i * 0.5),
+            1, h, i < 3 ? C.light : i < 6 ? C.body : C.pat);
+        }
       }
-      ellipseFrame(b, CX, BODY_Y - 1, BODY_RX + 1, BODY_RY + 1, C.rim);
       break;
-    case 'quills': {
-      b.solid = false;
-      for (let a = 190; a <= 350; a += 11) {
-        const rad = (a * Math.PI) / 180;
-        const x0 = CX + Math.cos(rad) * (BODY_RX - 1);
-        const y0 = BODY_Y + Math.sin(rad) * (BODY_RY - 1);
-        line(b, x0, y0, x0 + Math.cos(rad) * 6, y0 + Math.sin(rad) * 6, (a / 11) % 2 ? C.quillA : C.quillB);
+    case 'plume':
+      for (let i = 0; i < 8; i++) {
+        const h = 6 + Math.round(Math.sin((i / 7) * Math.PI) * 8);
+        rect(b, CX + r - 4 + i, CX - 4 - h, 1, h, i & 1 ? C.pat : C.light);
+        px(b, CX + r - 4 + i, CX - 4 - h, C.WH);
       }
-      b.solid = true;
       break;
-    }
-    case 'hump':
-      ellipse(b, CX - 2, BODY_Y - BODY_RY, 5, 4, C.body);
-      ellipse(b, CX - 2, BODY_Y - BODY_RY - 1, 4, 2, C.light);
+    case 'sail':
+      for (let i = 0; i < 13; i++) {
+        const h = 4 + Math.round(Math.sin((i / 12) * Math.PI) * 9);
+        rect(b, CX - 6 + i, CX - r - h + 2, 1, h, i & 1 ? C.light : C.pat);
+      }
       break;
     case 'flipper':
       for (const side of [-1, 1]) {
-        mtri(b, CX + side * (BODY_RX - 2), BODY_Y, CX + side * (BODY_RX + 6), BODY_Y + 5, CX + side * (BODY_RX - 1), BODY_Y + 5, C.shade);
+        mtri(b, CX + side * (r - 3), CX + 2, CX + side * (r + 6), CX + 8,
+          CX + side * (r - 2), CX + 9, C.shade);
       }
-      tri(b, CX + BODY_RX - 1, BODY_Y + 2, CX + BODY_RX + 8, BODY_Y - 2, CX + BODY_RX + 8, BODY_Y + 6, C.light);
       break;
-    case 'plume':
-      for (let i = 0; i < 7; i++) {
-        const h = 5 + Math.round(Math.sin((i / 6) * Math.PI) * 5);
-        rect(b, CX + BODY_RX - 2 + i, BODY_Y - 3 - h, 1, h, i & 1 ? C.pat : C.light);
-        px(b, CX + BODY_RX - 2 + i, BODY_Y - 3 - h, C.WH);
+    case 'shell':
+      for (let i = 0; i < 4; i++) ring(b, CX, CX - 1, r - 1 - i * 3, i & 1 ? C.pat : mix(C.pat, C.light, 0.4));
+      ring(b, CX, CX - 1, r, C.rim);
+      break;
+    case 'quills':
+      b.solid = false;
+      for (let a = 200; a <= 340; a += 12) {
+        const rad = (a * Math.PI) / 180;
+        const x0 = CX + Math.cos(rad) * (r - 1), y0 = CX + Math.sin(rad) * (r - 1);
+        line(b, x0, y0, x0 + Math.cos(rad) * 7, y0 + Math.sin(rad) * 7,
+          (a / 12) % 2 ? C.quillA : C.quillB);
+      }
+      b.solid = true;
+      break;
+    case 'hump':
+      disc(b, CX - 2, CX - r + 1, 5, C.body);
+      disc(b, CX - 3, CX - r, 3, C.light);
+      break;
+    case 'mane':
+      for (let a = 0; a < 360; a += 10) {
+        const rad = (a * Math.PI) / 180;
+        for (let rr = r; rr < r + 5 + (a % 30 === 0 ? 2 : 0); rr++) {
+          px(b, CX + Math.cos(rad) * rr, CX + Math.sin(rad) * rr,
+            rr > r + 2 ? C.pat : mix(C.pat, C.shade, 0.4));
+        }
+      }
+      break;
+    case 'gill':
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 5; j++) px(b, CX + side * (r - 3 + i * 2), CX - 2 + j, mix(C.pat, C.light, j / 5));
+        }
       }
       break;
     case 'antenna':
       b.solid = false;
       for (const side of [-1, 1]) {
-        line(b, CX + side * 2, HEAD_Y - HEAD_R, CX + side * 6, HEAD_Y - HEAD_R - 7, C.rim);
-        disc(b, CX + side * 6, HEAD_Y - HEAD_R - 8, 1, C.pat);
+        line(b, CX + side * 3, CX - r + 2, CX + side * 8, CX - r - 7, C.rim);
+        disc(b, CX + side * 8, CX - r - 8, 2, C.pat);
       }
       b.solid = true;
       break;
-    case 'gill':
+    default: break;
+  }
+}
+
+/** Ears and horns: on top, breaking the dome. The single biggest species cue. */
+function ballEars(b, rc, C) {
+  const r = BALL_R;
+  const y = CX - r + 1;
+  switch (rc.ears || 'round') {
+    case 'none': break;
+    case 'round':
       for (const side of [-1, 1]) {
-        for (let i = 0; i < 3; i++) {
-          for (let j = 0; j < 4; j++) px(b, CX + side * (HEAD_R - 1 + i * 2), HEAD_Y - 2 + j, mix(C.pat, C.light, j / 4));
+        const x = CX + side * 9;
+        disc(b, x, y - 2, 5, C.body);
+        disc(b, x, y - 2, 3, C.earIn);
+        disc(b, x - side, y - 3, 1, C.light);
+      }
+      break;
+    case 'tiny':
+      for (const side of [-1, 1]) { disc(b, CX + side * 8, y, 4, C.body); disc(b, CX + side * 8, y, 2, C.earIn); }
+      break;
+    case 'pointy':
+      for (const side of [-1, 1]) {
+        tri(b, CX + side * 3, y + 3, CX + side * 9, y - 9, CX + side * 9, y + 2, C.body);
+        tri(b, CX + side * 4, y + 2, CX + side * 8, y - 5, CX + side * 8, y + 1, C.earIn);
+      }
+      break;
+    case 'long':
+      for (const side of [-1, 1]) {
+        const x = CX + side * 5;
+        rect(b, x - 1, y - 12, 3, 14, C.body);
+        rect(b, x, y - 11, 1, 11, C.earIn);
+        rect(b, x - 1, y - 12, 3, 1, C.light);
+      }
+      break;
+    case 'tuft':
+      for (const side of [-1, 1]) {
+        const x = CX + side * 7;
+        disc(b, x, y, 4, C.body);
+        for (let i = 0; i < 5; i++) px(b, x + side * (i - 1), y - 4 - (i & 1), C.shade);
+      }
+      break;
+    case 'horn':
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 9; i++) {
+          const x = CX + side * (5 + Math.round(i * 0.7));
+          const w = i < 3 ? 3 : i < 6 ? 2 : 1;
+          rect(b, side < 0 ? x - w + 1 : x, y - 1 - i, w, 2, i > 6 ? C.horn : mix(C.horn, C.shade, 0.35));
+        }
+        px(b, CX + side * 10, y - 10, C.WH);
+      }
+      break;
+    case 'antler':
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 10; i++) {
+          const x = CX + side * (4 + (i >> 1));
+          rect(b, side < 0 ? x - 1 : x, y - i, 2, 1, i > 7 ? C.horn : mix(C.horn, C.shade, 0.25));
+        }
+        for (const [ty2, len] of [[3, 3], [6, 3], [9, 2]]) {
+          for (let j = 1; j <= len; j++) px(b, CX + side * (4 + (ty2 >> 1) + j), y - ty2 - j, C.horn);
+          px(b, CX + side * (4 + (ty2 >> 1) + len), y - ty2 - len, C.WH);
         }
       }
       break;
-    case 'sail':
-      for (let i = 0; i < 11; i++) {
-        const h = 3 + Math.round(Math.sin((i / 10) * Math.PI) * 7);
-        rect(b, CX - 5 + i, BODY_Y - BODY_RY - h, 1, h, i & 1 ? C.light : C.pat);
+    case 'crest':
+      for (let i = 0; i < 6; i++) {
+        const h = 4 + Math.round(Math.sin((i / 5) * Math.PI) * 6);
+        rect(b, CX - 5 + i * 2, y - h + 1, 2, h, i & 1 ? C.pat : C.light);
+      }
+      break;
+    case 'fin':
+      tri(b, CX - 2, y + 3, CX - 10, y - 6, CX - 1, y - 4, C.light);
+      line(b, CX - 8, y - 3, CX - 3, y + 1, C.shade);
+      break;
+    case 'frill':
+      for (const side of [-1, 1]) {
+        for (let i = 0; i < 8; i++) {
+          const h = 7 - Math.abs(i - 3);
+          rect(b, CX + side * (6 + i), y + 2 + Math.round(i * 0.7), 1, h, i & 1 ? C.body : C.shade);
+        }
       }
       break;
     default: break;
   }
 }
 
-/* ------------------------------------------------------------------- bake */
+/**
+ * The face. Two dot eyes and a small nose, and that is nearly all of it.
+ *
+ * The eyes are the whole game: 2x2 dots, four pixels apart, sitting BELOW the middle of
+ * the ball. High eyes read as an adult animal, low eyes read as a baby, and a baby is
+ * what we want. Each gets one white pixel of shine, which is what makes them look wet
+ * and alive rather than painted on.
+ */
+function ballFace(b, rc, C, mood) {
+  const ey = EYE_Y;
+  const st = rc.eyeStyle || 'dot';
+  const closed = mood === 'blink' || mood === 'sleepy' || st === 'sleepy';
 
-export function bakeAnimal(recipe, opts = {}) {
-  const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
-  if (opts.blink) rc.__blink = true;
-  const tone = makeTone(opts);
-  const C = colourSet(rc, tone);
-  const b = makeBoard(SPRITE_SIZE, SPRITE_SIZE);
-  if (!b.canvas) {
-    return { canvas: null, w: SPRITE_SIZE, h: SPRITE_SIZE, cx: CX, cy: BODY_Y, r: BODY_RX };
+  for (const side of [-1, 1]) {
+    const ex = CX + side * EYE_DX;
+    if (closed) {
+      rect(b, ex - 2, ey, 4, 1, C.IK);
+      px(b, ex - 2, ey + 1, C.IK);
+      px(b, ex + 1, ey + 1, C.IK);
+      continue;
+    }
+    if (mood === 'happy') {                       // ^ ^ — the cutest two pixels in games
+      px(b, ex - 2, ey + 1, C.IK); px(b, ex - 1, ey, C.IK);
+      px(b, ex, ey, C.IK); px(b, ex + 1, ey + 1, C.IK);
+      continue;
+    }
+    if (mood === 'scared') {                      // wide with a big highlight
+      rect(b, ex - 2, ey - 2, 4, 5, C.WH);
+      rect(b, ex - 1, ey - 1, 2, 3, C.eye);
+      px(b, ex - 1, ey - 1, C.WH);
+      continue;
+    }
+    // the default: a soft dark dot with a shine
+    rect(b, ex - 1, ey - 1, 3, 3, C.eye);
+    if (st === 'wide' || st === 'sparkle') {
+      rect(b, ex - 2, ey - 2, 4, 4, C.WH);
+      rect(b, ex - 1, ey - 1, 3, 3, C.eye);
+    }
+    px(b, ex - 1, ey - 1, C.WH);
+    if (st === 'sparkle') px(b, ex + 1, ey + 1, C.WH);
+    if (st === 'angry') { px(b, ex - 2 * side, ey - 2, C.shade); px(b, ex - side, ey - 2, C.shade); }
+    if (st === 'goggle') { ring(b, ex, ey, 3, C.metal); px(b, ex, ey - 3, C.hi); }
   }
 
-  // back-to-front: things behind the body, the body, the head, then things in front
-  if (rc.extra === 'wing' || rc.extra === 'plume' || rc.extra === 'sail' || rc.extra === 'tail') extra(b, rc, C);
-  shadedOval(b, CX, BODY_Y, BODY_RX, BODY_RY, C, { belly: true });
-  patternPass(b, rc, C);
-  legs(b, rc, C);
-  if (rc.extra === 'shell' || rc.extra === 'quills' || rc.extra === 'hump' || rc.extra === 'flipper') extra(b, rc, C);
-  ears(b, rc, C);
-  shadedOval(b, CX, HEAD_Y, HEAD_R, HEAD_R - 1, C, {});
-  if (rc.extra === 'mane' || rc.extra === 'gill' || rc.extra === 'antenna') extra(b, rc, C);
-  face(b, rc, C);
-  // a specular kiss on the crown, stamped last so the pattern cannot bury it
-  px(b, CX - 3, HEAD_Y - 4, C.hi);
-  px(b, CX - 2, HEAD_Y - 5, C.WH);
-  outline(b, opts.dim ? mix('ink', 'shadow', 0.5) : 'ink');
-  if (opts.glowRing) ellipseFrame(b, CX, BODY_Y, BODY_RX + 2, BODY_RY + 2, opts.glowRing);
-
-  return { canvas: b.canvas, w: SPRITE_SIZE, h: SPRITE_SIZE, cx: CX, cy: BODY_Y, r: BODY_RX, mask: b.occ };
+  // the nose / snout / beak, always small and always just under the eyes
+  const fy = ey + 5;
+  switch (rc.face) {
+    case 'beak':
+      tri(b, CX - 3, fy - 1, CX + 3, fy - 1, CX, fy + 4, C.beak);
+      px(b, CX, fy, mix(C.beak, C.IK, 0.4));
+      break;
+    case 'trunk':
+      rect(b, CX - 1, fy - 1, 3, 8, C.body);
+      rect(b, CX - 1, fy - 1, 1, 8, C.light);
+      px(b, CX, fy + 7, C.shade);
+      break;
+    case 'tusk':
+      ellipse(b, CX, fy, 3, 2, C.muz);
+      for (const side of [-1, 1]) for (let i = 0; i < 4; i++) px(b, CX + side * (3 + i), fy + i, C.horn);
+      break;
+    case 'mandible':
+      for (const side of [-1, 1]) {
+        line(b, CX + side * 2, fy, CX + side * 6, fy + 3, C.IK);
+        px(b, CX + side * 6, fy + 3, C.pat);
+      }
+      break;
+    case 'whiskers':
+      ellipse(b, CX, fy, 2, 1, C.nose);
+      b.solid = false;
+      for (const side of [-1, 1]) for (let i = 0; i < 2; i++) {
+        line(b, CX + side * 3, fy + i, CX + side * 9, fy - 1 + i * 3, C.bone);
+      }
+      b.solid = true;
+      break;
+    case 'flat':
+      rect(b, CX - 2, fy, 4, 1, C.shade);
+      break;
+    case 'snout':
+      ellipse(b, CX, fy + 1, 4, 3, C.muz);
+      px(b, CX - 1, fy + 1, C.nose); px(b, CX + 1, fy + 1, C.nose);
+      break;
+    default:                                       // muzzle: small, or it becomes the face
+      ellipse(b, CX, fy + 1, 3, 2, mix(C.muz, C.body, 0.35));
+      rect(b, CX - 1, fy, 2, 1, C.nose);
+      break;
+  }
+  // a little smile, on the moods that want one
+  if (mood === 'happy') {
+    px(b, CX - 2, fy + 4, C.IK); px(b, CX - 1, fy + 5, C.IK);
+    px(b, CX, fy + 5, C.IK); px(b, CX + 1, fy + 4, C.IK);
+  }
 }
 
-/* ------------------------------------------------------------------ cache */
+/* ==================================================================== baking
 
-const cache = new Map();
+Two caches, both lazy and both capped.
+
+  backCache   (animal, tint)          what sits behind the ball
+  bodyCache   (animal, phase, tint)   the spinning sphere
+  faceCache   (animal, mood, tint)    the upright ears and face
+
+Lazy matters: a rescue level has a dozen animals on screen, so a dozen animals times
+eight phases get baked, not ninety times eight. The caps are a backstop against a caller
+animating a tint, which would otherwise bake a new sprite every frame forever.
+*/
+
+const backCache = new Map();
+const bodyCache = new Map();
+const faceCache = new Map();
 const iconCache = new Map();
+const CACHE_CAP = 900;
 
-function keyFor(animal, o) {
-  return [
-    animal && animal.id ? animal.id : 'x',
-    o && o.tint ? o.tint : '', o && o.tintAmt !== undefined ? o.tintAmt : '',
-    o && o.dim ? Math.round(o.dim * 4) : 0,
-    o && o.blink ? 1 : 0,
-  ].join('|');
+function tintKey(o) {
+  return `${(o && o.tint) || ''}/${(o && o.tintAmt) !== undefined ? o.tintAmt : ''}/${(o && o.dim) || 0}`;
 }
 
-export function getAnimalSprite(animal, o = {}) {
-  const k = keyFor(animal, o);
-  let hit = cache.get(k);
-  if (hit) return hit;
-  hit = bakeAnimal(animal && animal.sprite, o);
-  if (cache.size > CACHE_CAP) cache.clear();
-  cache.set(k, hit);
+/** The spinning half: sphere + pattern, at one of PHASES rotations. */
+function bakeBody(recipe, phase, o) {
+  const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
+  const C = colourSet(rc, makeTone(o || {}));
+  const b = makeBoard(SPRITE_SIZE, SPRITE_SIZE);
+  if (!b.canvas) return null;
+  ballBody(b, rc, C, phase);
+  outline(b, 'ink');
+  return b.canvas;
+}
+
+/** Behind the ball. One bake per animal: none of it moves or emotes. */
+function bakeBack(recipe, o) {
+  const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
+  if ((rc.extra || 'none') === 'none') return null;      // nothing to draw, skip the blit
+  const C = colourSet(rc, makeTone(o || {}));
+  const b = makeBoard(SPRITE_SIZE, SPRITE_SIZE);
+  if (!b.canvas) return null;
+  backFeatures(b, rc, C);
+  outline(b, 'ink');
+  return b.canvas;
+}
+
+/** The upright half: ears and face, everything that must keep facing the camera. */
+function bakeFace(recipe, mood, o) {
+  const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
+  const C = colourSet(rc, makeTone(o || {}));
+  const b = makeBoard(SPRITE_SIZE, SPRITE_SIZE);
+  if (!b.canvas) return null;
+  ballEars(b, rc, C);
+  ballFace(b, rc, C, mood);
+  outline(b, 'ink');
+  return b.canvas;
+}
+
+/**
+ * bakeAnimal(recipe, opts) -> canvas
+ * The whole animal in one canvas, unrotated. Kept because the shop, the draft and every
+ * card in the game want a single still image and should not pay for two blits.
+ */
+export function bakeAnimal(recipe, opts = {}) {
+  const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
+  const C = colourSet(rc, makeTone(opts));
+  const b = makeBoard(SPRITE_SIZE, SPRITE_SIZE);
+  if (!b.canvas) return null;
+  backFeatures(b, rc, C);
+  ballBody(b, rc, C, opts.phase || 0);
+  ballEars(b, rc, C);
+  ballFace(b, rc, C, opts.mood || 'idle');
+  outline(b, 'ink');
+  return b.canvas;
+}
+
+function cachedBack(animal, o) {
+  const k = `${(animal && animal.id) || 'x'}/${tintKey(o)}`;
+  let hit = backCache.get(k);
+  if (hit === undefined) {
+    hit = bakeBack(animal && animal.sprite, o);
+    if (backCache.size > CACHE_CAP) backCache.clear();
+    backCache.set(k, hit);
+  }
   return hit;
 }
 
-export function clearSpriteCache() { cache.clear(); iconCache.clear(); }
-export function spriteCacheSize() { return cache.size + iconCache.size; }
-
-/* -------------------------------------------------------------------- draw */
-
-function blitPart(g, src, sx0, sy0, sw, sh, dx, dy, dw, dh, flip) {
-  if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
-  g.save();
-  g.imageSmoothingEnabled = false;
-  if (flip) {
-    g.translate(dx + dw, dy);
-    g.scale(-1, 1);
-    g.drawImage(src, sx0, sy0, sw, sh, 0, 0, dw, dh);
-  } else {
-    g.drawImage(src, sx0, sy0, sw, sh, dx, dy, dw, dh);
+function cachedBody(animal, phase, o) {
+  const k = `${(animal && animal.id) || 'x'}/${phase}/${tintKey(o)}`;
+  let hit = bodyCache.get(k);
+  if (hit === undefined) {
+    hit = bakeBody(animal && animal.sprite, phase, o);
+    if (bodyCache.size > CACHE_CAP) bodyCache.clear();
+    bodyCache.set(k, hit);
   }
-  g.restore();
+  return hit;
 }
 
+function cachedFace(animal, mood, o) {
+  const k = `${(animal && animal.id) || 'x'}/${mood}/${tintKey(o)}`;
+  let hit = faceCache.get(k);
+  if (hit === undefined) {
+    hit = bakeFace(animal && animal.sprite, mood, o);
+    if (faceCache.size > CACHE_CAP) faceCache.clear();
+    faceCache.set(k, hit);
+  }
+  return hit;
+}
+
+/** A single still image of the animal, memoised. For cards, lists and shop shelves. */
+export function getAnimalSprite(animal, o = {}) {
+  const k = `still/${(animal && animal.id) || 'x'}/${o.mood || 'idle'}/${tintKey(o)}`;
+  let hit = bodyCache.get(k);
+  if (hit === undefined) {
+    hit = bakeAnimal(animal && animal.sprite, o);
+    if (bodyCache.size > CACHE_CAP) bodyCache.clear();
+    bodyCache.set(k, hit);
+  }
+  return hit;
+}
+
+export function clearSpriteCache() { backCache.clear(); bodyCache.clear(); faceCache.clear(); iconCache.clear(); }
+export function spriteCacheSize() { return backCache.size + bodyCache.size + faceCache.size + iconCache.size; }
+
+/* ------------------------------------------------------------------- drawing */
+
 /**
- * Draw an animal with its BODY CENTRE at (sx, sy).
- * opts: {scale=1, squash=0, blink=0, bob=0, flip=false, tint, tintAmt, dim, glow, angle}
+ * drawAnimal(g, animal, sx, sy, opts)
+ *
+ * opts:
+ *   scale    1 | 2         integer only, so pixels stay pixels
+ *   roll     radians        how far it has rolled; picks the body phase
+ *   squash   0..1          flattened by an impact; conserves area
+ *   wet      0..1          sheen on top, drips off the bottom
+ *   rain     0..1          how hard it is raining on this animal
+ *   mood     idle|blink|happy|scared|sleepy
+ *   flip     boolean       mirror (features only look right one way for some recipes)
+ *   t        seconds       drives drips and sheen; pass the scene clock
+ *   alpha, tint, dim
+ *
+ * Cost: two drawImage calls, plus up to four pixels of water. The rolling, the squash and
+ * the wetness are all free at the call site because none of them re-bakes anything.
  */
 export function drawAnimal(g, animal, sx, sy, opts = {}) {
-  const scale = Math.max(0.05, opts.scale || 1);
-  const blink = (typeof opts.blink === 'number' ? opts.blink : (opts.blink ? 1 : 0)) > 0.45;
-  const sp = getAnimalSprite(animal, {
-    tint: opts.tint, tintAmt: opts.tintAmt, dim: opts.dim, blink,
-  });
-  sx = R(sx); sy = R(sy) - R(opts.bob || 0);
+  const sc = Math.max(1, Math.round(opts.scale || 1));
+  const S = SPRITE_SIZE * sc;
+  const phase = opts.roll !== undefined
+    ? ((Math.round((opts.roll / (Math.PI * 2)) * PHASES) % PHASES) + PHASES) % PHASES
+    : 0;
+  const mood = opts.mood || (opts.blink ? 'blink' : 'idle');
+  const back = cachedBack(animal, opts);
+  const body = cachedBody(animal, phase, opts);
+  const face = cachedFace(animal, mood, opts);
+  if (!body && !face) return;
 
-  if (opts.glow) {
-    const prev = g.globalAlpha;
-    if (opts.glowAlpha !== undefined) g.globalAlpha = opts.glowAlpha;
-    ellipseFrame(g, sx, sy, R(sp.r * scale) + 3, R(sp.r * scale * 0.8) + 3,
-      opts.glow === true ? 'gold' : opts.glow);
-    g.globalAlpha = prev;
-  }
+  // squash and stretch, area-preserving: a ball that flattens must also widen, or it
+  // reads as shrinking rather than as landing
+  const q = opts.squash ? Math.max(0, Math.min(0.5, opts.squash)) : 0;
+  const dw = Math.round(S * (1 + q * 0.55));
+  const dh = Math.round(S * (1 - q * 0.55));
+  const dx = Math.round(sx - dw / 2);
+  const dy = Math.round(sy - dh / 2 + (S - dh) / 2);
 
-  if (!sp.canvas) { disc(g, sx, sy, sp.r * scale, 'grey1'); return sp; }
-
-  const sq = Math.max(-0.6, Math.min(0.9, opts.squash || 0));
-  const dw = Math.max(1, R(sp.w * scale * (1 + sq * 0.3)));
-  const dh = Math.max(1, R(sp.h * scale * (1 - sq * 0.34)));
-  const kx = dw / sp.w, ky = dh / sp.h;
-  const x0 = R(sx - sp.cx * kx);
-  // pin the feet: the sprite's contact point is the bottom of the leg band
-  const y0 = R(sy + (sp.h - sp.cy) * ky * 0.42 - sp.h * ky + (sp.h - sp.cy) * ky * 0.58);
-  const flip = !!opts.flip;
-
-  const lean = opts.angle ? Math.max(-1, Math.min(1, R(Math.sin(opts.angle) * 1.3))) : 0;
-  if (lean === 0) {
-    blitPart(g, sp.canvas, 0, 0, sp.w, sp.h, x0, y0, dw, dh, flip);
+  const prevA = g.globalAlpha;
+  if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
+  if (opts.flip) {
+    g.save();
+    g.translate(dx + dw, dy);
+    g.scale(-1, 1);
+    if (back) g.drawImage(back, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
+    if (body) g.drawImage(body, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
+    if (face) g.drawImage(face, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
+    g.restore();
   } else {
-    const cut = HEAD_Y + HEAD_R;
-    const hTop = Math.max(1, R(cut * ky));
-    blitPart(g, sp.canvas, 0, 0, sp.w, cut, x0 + lean, y0, dw, hTop, flip);
-    blitPart(g, sp.canvas, 0, cut, sp.w, sp.h - cut, x0, y0 + hTop, dw, Math.max(1, dh - hTop), flip);
+    if (back) g.drawImage(back, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
+    if (body) g.drawImage(body, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
+    if (face) g.drawImage(face, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
   }
-  return sp;
+  g.globalAlpha = prevA;
+
+  if (opts.wet) drawWet(g, sx, sy, sc, opts.wet, opts.t || 0);
+  if (opts.rain) drawRainHit(g, sx, sy, sc, opts.rain, opts.t || 0);
 }
 
-/* -------------------------------------------------------------------- icon */
-
-/** A head-only badge for HUD lists. */
 /**
- * A 16px badge. This is not a shrunken sprite -- at 16 pixels a whole animal is mud.
- * It is a HEAD, cropped like a passport photo, and it earns its legibility from four
- * things in this order: the body colour, the ear silhouette breaking the circle, one
- * pattern mark, and the eyes. Everything else is left out on purpose.
+ * Wet: a bright sheen arc across the lit shoulder, and drips leaving the underside.
+ *
+ * Drips are indexed off a hash of the animal's position so neighbouring animals do not
+ * drip in unison, which is what gives a sodden flock its liveliness for eight pixels of
+ * work.
  */
+function drawWet(g, sx, sy, sc, wet, t) {
+  const w = Math.max(0, Math.min(1, wet));
+  const r = (BALL_R - 1) * sc;
+  // sheen: two short arcs, brighter the wetter it is
+  for (let i = 0; i < 5; i++) {
+    const a = -2.5 + i * 0.16;
+    px(g, sx + Math.cos(a) * r * 0.82, sy + Math.sin(a) * r * 0.82, i & 1 ? 'ice' : 'foam');
+  }
+  if (w > 0.45) {
+    for (let i = 0; i < 4; i++) {
+      const a = -2.1 + i * 0.14;
+      px(g, sx + Math.cos(a) * r * 0.6, sy + Math.sin(a) * r * 0.6, 'foam');
+    }
+  }
+  // drips: three staggered, each falling on its own loop
+  const n = w > 0.7 ? 3 : w > 0.35 ? 2 : 1;
+  for (let i = 0; i < n; i++) {
+    const seed = i * 2.7 + Math.floor(sx * 0.31 + sy * 0.17);
+    const k = (t * (0.9 + i * 0.25) + seed) % 1;
+    const dx = sx + ((i - 1) * 5 + (seed % 3) - 1) * sc;
+    const dy = sy + r * 0.72 + k * 12 * sc;
+    px(g, dx, dy, 'foam');
+    px(g, dx, dy + 1, 'water3');
+    if (k > 0.86) { px(g, dx - 1, dy + 2, 'foam'); px(g, dx + 1, dy + 2, 'foam'); }
+  }
+}
+
+/** Rain landing on the animal: a couple of splash ticks on the dome. */
+function drawRainHit(g, sx, sy, sc, rain, t) {
+  const n = Math.round(1 + Math.max(0, Math.min(1, rain)) * 3);
+  const r = (BALL_R - 2) * sc;
+  for (let i = 0; i < n; i++) {
+    const seed = i * 5.3 + Math.floor(sx * 0.7 + sy * 0.3);
+    const k = (t * 3.4 + seed) % 1;
+    if (k > 0.4) continue;                       // most of the loop is nothing happening
+    const a = -2.6 + ((seed * 7) % 20) / 10;
+    const px2 = sx + Math.cos(a) * r, py2 = sy + Math.sin(a) * r;
+    px(g, px2, py2, 'white');
+    if (k > 0.18) { px(g, px2 - 1, py2 - 1, 'foam'); px(g, px2 + 1, py2 - 1, 'foam'); }
+  }
+}
+
+/** A flattened shadow on the ground, so a ball reads as resting on something. */
+export function drawAnimalShadow(g, sx, sy, r, opts = {}) {
+  const flat = opts.flat !== undefined ? opts.flat : 0.34;
+  const a = opts.alpha !== undefined ? opts.alpha : 0.5;
+  const c = opts.color || 'ink';
+  const rx = Math.max(2, Math.round(r));
+  const ry = Math.max(1, Math.round(r * flat));
+  const prev = g.globalAlpha;
+  g.globalAlpha = prev * a;
+  ellipse(g, Math.round(sx), Math.round(sy), rx, ry, c);
+  g.globalAlpha = prev * a * 0.55;
+  ellipse(g, Math.round(sx), Math.round(sy), rx + 2, ry + 1, c);
+  g.globalAlpha = prev;
+}
+
+/* --------------------------------------------------------------------- icons
+
+A 16px badge. Not a shrunken sprite -- at sixteen pixels a whole animal is mud. It is the
+ball's TOP HALF, cropped like a passport photo, which keeps the two dot eyes at a
+readable size and lets the ears still break the edge.
+*/
+
 export function bakeIcon(recipe, size = ICON_SIZE) {
   const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
   const C = colourSet(rc, makeTone({}));
   const b = makeBoard(size, size);
   if (!b.canvas) return { canvas: null, w: size, h: size, cx: size / 2, cy: size / 2 };
   const cx = Math.round(size / 2), cy = Math.round(size / 2) + 1;
-  const r = Math.round(size * 0.40);
+  const r = Math.round(size * 0.42);
 
-  // --- ears / horns first, so the head overlaps their roots
+  // ears first so the dome overlaps their roots
   const et = rc.ears || 'round';
   if (et === 'long') {
-    for (const side of [-1, 1]) {
-      rect(b, cx + side * 2 - 1, cy - r - 5, 3, 7, C.body);
-      px(b, cx + side * 2, cy - r - 4, C.earIn);
-    }
+    for (const side of [-1, 1]) { rect(b, cx + side * 2 - 1, cy - r - 5, 3, 7, C.body); px(b, cx + side * 2, cy - r - 4, C.earIn); }
   } else if (et === 'pointy') {
     for (const side of [-1, 1]) tri(b, cx + side * 2, cy - r + 2, cx + side * 6, cy - r - 5, cx + side * 1, cy - r, C.body);
-  } else if (et === 'horn') {
+  } else if (et === 'horn' || et === 'antler') {
     for (const side of [-1, 1]) for (let i = 0; i < 5; i++) rect(b, cx + side * (2 + (i >> 1)), cy - r - i, 2, 1, C.horn);
-  } else if (et === 'antler') {
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 6; i++) px(b, cx + side * (2 + (i >> 1)), cy - r - i, C.horn);
-      px(b, cx + side * 5, cy - r - 3, C.horn);
-    }
   } else if (et === 'crest' || et === 'tuft') {
-    for (let i = 0; i < 5; i++) rect(b, cx - 4 + i * 2, cy - r - 2 - (i === 2 ? 2 : i === 1 || i === 3 ? 1 : 0), 2, 4, i & 1 ? C.pat : C.light);
-  } else if (et === 'fin') {
-    tri(b, cx - 1, cy - r + 2, cx - 6, cy - r - 4, cx, cy - r - 2, C.light);
+    for (let i = 0; i < 5; i++) rect(b, cx - 4 + i * 2, cy - r - 2 - (i === 2 ? 2 : 0), 2, 4, i & 1 ? C.pat : C.light);
   } else if (et !== 'none') {
     for (const side of [-1, 1]) { disc(b, cx + side * 4, cy - r + 2, 2, C.body); px(b, cx + side * 4, cy - r + 2, C.earIn); }
   }
 
-  shadedOval(b, cx, cy, r, r - 1, C, {});
-
-  // --- one pattern mark: enough to tell a zebra from a horse, no more
+  // the dome, shaded with the same light as the big sprite
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y > r * r) continue;
+      const nx = x / r, ny = y / r;
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      const lam = nx * LX + ny * LY + nz * LZ;
+      px(b, cx + x, cy + y, lam > 0.72 ? C.hi : lam > 0.4 ? C.light : lam > 0 ? C.body : lam > -0.3 ? C.shade : C.deep);
+    }
+  }
+  // one pattern mark: enough to tell a zebra from a horse
   switch (rc.pattern) {
-    case 'stripes':
-      for (let i = -1; i <= 1; i++) rect(b, cx + i * 3 - 0, cy - r + 2, 1, r, C.pat);
-      break;
+    case 'stripes': for (let i = -1; i <= 1; i++) rect(b, cx + i * 3, cy - r + 2, 1, r, C.pat); break;
     case 'spots': case 'freckles': case 'patches':
-      px(b, cx - 3, cy + 1, C.pat); px(b, cx + 3, cy + 2, C.pat); px(b, cx + 1, cy - 3, C.pat);
-      break;
+      px(b, cx - 3, cy + 1, C.pat); px(b, cx + 3, cy + 2, C.pat); px(b, cx + 1, cy - 3, C.pat); break;
     case 'bands': case 'scales': case 'plates':
-      rect(b, cx - r + 2, cy - 2, r * 2 - 4, 1, C.pat);
-      rect(b, cx - r + 3, cy + 2, r * 2 - 6, 1, C.pat);
-      break;
+      rect(b, cx - r + 2, cy - 2, r * 2 - 4, 1, C.pat); rect(b, cx - r + 3, cy + 2, r * 2 - 6, 1, C.pat); break;
     case 'wool':
       for (const [dx, dy] of [[-4, -3], [0, -4], [4, -3], [-3, 2], [3, 2]]) disc(b, cx + dx, cy + dy, 1, C.light);
       break;
     default: break;
   }
-
-  // --- eyes, in the animal's own style, then the face
-  const st = rc.eyeStyle || 'dot';
+  // the two dots, and one shine
   for (const side of [-1, 1]) {
-    const ex = cx + side * 3, ey = cy - 1;
-    if (st === 'sleepy') { rect(b, ex - 1, ey, 3, 1, C.eye); continue; }
-    if (st === 'angry') { px(b, ex, ey, C.eye); px(b, ex - side, ey - 1, C.shade); continue; }
-    if (st === 'wide') { rect(b, ex - 1, ey - 1, 3, 3, C.WH); px(b, ex, ey, C.eye); continue; }
+    const ex = cx + side * 3, ey = cy;
     px(b, ex, ey, C.eye);
-    px(b, ex, ey - 1, C.WH);
+    px(b, ex, ey - 1, C.eye);
+    px(b, ex - 1, ey - 1, C.WH);
   }
-  if (rc.face === 'beak') { tri(b, cx - 2, cy + 1, cx + 2, cy + 1, cx, cy + 5, C.beak); }
-  else if (rc.face === 'snout' || rc.face === 'muzzle') {
-    ellipse(b, cx, cy + 3, 3, 2, C.muz); px(b, cx, cy + 2, C.nose || C.eye);
-  } else if (rc.face === 'trunk') { rect(b, cx - 1, cy + 1, 2, 5, C.body); }
-  else { ellipse(b, cx, cy + 3, 2, 1, C.muz); }
-
-  // --- a single feathered/finned hint at the shoulder for the flyers and swimmers
-  if (rc.extra === 'wing' || rc.extra === 'plume') {
-    for (let i = 0; i < 3; i++) px(b, cx + r - 1 + i, cy + 2 + i, i ? C.pat : C.light);
-  } else if (rc.extra === 'mane') {
-    for (let a2 = 0; a2 < 360; a2 += 40) {
-      const rad = (a2 * Math.PI) / 180;
-      px(b, cx + Math.cos(rad) * (r + 1), cy + Math.sin(rad) * (r + 1), C.pat);
-    }
-  }
-
+  if (rc.face === 'beak') tri(b, cx - 2, cy + 3, cx + 2, cy + 3, cx, cy + 6, C.beak);
+  else ellipse(b, cx, cy + 4, 2, 1, C.muz);
   outline(b, 'ink');
   return { canvas: b.canvas, w: size, h: size, cx, cy };
 }
@@ -764,37 +865,12 @@ export function getAnimalIcon(animal, size = ICON_SIZE) {
 
 export function drawAnimalIcon(g, animal, sx, sy, opts = {}) {
   const size = opts.size || ICON_SIZE;
-  const sp = getAnimalIcon(animal, size);
-  const scale = Math.max(1, R(opts.scale || 1));
-  if (!sp.canvas) return sp;
-  blitPart(g, sp.canvas, 0, 0, sp.w, sp.h,
-    R(sx) - R(sp.cx * scale), R(sy) - R(sp.cy * scale),
-    sp.w * scale, sp.h * scale, !!opts.flip);
-  return sp;
-}
-
-/**
- * Flattened dither ellipse on the felt. (sx, sy) is the contact point.
- * opts: {flat=0.34, color='ink', alpha=1, spread=1}
- */
-export function drawAnimalShadow(g, sx, sy, r, opts = {}) {
-  const rx = Math.max(1, R(r * (opts.spread !== undefined ? opts.spread : 1)));
-  const ry = Math.max(1, R(rx * (opts.flat !== undefined ? opts.flat : 0.34)));
-  const cx = R(sx), cy = R(sy);
+  const ic = getAnimalIcon(animal, size);
+  if (!ic || !ic.canvas) return;
+  const sc = Math.max(1, Math.round(opts.scale || 1));
   const prev = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
-  g.fillStyle = col(opts.color || 'ink');
-  for (let dy = -ry; dy <= ry; dy++) {
-    const k = 1 - (dy * dy) / (ry * ry);
-    if (k < 0) continue;
-    const dxo = Math.floor(rx * Math.sqrt(k) + 0.4);
-    if (dxo < 0) continue;
-    const dxi = Math.floor(dxo * 0.58);
-    g.fillRect(cx - dxi, cy + dy, dxi * 2 + 1, 1);
-    const y = cy + dy;
-    for (let x = cx - dxo; x < cx - dxi; x++) if (((x + y) & 1) === 0) g.fillRect(x, y, 1, 1);
-    for (let x = cx + dxi + 1; x <= cx + dxo; x++) if (((x + y) & 1) === 0) g.fillRect(x, y, 1, 1);
-  }
+  g.drawImage(ic.canvas, 0, 0, size, size,
+    Math.round(sx - ic.cx * sc), Math.round(sy - ic.cy * sc), size * sc, size * sc);
   g.globalAlpha = prev;
-  void P;
 }

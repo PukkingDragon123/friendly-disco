@@ -1,76 +1,147 @@
-// The Ark palette. Dusk-harbour base + biome accents. 44 colours, hand-tuned so any
-// two adjacent ramp steps read cleanly at 1x pixel scale.
+// The palette. A COZY palette: warm woods, parchment, clay, muted greens, and a sea you
+// would put your hand in. Hand-tuned so any two adjacent ramp steps read cleanly at 1x.
+//
+// Two rules the whole look depends on:
+//   * nothing is pure white or blue-black. `white` is cream, `ink` is a warm near-black.
+//     A cold outline over warm art is the fastest way to make pixel art look like a UI
+//     mockup instead of a place.
+//   * every material gets its OWN ramp -- clay, stone, leaf, skin, wood. Sharing one
+//     grey across a cliff, a golem and a person is what makes pixel art look flat.
 //
 // Rule for the whole codebase: never write a hex literal outside this file.
 // Helpers accept a palette KEY (preferred) or a raw hex (escape hatch only).
 
 export const P = {
-  // structural darks
-  ink:     '#0a0d16',
-  shadow:  '#141c31',
-  deep:    '#1d2846',
-  night:   '#28345c',
+  // --- structural darks. WARM, not blue-black: a cold outline over warm art is the
+  // fastest way to make cozy pixel art look like a UI mockup.
+  ink:     '#1a1210',
+  shadow:  '#2b1e1a',
+  deep:    '#33261f',
+  night:   '#3d3348',
 
-  // sea
-  water0:  '#1b3358',
-  water1:  '#244madjust', // placeholder replaced below
-  water2:  '#2f6ba4',
-  water3:  '#4a97c9',
-  foam:    '#b6e2f2',
+  // --- sea. Muted teal-leaning blue rather than navy. Cozy water is water you would
+  // put your hand in.
+  water0:  '#22424a',
+  water1:  '#2f6068',
+  water2:  '#40858f',
+  water3:  '#66b0b2',
+  foam:    '#d3ebe2',
 
-  // timber + hull
-  wood0:   '#2a1a12',
-  wood1:   '#43291b',
-  wood2:   '#5f3d26',
-  wood3:   '#8a5a34',
-  wood4:   '#b98553',
+  // --- timber + hull. The widest ramp in the palette, because almost every surface in
+  // the game is a plank, a post, a crate or a deck.
+  wood0:   '#2a1a13',
+  wood1:   '#482d1e',
+  wood2:   '#6d462c',
+  wood3:   '#96663b',
+  wood4:   '#c48d58',
 
-  // metal
-  brass0:  '#4a3512',
-  brass1:  '#7b5a20',
-  brass2:  '#c99b3e',
-  brass3:  '#f4d582',
+  // --- metal
+  brass0:  '#4a3616',
+  brass1:  '#7f5e27',
+  brass2:  '#c69c49',
+  brass3:  '#f1d99c',
 
-  // felt
-  cloth0:  '#0c2a20',
-  cloth1:  '#12miss',     // placeholder replaced below
-  cloth2:  '#1f6b52',
-  cloth3:  '#2f8e69',
+  // --- deep foliage / canopy shadow (was felt green)
+  cloth0:  '#16301f',
+  cloth1:  '#204b2c',
+  cloth2:  '#2d6438',
+  cloth3:  '#418446',
 
-  // neutrals
-  white:   '#f7f4e8',
-  bone:    '#d9d2b8',
-  grey0:   '#4d5468',
-  grey1:   '#6f7688',
-  grey2:   '#9aa2b4',
+  // --- neutrals. `white` is CREAM and `bone` is PARCHMENT: nothing in a cozy palette
+  // is ever pure #fff, and the warm greys keep shadows from going blue.
+  white:   '#fdf6e3',
+  bone:    '#ecdcbb',
+  grey0:   '#544a41',
+  grey1:   '#7d7164',
+  grey2:   '#ab9d8d',
 
-  // warm accents
-  red0:    '#5e1420',
-  red1:    '#a82a3a',
-  red2:    '#e04a58',
-  orange:  '#e8843c',
-  gold:    '#ffcb52',
-  amber:   '#f7a63b',
-  rust:    '#a8552a',
-  sand:    '#e6c894',
+  // --- warm accents
+  red0:    '#5c211c',
+  red1:    '#a83a2f',
+  red2:    '#d6614a',
+  orange:  '#e08c46',
+  gold:    '#f5c451',
+  amber:   '#eaa740',
+  rust:    '#a35730',
+  sand:    '#e9d0a0',
 
-  // cool accents
-  green0:  '#3f7a2e',
-  green1:  '#8bd450',
-  moss:    '#5c8a4a',
-  teal:    '#3fd0c9',
-  sky:     '#8ecae6',
-  ice:     '#cdeeff',
+  // --- greens. Muted: the old green1 was a highlighter.
+  green0:  '#3d6b33',
+  green1:  '#70b04b',
+  moss:    '#57783f',
+  teal:    '#4fb0a2',
+  sky:     '#93b9cd',
+  ice:     '#d8ebe6',
 
-  // exotics
-  purple0: '#4a2a7a',
-  purple1: '#8c5ad6',
-  pink:    '#ef77b0',
+  // --- magic
+  purple0: '#43305e',
+  purple1: '#8a69b2',
+  pink:    '#e08fa2',
+
+  /* ==================================================== new ramps
+
+  Everything below was added for the rebuild. They exist because the alternative is
+  callers reaching for an approximate old key -- a golem drawn out of `wood` reads as a
+  wooden puppet, a cliff drawn out of `grey` reads as concrete -- and because sharing
+  one ramp across clay, stone and skin is what makes pixel art look flat.
+  */
+
+  // river clay: the golem's body, and the mud hazard
+  clay0:   '#3b2418',
+  clay1:   '#5d3a25',
+  clay2:   '#875436',
+  clay3:   '#b0714a',
+  clay4:   '#d19a6e',
+
+  // foliage, lit from above. leaf3 is the sun-caught top of a canopy.
+  leaf0:   '#1e3a22',
+  leaf1:   '#2f5a2f',
+  leaf2:   '#457f3c',
+  leaf3:   '#6ba84c',
+  leaf4:   '#a3cc63',
+
+  // skin. Four tones so a crowd of cute humans is not one family.
+  skin0:   '#6b4029',   // shadow for the darkest
+  skin1:   '#8f5a38',
+  skin2:   '#c08a5e',
+  skin3:   '#e0ab80',
+  skin4:   '#f4d3ae',
+
+  // hair
+  hair0:   '#22160f',
+  hair1:   '#4a2c18',
+  hair2:   '#8a5a2c',
+  hair3:   '#d9b46a',
+
+  // stone: cliffs, ruins, rocks, standing walls
+  stone0:  '#3a3730',
+  stone1:  '#5c574c',
+  stone2:  '#847c6d',
+  stone3:  '#b0a693',
+  stone4:  '#d8cdb6',
+
+  // biome specials, one or two steps each -- enough to read, not enough to bloat
+  lava0:   '#7a2410',
+  lava1:   '#e0632a',
+  lava2:   '#ffb347',
+  snow0:   '#b9c9cf',
+  snow1:   '#e6f0f2',
+  ash:     '#4a453f',
+  bark:    '#4d3524',
+  coral0:  '#c2566b',
+  coral1:  '#f08a95',
+
+  // parchment UI. `parch` is the paper a menu is printed on, `cream` the lit edge.
+  parch:   '#e3cfa4',
+  parch1:  '#cbb183',
+  parch0:  '#a68a5f',
+  cream:   '#f6e9c8',
+
+  // the shepherd wand's magic
+  magic0:  '#3f6b8a',
+  magic1:  '#7fd0d8',
+  magic2:  '#e8fbf6',
 };
-
-// two entries above are written oddly on purpose so a bad merge is loud; fix them here.
-P.water1 = '#244a7a';
-P.cloth1 = '#175a44';
 
 const KEYS = Object.keys(P);
 export function palKeys() { return KEYS.slice(); }

@@ -237,6 +237,48 @@ switch (which) {
     };
     break;
   }
+  case 'anim': {
+    // one animal across every axis: roll phase, mood, wet, squash
+    const { ANIMAL_BY_ID } = await import('../src/data/animals.js');
+    const { drawAnimal, drawAnimalShadow } = await import('../src/render/sprites.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const who = (process.env.WHO || 'cow,zebra,sheep,lion').split(',');
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, SW, SH, 'deep');
+        text(g, 'ROLL PHASES  ·  MOODS  ·  WET  ·  SQUASH', SW / 2, 8, 'gold', { center: true, font: 7 });
+        who.forEach((id, row) => {
+          const a = ANIMAL_BY_ID[id];
+          if (!a) return;
+          const y = 46 + row * 118;
+          text(g, a.name, 8, y - 12, 'bone', { font: 5 });
+          // eight roll phases
+          for (let i = 0; i < 8; i++) {
+            const x = 60 + i * 46;
+            drawAnimalShadow(g, x, y + 34, 13);
+            drawAnimal(g, a, x, y + 20, { scale: 1, roll: (i / 8) * Math.PI * 2 });
+          }
+          text(g, 'roll', 60 - 44, y + 20, 'grey2', { font: 3 });
+          // moods
+          ['idle', 'blink', 'happy', 'scared', 'sleepy'].forEach((m, i) => {
+            const x = 470 + i * 46;
+            drawAnimal(g, a, x, y + 20, { scale: 1, mood: m });
+            text(g, m, x, y + 40, 'grey2', { font: 3, center: true });
+          });
+          // wet + rain, at 2x so the drips are visible
+          drawAnimal(g, a, 736, y + 24, { scale: 2, wet: 1, t: 1.3 });
+          text(g, 'wet', 736, y + 62, 'sky', { font: 3, center: true });
+          drawAnimal(g, a, 810, y + 24, { scale: 2, rain: 1, t: 0.42 });
+          text(g, 'rain', 810, y + 62, 'sky', { font: 3, center: true });
+          // squash
+          drawAnimal(g, a, 884, y + 28, { scale: 2, squash: 0.42 });
+          text(g, 'squash', 884, y + 62, 'sky', { font: 3, center: true });
+        });
+      },
+    };
+    break;
+  }
   case 'icons': {
     const { ANIMALS } = await import('../src/data/animals.js');
     const { drawAnimalIcon } = await import('../src/render/sprites.js');

@@ -43,6 +43,10 @@ const M = {};
     ['run', '../src/game/run.js'], ['flood', '../src/game/flood.js'],
     ['eden', '../src/data/eden.js'], ['cinematic', '../src/render/cinematic.js'],
     ['story', '../src/data/story.js'],
+    ['abilities', '../src/data/abilities.js'], ['obstacles', '../src/data/obstacles.js'],
+    ['islands', '../src/data/islands.js'], ['voyage', '../src/game/voyage.js'],
+    ['boatart', '../src/render/boat.js'], ['islandart', '../src/render/islandart.js'],
+    ['folk', '../src/render/folk.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -887,6 +891,196 @@ if (section('autoplay') && M.physics && M.cargo && M.blinds) {
   ok(Math.max(...reached) <= 9, 'sanity: nobody exceeds ante 9');
 }
 
+/* ------------------------------------------------------------------ voyage */
+
+if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
+  const { ABILITIES, ABILITY_BY_ID, abilityOf, abilityPower } = M.abilities;
+  const { OBSTACLES, OBSTACLE_BY_ID } = M.obstacles;
+  const { ISLANDS, CHERUBIM, rollLeg, allObstacleKinds } = M.islands;
+  const V = M.voyage;
+  const PHYS = ['solid', 'slow', 'slick', 'kill', 'push', 'pull', 'gap', 'strike'];
+  const palOk = (k) => M.palette.palKeys().indexOf(k) >= 0;
+
+  // --- abilities: every animal is FOR something, and nothing is unused
+  const spread = {};
+  let missing = 0;
+  for (const a of M.animals.ANIMALS) {
+    const ab = abilityOf(a);
+    if (!ab || !ab.id) { missing++; continue; }
+    spread[ab.id] = (spread[ab.id] || 0) + 1;
+    if (!num(abilityPower(a)) || abilityPower(a) < 1) missing++;
+  }
+  ok(missing === 0, 'every animal has an ability and a power', String(missing));
+  ok(Object.keys(spread).length === ABILITIES.length,
+    'every ability is carried by at least one animal',
+    `${Object.keys(spread).length}/${ABILITIES.length}: ${JSON.stringify(spread)}`);
+  const thin = ABILITIES.filter((a) => (spread[a.id] || 0) < 5).map((a) => a.id);
+  ok(thin.length === 0, 'no ability is carried by fewer than five animals', thin.join(','));
+  for (const a of ABILITIES) {
+    ok(!!a.name && !!a.verb && !!a.blurb, `ability ${a.id} is written`);
+    ok(M.uikit.hasIcon(a.icon), `ability ${a.id} icon exists`, a.icon);
+    ok(palOk(a.color), `ability ${a.id} colour is a palette key`, a.color);
+  }
+
+  // --- obstacles: each one is answered by exactly one real ability, or by nothing
+  for (const o of OBSTACLES) {
+    ok(PHYS.indexOf(o.physics) >= 0, `obstacle ${o.id} has a known physics`, o.physics);
+    ok(o.clearedBy === null || !!ABILITY_BY_ID[o.clearedBy],
+      `obstacle ${o.id} clearedBy names a real ability`, String(o.clearedBy));
+    ok(!!o.blurb && (o.clearedBy ? !!o.cleared : true), `obstacle ${o.id} is written`);
+    ok(M.uikit.hasIcon(o.icon), `obstacle ${o.id} icon exists`, o.icon);
+    ok(num(o.r) && o.r > 4, `obstacle ${o.id} has a radius`);
+    for (const k of ['color', 'dark', 'light']) ok(palOk(o[k]), `obstacle ${o.id} ${k} is a palette key`, o[k]);
+  }
+  const answered = OBSTACLES.filter((o) => o.clearedBy).length;
+  ok(answered >= 8, 'most obstacles are solvable by an animal', `${answered}/${OBSTACLES.length}`);
+
+  // --- islands: eleven biomes plus the gate, each a place you can tell apart
+  ok(ISLANDS.length === 11, 'eleven biomes', String(ISLANDS.length));
+  const seenBiome = new Set();
+  for (const i of ISLANDS.concat([CHERUBIM])) {
+    seenBiome.add(i.biome);
+    ok(!!i.name && !!i.blurb, `island ${i.id} is written`);
+    for (const key of ['ground', 'rock', 'sky']) {
+      const ramp = i[key];
+      ok(Array.isArray(ramp) && ramp.length === 3, `island ${i.id} ${key} is a three-step ramp`);
+      for (const c of ramp || []) ok(palOk(c), `island ${i.id} ${key} colour is a palette key`, c);
+    }
+    ok(num(i.relief) && i.relief > 0.2 && i.relief <= 1, `island ${i.id} relief is sane`, String(i.relief));
+    ok(num(i.steep) && i.steep > 0.1 && i.steep <= 1.6, `island ${i.id} steep is sane`, String(i.steep));
+    ok(i.danger >= 0 && i.danger <= 4, `island ${i.id} danger is 0..4`);
+    for (const oid of i.obstacles) ok(!!OBSTACLE_BY_ID[oid], `island ${i.id} obstacle ${oid} exists`);
+    ok(Array.isArray(i.scenery) && i.scenery.length >= 3, `island ${i.id} has scenery`);
+  }
+  ok(seenBiome.size >= 11, 'no two islands share a biome word', String(seenBiome.size));
+  ok(allObstacleKinds().length >= 10, 'the biomes between them use most obstacle kinds',
+    String(allObstacleKinds().length));
+
+  // --- the route roll: a safe haul, a risky haul, and sometimes the gate
+  const rng = M.rng.makeRng('ROUTE');
+  let gates = 0, dupes = 0;
+  for (let leg = 1; leg <= 60; leg++) {
+    const out = rollLeg(rng.fork('L' + leg), { leg, lastWasCherubim: leg % 7 === 0 });
+    if (out.length !== 3) { dupes++; continue; }
+    const ids = out.map((o) => o.id);
+    if (new Set(ids).size !== 3) dupes++;
+    if (ids.indexOf('cherubim') >= 0) {
+      gates++;
+      if (leg % 7 === 0) dupes++;             // never offered twice in a row
+    }
+  }
+  ok(dupes === 0, 'every leg offers three distinct destinations', String(dupes));
+  ok(gates > 20, 'the gate is offered often enough to matter', String(gates));
+
+  // --- the starting deck is a set of TOOLS, not five of the same animal
+  const v0 = V.newVoyage('VOY-0001');
+  ok(v0.aboard.length === V.capacity(v0), 'the boat starts full');
+  const startAb = new Set(v0.aboard.map((id) => abilityOf(M.animals.ANIMAL_BY_ID[id]).id));
+  ok(startAb.size >= 3, 'the starting deck carries at least three abilities',
+    [...startAb].join(','));
+
+  // --- the tide: an unupgraded boat runs out of ocean exactly at the end of the voyage
+  const v1 = V.newVoyage('VOY-TIDE');
+  let legs = 0;
+  while (!v1.over && legs < 40) { V.sailTo(v1, v1.choices[0]); V.departIsland(v1); legs++; }
+  ok(legs >= 14 && legs <= 18, 'an unupgraded voyage ends within a leg or two of the finish',
+    `${legs} legs`);
+  ok(v1.flood > 0.9, 'and it finishes with the water at its heels', v1.flood.toFixed(3));
+  const v2 = V.newVoyage('VOY-SAIL');
+  v2.tiers.speed = 4;
+  let legs2 = 0;
+  while (!v2.over && legs2 < 40) { V.sailTo(v2, v2.choices[0]); V.departIsland(v2); legs2++; }
+  ok(legs2 === legs && v2.won, 'a full sail finishes the same voyage', `${legs2} legs`);
+  ok(v2.flood < 0.62, 'and buys real margin doing it', v2.flood.toFixed(3));
+
+  // --- the manifest: aboard / Eden / lost, and the rules that move between them
+  const v = V.newVoyage('VOY-MAN');
+  // a kind that appears ONCE on the deck, so "moved" and "still there" cannot both be
+  // true off the back of a duplicate
+  const first = v.aboard.find((id) => v.aboard.filter((o) => o === id).length === 1);
+  ok(!V.takeAboard(v, 'cow'), 'a full boat refuses another animal');
+  ok(V.stow(v, first), 'stowing moves an animal into the garden');
+  ok(v.eden.indexOf(first) >= 0 && v.aboard.indexOf(first) < 0, 'and it is in exactly one place');
+  ok(V.unstow(v, first), 'and it can come back out');
+  const price = V.sellPrice(v, first);
+  ok(price > 0, 'an animal has a price');
+  V.makeLoyal(v, first);
+  ok(V.sellPrice(v, first) > price, 'a loyal animal is worth more');
+  ok(V.isLoyal(v, first), 'loyalty sticks');
+
+  // a breach never takes a loyal animal, which is the whole promise of the apple
+  const v3 = V.newVoyage('VOY-HULL');
+  for (const id of v3.aboard.slice()) V.makeLoyal(v3, id);
+  const before = v3.aboard.length;
+  V.damageHull(v3, 99);
+  ok(v3.over || v3.aboard.length === before, 'a breach never drowns a loyal animal');
+  const v4 = V.newVoyage('VOY-HULL2');
+  V.makeLoyal(v4, v4.aboard[0]);
+  V.damageHull(v4, 99);
+  ok(v4.aboard.indexOf(v4.loyal[0]) >= 0, 'the loyal one is still aboard after a breach');
+  ok(v4.lost.length === 1, 'and exactly one other went');
+
+  // --- upgrades: visible, priced, and capped
+  const v5 = V.newVoyage('VOY-UP');
+  v5.money = 999;
+  for (const id of V.UPGRADE_IDS) {
+    let steps = 0;
+    while (V.tierCost(v5, id) !== null && steps < 9) { ok(V.buyUpgrade(v5, id), `buy ${id} ${steps}`); steps++; }
+    ok(steps === 4, `${id} has four purchasable steps`, String(steps));
+    ok(V.buyUpgrade(v5, id) === false, `${id} cannot be bought past the top`);
+  }
+  ok(V.capacity(v5) === 15 && V.hullMax(v5) === 11, 'a fully upgraded boat is at its numbers');
+  const v6 = V.newVoyage('VOY-POOR');
+  v6.money = 0;
+  ok(V.buyUpgrade(v6, 'capacity') === false, 'you cannot buy what you cannot afford');
+
+  // --- relics slot by type, and the golem has exactly three
+  const v7 = V.newVoyage('VOY-REL');
+  const held = { id: 'r1', name: 'Thing', slot: 'hold', bonus: { grip: 2 } };
+  const worn = { id: 'r2', name: 'Cloak', slot: 'wear', bonus: { grip: 1, dry: true } };
+  V.equip(v7, held); V.equip(v7, worn);
+  ok(V.equipped(v7).length === 2, 'two slots filled');
+  ok(V.relicBonus(v7, 'grip') === 3, 'numeric bonuses add across slots');
+  ok(V.relicFlag(v7, 'dry'), 'flags read across slots');
+  const displaced = V.equip(v7, { id: 'r3', name: 'Other', slot: 'hold', bonus: {} });
+  ok(displaced === held, 'a new relic displaces the one in its own slot');
+  ok(Object.keys(v7.slots).length === 3, 'the golem has three slots');
+
+  // --- the hold: apples and gear, capped by the boat
+  const v8 = V.newVoyage('VOY-HOLD');
+  const cap = V.holdSize(v8);
+  for (let i = 0; i < cap; i++) ok(V.addItem(v8, 'apple'), `hold takes apple ${i}`);
+  ok(V.addItem(v8, 'apple') === false, 'a full hold refuses another apple');
+  ok(V.useItem(v8, 'apple') && v8.hold.length === cap - 1, 'using one frees a slot');
+  ok(V.useItem(v8, 'nothing') === false, 'you cannot use what you do not have');
+
+  // --- status is complete, because the HUD reads it
+  const st = V.status(v8);
+  for (const k of ['chapter', 'leg', 'flood', 'aboard', 'capacity', 'eden', 'garden', 'hull', 'hullMax', 'money', 'lost', 'where']) {
+    ok(st[k] !== undefined, `status reports ${k}`);
+  }
+
+  // --- the art layers take every island and every boat tier without throwing
+  if (M.boatart && M.islandart) {
+    const cv = new SoftCanvas(960, 540);
+    const g = cv.getContext('2d');
+    let threw = null;
+    try {
+      for (let i = 0; i < 5; i++) {
+        M.boatart.drawBoat(g, 480, 400, i * 0.7, {
+          tiers: { capacity: i, speed: i, hull: i, hold: i }, damage: i, scale: 1,
+        });
+        M.boatart.drawBoatFar(g, 100 + i * 40, 200, i * 0.3, { tiers: { speed: i } });
+      }
+      for (const isl of ISLANDS.concat([CHERUBIM])) {
+        M.islandart.drawIslandFar(g, isl, 480, 300, 130, 96, 1.3, {});
+        M.islandart.drawIslandBack(g, isl, 0, 0, 240, 135, 1.3, {});
+      }
+    } catch (e) { threw = e; }
+    ok(!threw, 'every island and boat tier renders', threw && threw.message);
+  }
+}
+
 /* ------------------------------------------------------------ render smoke */
 
 if (section('render') && M.pixel) {
@@ -895,6 +1089,9 @@ if (section('render') && M.pixel) {
     ['table', '../src/scenes/table.js', 'makeTableScene', (run) => ({ run, onExit: () => {} })],
     ['shop', '../src/scenes/shop.js', 'makeShopScene', (run) => ({ run, onDone: () => {} })],
     ['gameover', '../src/scenes/gameover.js', 'makeGameOverScene', (run) => ({ run, won: true, onDone: () => {} })],
+    ['ocean', '../src/scenes/ocean.js', 'makeOceanScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-ocean'), onArrive: () => {}, onOver: () => {},
+    })],
   ];
   const { Input } = await import('../src/core/input.js');
   const { Juice } = await import('../src/core/juice.js');

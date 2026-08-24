@@ -1,6 +1,7 @@
 // Headless screenshotter.
 //   node tools/shot.mjs <scene> [outfile] [frames] [scale]
-// scene: menu | table | shop | over | sprites | ui | sea | font
+// scene: menu | table | shop | over | draft | eden | sprites | anim | icons | folk
+//        | boat | isles | ocean | ui | sea | font
 //
 // Boots the real scene against the software canvas, ticks it, and writes a PNG. This is
 // how the renderer gets reviewed — by looking at it.
@@ -195,6 +196,85 @@ switch (which) {
       Input.consume();
       for (let k = 0; k < 3; k++) { scene.update(1 / 60, app); Input.consume(); }
     }
+    break;
+  }
+  case 'isles': {
+    const I = await import('../src/data/islands.js');
+    const A = await import('../src/render/islandart.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const all = I.ISLANDS.concat([I.CHERUBIM]);
+    if (process.env.BACK) {
+      const isl = I.ISLAND_BY_ID[process.env.BACK] || all[0];
+      scene = { update() {}, draw() {
+        A.drawIslandBack(g, isl, 0, 0, SW, SH, 1.6, {});
+        text(g, isl.name.toUpperCase() + '  —  ' + isl.biome, SW / 2, 12, 'white',
+          { center: true, font: 7, shadow: 'ink' });
+      } };
+    } else {
+      scene = { update() {}, draw() {
+        rect(g, 0, 0, SW, SH, 'water1');
+        for (let y = 0; y < SH; y++) rect(g, 0, y, SW, 1, y < 150 ? 'sky' : y < 170 ? 'water3' : 'water1');
+        text(g, 'ISLANDS ON THE MAP', SW / 2, 8, 'gold', { center: true, font: 7 });
+        all.forEach((isl, i) => {
+          const x = 80 + (i % 6) * 160, y = 250 + Math.floor(i / 6) * 230;
+          A.drawIslandFar(g, isl, x, y, 130, 96, 1.3 + i * 0.4, {});
+          text(g, isl.name, x, y + 8, 'cream', { center: true, font: 5, shadow: 'ink' });
+          text(g, isl.biome + '  d' + isl.danger, x, y + 22, 'brass3', { center: true, font: 3 });
+        });
+      } };
+    }
+    break;
+  }
+  case 'ocean': {
+    const V = await import('../src/game/voyage.js');
+    const { makeOceanScene } = await import('../src/scenes/ocean.js');
+    const voyage = V.newVoyage(seed);
+    if (process.env.FLOOD) voyage.flood = Number(process.env.FLOOD);
+    if (process.env.TIER) {
+      const n = Number(process.env.TIER);
+      for (const k of V.UPGRADE_IDS) voyage.tiers[k] = n;
+      voyage.hull = V.hullMax(voyage);
+      voyage.aboard = voyage.stock.slice(0, V.capacity(voyage));
+    }
+    if (process.env.LEG) {
+      voyage.leg = Number(process.env.LEG);
+      V.rollChoices(voyage);
+    }
+    scene = makeOceanScene();
+    scene.enter({ voyage, onArrive: () => {}, onOver: () => {} }, app);
+    if (process.env.SAIL) scene.debug().choose(Number(process.env.SAIL));
+    mouse(Number(process.env.MX || 480), Number(process.env.MY || 280));
+    break;
+  }
+  case 'boat': {
+    const B = await import('../src/render/boat.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, SW, SH, 'water1');
+        for (let y = 0; y < SH; y++) rect(g, 0, y, SW, 1, y < SH * 0.4 ? 'sky' : 'water1');
+        text(g, 'BOAT TIERS — every upgrade is visible', SW / 2, 8, 'gold', { center: true, font: 7 });
+        // five tiers of everything, left to right
+        for (let i = 0; i < 5; i++) {
+          const x = 110 + i * 190, y = 150;
+          const tiers = { capacity: i, speed: i, hull: i, hold: i };
+          B.drawBoat(g, x, y, 1.4 + i * 0.3, { tiers, scale: 1, speed: 0.5 });
+          text(g, 'TIER ' + i, x, y + 22, 'cream', { center: true, font: 5 });
+        }
+        // damage states
+        for (let i = 0; i < 5; i++) {
+          const x = 110 + i * 190, y = 330;
+          B.drawBoat(g, x, y, 2.1 + i, { tiers: { capacity: 2, speed: 2, hull: 3, hold: 1 }, damage: i, scale: 1 });
+          text(g, 'DAMAGE ' + i, x, y + 22, 'red2', { center: true, font: 5 });
+        }
+        // and the far-off map version
+        text(g, 'ON THE MAP', SW / 2, 400, 'brass3', { center: true, font: 5 });
+        for (let i = 0; i < 5; i++) {
+          B.drawBoatFar(g, 300 + i * 90, 450, 1.2 + i, { tiers: { speed: i }, scale: 1 + (i > 2 ? 1 : 0) });
+        }
+      },
+    };
     break;
   }
   case 'folk': {

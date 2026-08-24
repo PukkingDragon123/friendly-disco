@@ -213,7 +213,7 @@ function buildStrand(r) {
     const y = Math.round(26 + lane * (FIELD_H - 52) + r.rng.range(-14, 14));
     const ball = addBall(r.world, { animalId: a.id, x, y, r: BALL_R, mass: a.mass });
     if (!ball) return;
-    r.strand.push({ ball, animalId: a.id, state: 'ashore', wet: 0 });
+    r.strand.push({ ball, animalId: a.id, state: 'ashore' });
   });
 }
 
@@ -226,15 +226,11 @@ the animal away would not be.
 */
 function syncGates(r) {
   if (berthsFree(r.voyage) <= 0) { setGates(r.world, []); return; }
-  // r matches the pen mouth the scene DRAWS (cy +/- 40). At 26 the visible mouth was
-  // half again as big as the disc that actually caught anything, so an animal rolled to
-  // the hull and visibly into the pen just sat there -- the worst kind of near miss,
-  // because the player cannot see why it did not count.
   const gates = [];
   for (let i = 0; i < 3; i++) {
     gates.push({
       id: `gang${i}`, habitatId: 'boat', slot: `g${i}`,
-      x: GANGWAY_X, y: Math.round((i + 0.5) * (FIELD_H / 3)), r: 40,
+      x: GANGWAY_X, y: Math.round((i + 0.5) * (FIELD_H / 3)), r: 26,
     });
   }
   setGates(r.world, gates);
@@ -432,29 +428,10 @@ export function throwApple(r, entry, itemId) {
 
 /* -------------------------------------------------------------------- ticking */
 
-/**
- * How wet each animal is, decaying.
- *
- * An animal that has just been dragged through a channel should still be dripping when it
- * arrives, not dry the instant it leaves the zone -- the drip is most of what tells the
- * player the water did something to it.
- */
-function soak(r, dt) {
-  for (const s of r.strand) {
-    if (s.state !== 'ashore') continue;
-    const z = s.ball.zone;
-    const inWater = z && (z.physics === 'kill' || z.physics === 'push' || z.physics === 'pull'
-      || z.physics === 'slow');
-    if (inWater) s.wet = 1;
-    else if (s.wet > 0) s.wet = Math.max(0, s.wet - dt * 0.35);
-  }
-}
-
 /** Advance the physics and turn its events into rescues and losses. */
 export function update(r, dt) {
   if (r.noteT > 0) { r.noteT -= dt; if (r.noteT <= 0) r.note = null; }
   if (r.over) return [];
-  soak(r, dt);
   const events = step(r.world, dt);
   const out = [];
   for (const e of events) {

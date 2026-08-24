@@ -61,9 +61,9 @@ export function makeMenuScene() {
       state: UI.hover(btn.mute, m) ? 'hover' : 'idle', color: Audio.muted ? 'grey0' : 'wood2',
     });
 
-    text(g, 'a cozy pixel-art rescue roguelike', W / 2, 492, 'foam', { font: 5, center: true });
-    text(g, 'Noah built the ark. Somebody has to decide who gets on it. You are the golem.',
-      W / 2, 508, 'water3', { font: 5, center: true });
+    text(g, 'a 2.5D berth-trait pool roguelike', W / 2, 496, 'foam', { font: 5, center: true });
+    text(g, 'Noah built the ark. The animals will not board. You are the golem.',
+      W / 2, 512, 'water3', { font: 5, center: true });
 
     parts.draw(g, 'front');
     if (showHelp) drawHelp(g);
@@ -83,7 +83,7 @@ export function makeMenuScene() {
     text(g, 'ARK', cx, y + 47, 'white', { center: true, scale: 6, shadow: 'brass1' });
 
     // a dark strip behind the strapline — engraved brass on brass is unreadable
-    const strap = 'ONE BOAT · ELEVEN ISLANDS · NO ROOM';
+    const strap = 'SIX BERTHS · EIGHT ANTES · ONE ARK';
     const sw = textW(strap, { font: 5 }) + 22;
     rect(g, cx - sw / 2, y + h - 26, sw, 15, 'wood0');
     rect(g, cx - sw / 2, y + h - 26, sw, 1, 'brass1');
@@ -164,43 +164,31 @@ export function makeMenuScene() {
 
   function drawHelp(g) {
     wash(g, 0, 0, W, H, 'ink', 0.72);
-    // sized to the TEXT: at font 3 these lines run about 310px, and a 660-wide sheet
-    // left three hundred pixels of blank parchment down one side
-    const hx = 246, hw = 468;
-    UI.panel(g, hx, 24, hw, 356, { style: 'paper', shadow: true, title: "THE KEEPER'S MANUAL" });
+    UI.panel(g, 60, 30, 520, 300, { style: 'paper', shadow: true, title: 'THE KEEPER\'S MANUAL' });
     const lines = [
-      ['THE JOB', 'rust'],
-      ['The water is still rising and the boat is not getting bigger. Every island has', 'ink'],
-      ['more animals on it than you have room for. Go out, bring back what you can', 'ink'],
-      ['carry, and know exactly what you left.', 'ink'],
+      ['THE JOB', 'brass3'],
+      ['Animals are racked on the felt. Six gates ring the deck, each opening onto a', 'ink'],
+      ['habitat. Sink an animal into its TRUE habitat for x3 chips and +2 mult. Wrong', 'ink'],
+      ['gate and it loses almost everything. Adjacent biomes pay partial credit.', 'ink'],
       ['', 'ink'],
-      ['THE CROOK', 'rust'],
-      ['An animal on the ground is a ball. PRESS on it, DRAG AWAY to aim and wind up,', 'ink'],
-      ['and let go. It bounces off rock, bogs down in mire, slides on black ice, is', 'ink'],
-      ['carried off by a current, and drowns if it stops in deep water.', 'ink'],
+      ['THE SHOT', 'brass3'],
+      ['Click an animal to take it as your cue. Point, HOLD to charge, release to break.', 'ink'],
+      ['A / D or the mouse wheel puts english on the ball. R re-racks the felt.', 'ink'],
+      ['Sink several animals in one shot and every extra one compounds the mult.', 'ink'],
       ['', 'ink'],
-      ['PUTTING ONE DOWN', 'rust'],
-      ['Click an animal you already carry, then click whatever is in the way. If its', 'ink'],
-      ['ability answers that obstacle the obstacle OPENS for good -- the ox shifts the', 'ink'],
-      ['boulder, the pig digs, the duck holds the channel. It stays there, so opening a', 'ink'],
-      ['path is a real risk and not a free move.', 'ink'],
+      ['INTERACTIONS', 'brass3'],
+      ['Animals notice each other. A fox that lands beside a rabbit eats it for a fat', 'ink'],
+      ['pile of chips. Sheep panic near wolves. Flamingos flock. Penguins do not want', 'ink'],
+      ['to meet a polar bear. Read the gate before you shoot into it.', 'ink'],
       ['', 'ink'],
-      ['THE WATER', 'rust'],
-      ['Every flick and every animal you put down lets the water in another step, and', 'ink'],
-      ['anything it reaches is gone. So it is never how many you can save. It is what', 'ink'],
-      ['order, and what you will spend to reach the last one.', 'ink'],
+      ['THE DOCK', 'brass3'],
+      ['Beat a blind and you sail to the dock. Pick ONE crate from the manifest; a boat', 'ink'],
+      ['brings it in and unloads. Crates hold animals, relics, cue work and vouchers.', 'ink'],
       ['', 'ink'],
-      ['THE GARDEN', 'rust'],
-      ['Sail to Cherubim Rock and step through to Eden. An animal in a bed there is', 'ink'],
-      ['safe for good -- and out of the game. Sit with one three times and it will never', 'ink'],
-      ['leave you. Ask the Cherubim and one of three gates opens, free.', 'ink'],
-      ['', 'ink'],
-      ['Four chapters. Sixteen crossings. The tide does not wait for either of us.', 'red1'],
+      ['Eight antes. Three blinds each. The last one always bites back.', 'red1'],
     ];
-    lines.forEach((l, i) => {
-      text(g, l[0], hx + 16, 46 + i * 11, l[1], { font: l[1] === 'rust' ? 5 : 3 });
-    });
-    text(g, 'CLICK ANYWHERE TO CLOSE', hx + hw / 2, 364, 'wood1', { font: 5, center: true });
+    lines.forEach((l, i) => text(g, l[0], 76, 52 + i * 12, l[1], { font: l[1] === 'brass3' ? 5 : 3 }));
+    text(g, 'CLICK ANYWHERE TO CLOSE', W / 2, H - 34, 'grey0', { font: 5, center: true });
   }
 
   function update(dt) {
@@ -243,11 +231,6 @@ export function makeMenuScene() {
     },
     exit() {},
     update, draw,
-    debug() {
-      return {
-        rects: btn, showHelp, seed,
-        help: (on) => { showHelp = on !== false; },
-      };
-    },
+    debug() { return { rects: btn, showHelp, seed }; },
   };
 }

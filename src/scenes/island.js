@@ -32,7 +32,7 @@ import { drawObstacle } from '../render/obstacles.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { abilityOf, ABILITY_BY_ID } from '../data/abilities.js';
 import { ITEM_BY_ID } from '../data/items.js';
-import { berthsFree, capacity, isLoyal, holdSize } from '../game/voyage.js';
+import { berthsFree, capacity, isLoyal } from '../game/voyage.js';
 import {
   newRescue, update as tickRescue, flick, placeHelper, useApple, endRescue, result,
   advanceTide, tideX, remaining, isSettled, shotPower, note,
@@ -213,7 +213,6 @@ export function makeIslandScene() {
   }
 
   function drawField(g) {
-    const wetWeather = island.weather === 'rain' || island.weather === 'storm';
     // the ground the level is played on comes from the baked backdrop; all this adds is
     // the boundary, so a flick that bounces has something visible to bounce off
     frame(g, FX - 1, FY - 1, FIELD_W + 2, FIELD_H + 2, 'wood0');
@@ -232,10 +231,7 @@ export function makeIslandScene() {
       const ab = ABILITY_BY_ID[hp.ability];
       drawAnimalShadow(g, sx(hp.x), sy(hp.y) + 12, 1);
       drawAnimal(g, a, sx(hp.x), sy(hp.y), {
-        scale: 1, mood: 'happy',
-        wet: wetWeather ? 0.6 : 0,
-        rain: wetWeather ? 0.5 : 0,
-        t,
+        scale: 1, mood: 'happy', wet: island.weather === 'rain' ? 0.6 : 0,
       });
       if (ab) UI.icon(g, ab.icon, sx(hp.x) - 4, sy(hp.y) + 14, { color: ab.color });
     }
@@ -258,8 +254,8 @@ export function makeIslandScene() {
         roll: moving ? b.angle : 0,
         squash: b.squash,
         mood: moving ? 'scared' : 'idle',
-        wet: s.wet || 0,                 // decays after it leaves the water, so it drips
-        rain: wetWeather ? 0.7 : 0,
+        wet: b.zone && (b.zone.physics === 'kill' || b.zone.physics === 'push') ? 1 : 0,
+        rain: island.weather === 'rain' || island.weather === 'storm' ? 0.7 : 0,
         t,
       });
       if (isLoyal(v, s.animalId)) UI.icon(g, 'heart', sx(b.x) + 8, sy(b.y) - 16, { color: 'gold' });
@@ -288,11 +284,7 @@ export function makeIslandScene() {
     const gx = sx(GANGWAY_X) + 6;
     const gy = FY + FIELD_H - 4;
     const pose = aim ? 'react' : r.over ? 'happy' : 'idle';
-    // in the rain he is a wet riverbank, which is the whole joke of him
-    const wetWeather = island.weather === 'rain' || island.weather === 'storm';
-    drawFolk(g, 'golem', gx, gy, t, {
-      scale: 2, pose, mud: wetWeather ? 0.9 : 0.4, wet: wetWeather ? 1 : 0,
-    });
+    drawFolk(g, 'golem', gx, gy, t, { scale: 2, pose, mud: 0.4 });
     // the hand, and the wand in it
     const hx = gx + 22, hy = gy - 52;
     let ang = -0.5, ch = 0;
@@ -367,9 +359,7 @@ export function makeIslandScene() {
     appleRects = [];
     const bx = 730;
     text(g, 'BASKET', bx, 4, 'parch1', { font: 3 });
-    // as many slots as the hold actually HAS, not as many as happen to be full: the
-    // basket is where the player checks what they can still spend
-    const slots = Math.max(2, Math.min(6, holdSize(v)));
+    const slots = Math.max(2, v.hold.length);
     for (let i = 0; i < slots; i++) {
       const rct = UI.rectOf(bx + i * 22, 12, 20, 20);
       appleRects[i] = rct;

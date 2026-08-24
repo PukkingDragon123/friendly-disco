@@ -512,38 +512,42 @@ export function createDeck(o = {}) {
       }
     },
 
-    /** Aim guide: dotted path, ghost ball, and the bounce direction off first contact. */
-    drawAim(g, path, o2 = {}) {
-      if (!path || !path.points || path.points.length < 2) return;
-      const pts = path.points;
-      const c = o2.color || 'white';
-      let prev = toScreen(pts[0].x, pts[0].y);
-      const phase = Math.floor(-t * 26);
-      // A dark underlay first: a pale dashed line on green felt is nearly invisible,
-      // and this is the single most important read on the table.
-      for (let pass = 0; pass < 2; pass++) {
-        prev = toScreen(pts[0].x, pts[0].y);
-        const cc = pass === 0 ? 'ink' : c;
-        const off = pass === 0 ? 1 : 0;
-        for (let i = 1; i < pts.length; i++) {
-          const s = toScreen(pts[i].x, pts[i].y);
-          dashLine(g, prev.x + off, prev.y - 4 + off, s.x + off, s.y - 4 + off, cc, 2, 3, phase + i * 5);
-          prev = s;
+    /**
+     * Rail diamonds — the Rail Sight upgrade.
+     *
+     * A real table has diamonds on the cushions because you aim off THEM, not off a
+     * drawn line. Eight to a long rail, four to a short one, projected through the same
+     * view as everything else so they sit where the cushion actually is.
+     */
+    drawRailMarks(g) {
+      for (let i = 1; i < 8; i++) {
+        const tx = (i / 8) * TABLE_W;
+        for (const ty of [0, TABLE_H]) {
+          const p = toScreen(tx, ty, 0);
+          const off = ty === 0 ? -DECK.rail + 5 : DECK.rail - 5;
+          rect(g, p.x - 1, p.y + off - 1, 3, 3, 'ink');
+          rect(g, p.x - 1, p.y + off - 1, 2, 2, 'bone');
+          px(g, p.x, p.y + off, 'white');
         }
       }
-      const hit = path.hit;
-      if (hit) {
-        const s = toScreen(hit.x, hit.y);
-        const pr = ballPixelRadius(o2.r || BALL_R, hit.y);
-        ellipseFrame(g, s.x + 1, s.y - Math.round(pr * 0.5) + 1, Math.round(pr), Math.round(pr * 0.66), 'ink');
-        ellipseFrame(g, s.x, s.y - Math.round(pr * 0.5), Math.round(pr), Math.round(pr * 0.66), 'white');
-        if (hit.normal) {
-          const nx = s.x + hit.normal.x * 20;
-          const ny = s.y - Math.round(pr * 0.5) + hit.normal.y * 20 * (VIEW.tilt / VIEW.xs);
-          dashLine(g, s.x, s.y - Math.round(pr * 0.5), nx, ny, hit.kind === 'gate' ? 'gold' : 'grey2', 1, 2, phase);
+      for (let i = 1; i < 4; i++) {
+        const ty = (i / 4) * TABLE_H;
+        for (const tx of [0, TABLE_W]) {
+          const p = toScreen(tx, ty, 0);
+          const off = tx === 0 ? -DECK.rail + 6 : DECK.rail - 6;
+          rect(g, p.x + off - 1, p.y - 1, 3, 3, 'ink');
+          rect(g, p.x + off - 1, p.y - 1, 2, 2, 'bone');
+          px(g, p.x + off, p.y, 'white');
         }
       }
     },
+
+    // There is no drawAim. The aiming guide was removed on purpose (see the aim layer
+    // in scenes/table.js): with a trajectory drawn, every shot was arithmetic and the
+    // only skill left was dragging a mouse along a dotted path. physics.predict() still
+    // exists because the autoplay bot needs to reason about shots -- but nothing draws
+    // its output, and nothing should. What the chandler sells instead is REFERENCE:
+    // drawRailMarks above, and the bearing readout in the controls band.
 
     /**
      * The flood, climbing the ark. level 0 = dry rail, 1 = the water is over the felt.

@@ -68,8 +68,9 @@ function baseRun(seed) {
     // --- tunables (cargo.js documents that it mutates exactly these)
     power: 1,
     spin: 0.6,
-    guideLen: 46,
-    guideBounces: 1,
+    // aim AIDS, not aim answers -- there is no guide line to lengthen
+    bearing: false,      // Brass Compass: show the cue's bearing in degrees
+    railMarks: false,    // Rail Sight: diamonds on the cushions to aim off
     railChips: 4,
     shots: 4,
     reracks: 3,

@@ -17,7 +17,7 @@
 //   res.chips / res.mult / res.xmult / res.money / res.consumed   (the animal being scored)
 //   ctx.relic.state                                              (per-run, deep cloned)
 //   ctx.log(text, colorKey) / ctx.addMoney(n) / ctx.consumeAnimal(id)
-//   run tunables, from modifyRun() only: shots reracks gateScale guideLen railChips
+//   run tunables, from modifyRun() only: shots reracks gateScale railChips bearing
 //                 crateSlots handSize relicSlots rerollCost interest sellBonus crateDiscount
 // Nothing else. No DOM, no scene imports, no Math.random, no Date.now.
 //
@@ -323,13 +323,15 @@ export const RELICS = [
     },
   },
   {
+    // No aiming line exists to lengthen, so the chalk does what chalk does: it puts
+    // marks on the rails you can aim off, and tells you the bearing you are on.
     id: 'long_chalk', name: 'Long Chalk',
     rarity: 'common', price: 3,
-    desc: 'The aim guide reaches much further down the felt',
+    desc: "Chalks the rails: diamonds to aim off, and the cue's bearing in degrees",
     art: { icon: 'chalk', bg: 'cloth0', fg: 'white' },
     tags: ['structure'],
     hooks: {
-      modifyRun(run) { if (run) run.guideLen = num(run.guideLen, 46) + 30; },
+      modifyRun(run) { if (run) { run.railMarks = true; run.bearing = true; } },
     },
   },
   {

@@ -6,7 +6,7 @@
 // the roster changed, and it would also let the same crate offer a relic you already own.
 //
 // RUN FIELDS MUTATED BY THIS MODULE (and nothing else):
-//   power  spin  spinDrift  guideLen  guideBounces  railChips  shots  reracks
+//   power  spin  spinDrift  bearing  railMarks  railChips  shots  reracks
 //   gateScale  crateSlots  rerollCost  interest  sellBonus  handSize  relicSlots
 //   breakBonus  crateDiscount  habitatLevels
 //
@@ -34,8 +34,11 @@ export const CUE_UPGRADES = [
   { id: 'ash_shaft', name: 'Ash Shaft', desc: 'Break 12% harder', price: 4, icon: 'cue', apply: (r) => { r.power += 0.12; } },
   { id: 'leather_tip', name: 'Leather Tip', desc: 'English drifts far less', price: 4, icon: 'chalk', apply: (r) => { r.spinDrift = Math.max(0.25, r.spinDrift * 0.68); } },
   { id: 'chalked_cue', name: 'Chalked Cue', desc: '+40% english on every shot', price: 5, icon: 'chalk', apply: (r) => { r.spin += 0.4; } },
-  { id: 'brass_compass', name: 'Brass Compass', desc: 'The aim guide reaches much further', price: 4, icon: 'compass', apply: (r) => { r.guideLen += 24; } },
-  { id: 'rail_sight', name: 'Rail Sight', desc: 'The guide shows one more cushion', price: 6, icon: 'eye', apply: (r) => { r.guideBounces += 1; } },
+  // There is no aiming line, so the chandler does not sell a better one. What it sells
+  // is REFERENCE: a bearing you can note down and repeat, and marks on the rail to aim
+  // off. Both make you better at shooting blind without shooting for you.
+  { id: 'brass_compass', name: 'Brass Compass', desc: 'Shows the cue\'s bearing in degrees', price: 4, icon: 'compass', apply: (r) => { r.bearing = true; } },
+  { id: 'rail_sight', name: 'Rail Sight', desc: 'Diamonds on every rail, to aim off', price: 6, icon: 'eye', apply: (r) => { r.railMarks = true; } },
   { id: 'ivory_ferrule', name: 'Ivory Ferrule', desc: '+3 chips for every cushion struck', price: 5, icon: 'gem', apply: (r) => { r.railChips += 3; } },
   { id: 'break_cue', name: 'Break Cue', desc: 'The first shot of a blind hits harder', price: 5, icon: 'bolt', apply: (r) => { r.breakBonus += 0.25; } },
   { id: 'spare_cue', name: 'Spare Cue', desc: '+1 shot every blind', price: 9, icon: 'plus', apply: (r) => { r.shots += 1; } },

@@ -53,6 +53,7 @@ switch (which) {
     const RD = await import('../src/game/run.js');
     RD.beginDraft(run);
     RD.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
+    if (process.env.AIDS) { RD.addCue(run, 'brass_compass'); RD.addCue(run, 'rail_sight'); }
     scene = makeTableScene();
     scene.enter({ run, onExit: () => {} }, app);
     // FLOOD=0..1 forces the waterline for a screenshot without playing the shots
@@ -134,14 +135,13 @@ switch (which) {
       for (let i = 0; i < Number(process.env.BREAKFRAMES || 90); i++) PH.step(world, 1 / 60);
     }
     const sel = world.balls.find((b) => !b.sunk);
-    const aim = sel ? PH.predict(world, sel, Number(process.env.AIM || -0.5), 0.8, 46) : null;
+
     scene = {
       update(dt) { sea2.update(dt); deck.update(dt); ps.update(dt); },
       draw() {
-        sea2.draw(g, { x: 0, y: 0, w: SW, h: SH, horizonY: 96, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
+        sea2.draw(g, { x: 0, y: 0, w: SW, h: SH, horizonY: 150, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
         deck.drawBase(g);
-        deck.drawGates(g, { highlight: 'farm' });
-        if (aim) deck.drawAim(g, aim, { r: sel.r });
+        deck.drawGates(g, { highlight: 'tame' });
         deck.drawAnimals(g, world, { lookup: (id) => ANIMAL_BY_ID[id], selected: sel });
         deck.drawLight(g);
         ps.draw(g);

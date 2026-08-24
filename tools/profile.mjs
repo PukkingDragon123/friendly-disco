@@ -90,7 +90,7 @@ for (const name of SCENES) {
   const before = () => Object.values(counts).reduce((a, b) => a + b, 0);
   const dbg = scene.debug ? scene.debug() : null;
   if (dbg && dbg.deck) {
-    for (const k of ['drawBase', 'drawGates', 'drawAnimals', 'drawFlood', 'drawLight', 'drawAim']) {
+    for (const k of ['drawBase', 'drawGates', 'drawAnimals', 'drawFlood', 'drawLight', 'drawRailMarks']) {
       const orig = dbg.deck[k];
       if (typeof orig !== 'function') continue;
       layers[k] = 0;

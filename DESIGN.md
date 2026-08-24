@@ -19,7 +19,11 @@ really rarity tables, Adam and Eve hold out relics, and the Cherubim deal tarot
 blessings that last exactly one round. Clear a boss and the supply freighter comes out
 to you with a crate as well.
 
-There is **no aiming line**. You get a power gauge and your own eye.
+There is **no aiming line**. You get a power gauge and your own eye. What the chandler
+sells instead is *reference*, never answers: the **Brass Compass** puts the cue's
+bearing on screen in degrees, and the **Rail Sight** chalks diamonds onto the cushions
+to aim off. `physics.predict()` still exists because the autoplay bot has to reason
+about shots — but nothing draws its output, and nothing should.
 
 ---
 

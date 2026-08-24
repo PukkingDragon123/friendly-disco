@@ -711,6 +711,8 @@ export function makeTableScene() {
     deck.drawBase(g);
     parts.draw(g, 'back');
     deck.drawGates(g, { highlight: hoverHabitat(), hideLabels: eff.hideLabels });
+    // the Rail Sight's diamonds, if bought: reference marks, never a trajectory
+    if (run.railMarks) deck.drawRailMarks(g);
     drawAimLayer(g);
     deck.drawAnimals(g, world, { lookup, selected, still: phase === 'score' });
     deck.drawLight(g);
@@ -1095,8 +1097,26 @@ export function makeTableScene() {
     text(g, 'WILD', x + 10 + pw - 8, y + 44, 'red2', { font: 5, right: true });
     text(g, charging ? 'RELEASE TO STRIKE' : 'HOLD TO CHARGE', x + 10, y + 44,
       charging ? 'white' : 'brass3', { font: 5 });
-    // no line, no ghost ball, and it says so once where it matters
-    text(g, 'NO GUIDE — SHOOT BY EYE', x + 10, y + 58, 'brass2', { font: 5 });
+    // no line, no ghost ball, and it says so once where it matters -- unless you have
+    // bought the compass, in which case you get a BEARING. Not a trajectory: a number
+    // you can write down and repeat, which is what shooting by eye actually needs.
+    if (run.bearing) {
+      const deg = ((angle * 180) / Math.PI + 360) % 360;
+      text(g, 'BEARING', x + 10, y + 58, 'brass2', { font: 5 });
+      text(g, deg.toFixed(1).padStart(5, ' ') + '°', x + 84, y + 56, 'ice',
+        { font: 7, shadow: 'ink' });
+      // a little compass rose, so the number has something to be relative to
+      const bx2 = x + 168, by2 = y + 64;
+      ring(g, bx2, by2, 9, 'brass1');
+      for (let i = 0; i < 4; i++) {
+        const a2 = (i / 4) * Math.PI * 2;
+        px(g, bx2 + Math.cos(a2) * 9, by2 + Math.sin(a2) * 9, 'brass3');
+      }
+      line(g, bx2, by2, bx2 + Math.cos(angle) * 8, by2 + Math.sin(angle) * 8, 'red2');
+      px(g, bx2, by2, 'white');
+    } else {
+      text(g, 'NO GUIDE — SHOOT BY EYE', x + 10, y + 58, 'brass2', { font: 5 });
+    }
 
     // --- spin widget (a little cue ball you can click)
     const sx = x + pw + 46, sy = y + 28;

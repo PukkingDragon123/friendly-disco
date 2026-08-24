@@ -1,424 +1,609 @@
 // The cast: every person, spirit and serpent in the game.
 //
-// ONE art system for two jobs. A folk sprite is baked at 34x46 and used both as the
-// walk-around character (Eden, the boat, an island) and, drawn at 4x and cropped to the
-// shoulders, as the dialogue portrait. That is deliberate: two art systems for the same
-// character is how a cast ends up looking like two different games, and it doubles the
-// work every time somebody needs a new expression.
+// ONE art system for two jobs. A folk sprite is baked once and used both as the
+// walk-around character (Eden, the boat, an island) and, cropped to the shoulders, as the
+// dialogue portrait. Two art systems for the same character is how a cast ends up looking
+// like two different games.
 //
-// PROPORTIONS ARE THE WHOLE TRICK. Cute is a big head on a small body:
+// PROPORTIONS ARE THE WHOLE TRICK. Cute is a big round head on a small body:
 //
-//     hair / hat        rows  0..9
-//     head  (r 9)       rows  6..24     <- 40% of the figure
-//     eyes              row  17         <- 2px dots, 6px apart, BELOW the middle
-//     nose              row  19
-//     mouth             row  21
-//     torso             rows 24..36
-//     legs              rows 36..46
+//     hat / hair / halo     rows  0.. 6
+//     HEAD   (orb, r 11)    rows  4..26     <- 40% of the whole figure
+//     eyes                  row  18         <- 2px dots, close together, BELOW centre
+//     nose                  row  20
+//     mouth                 row  22
+//     torso                 rows 27..42
+//     legs                  rows 42..55
 //
-// Tiny dot eyes set low, a visible nose, and a head that is far too big. Every character
-// here is built on that skeleton, which is also why they read as belonging together.
+// Tiny dot eyes set low and close, a visible nose, and a head that is far too big. Every
+// character is built on that skeleton, which is why they read as one family.
 //
-// Baked per (id, pose, mouth, blink) -- at most a hundred little canvases for the whole
-// cast -- so drawing a character is one blit plus an integer bob. Everything that has to
-// move every frame (the golem's mud, the cherub's sparkle, the snake's tongue) is a
-// handful of live pixels on top.
+// EVERYTHING GOES THROUGH render/pixbuf.js, and that is not an implementation detail: it
+// gives every figure a one-pixel dark contour computed after the last shape is down, and
+// spherical shading with a curved terminator, a rim light and a bounce. The previous cast
+// was drawn straight to canvas with flat fills and a diagonal light split, and at 34
+// pixels they were stacks of boxes with dashes for eyes.
+//
+// Baked per (id, pose, mouth, blink), so a character is one blit plus an integer bob.
+// Anything that must move every frame -- the golem's mud, the cherub's motes, the snake's
+// tongue -- is a handful of live pixels on top.
 
 import { P, col, mix } from '../core/palette.js';
+import { makeCanvas, rect, px, disc, ellipse, wash, clamp } from '../core/pixel.js';
 import {
-  makeCanvas, rect, px, line, disc, ellipse, ellipseFrame, ring, tri, wash, clamp,
-} from '../core/pixel.js';
+  makeBuf, bset, bget, bmir, brect, bline, orb, blob, limb, orbShade, outline, flush,
+} from './pixbuf.js';
 
-export const FOLK_W = 34;
-export const FOLK_H = 46;
-const CX = 17;                 // centre line
-const HEAD_Y = 15, HEAD_R = 9;
-const EYE_Y = HEAD_Y + 2, EYE_DX = 3;
-const NOSE_Y = HEAD_Y + 4;
-const MOUTH_Y = HEAD_Y + 6;
-const TORSO_Y = 24;
-const HIP_Y = 36;
-const FOOT_Y = 45;
+export const FOLK_W = 40;
+export const FOLK_H = 56;
 
-/** Poses. Every character supports all four; some just differ more than others. */
+const CX = 20;
+const HEAD_CY = 15, HEAD_R = 11;
+const EYE_Y = HEAD_CY + 3;
+const EYE_DX = 3;                 // 2px eyes at CX-4 and CX+2: close together is cuter
+const NOSE_Y = HEAD_CY + 5;
+const MOUTH_Y = HEAD_CY + 7;
+const NECK_Y = 26;
+const TORSO_Y = 27, HIP_Y = 42, FOOT_Y = 55;
+
+/** Poses. Every character supports all four; some differ more than others. */
 export const POSES = ['idle', 'talk', 'happy', 'react'];
 
-/* ------------------------------------------------------------------ helpers */
+/* ------------------------------------------------------------------ materials */
 
-const mpx = (b, x, y, c) => { px(b, x, y, c); px(b, 2 * CX - x, y, c); };
-const mrect = (b, x, y, w, h, c) => { rect(b, x, y, w, h, c); rect(b, 2 * CX - x - w, y, w, h, c); };
+const SKIN = { dark: ['skin0', 'skin1', 'skin2', 'skin3'], warm: ['skin1', 'skin2', 'skin3', 'skin4'] };
+const CLAY = ['clay0', 'clay1', 'clay2', 'clay3', 'clay4'];
+const LEAF = ['leaf0', 'leaf1', 'leaf2', 'leaf3', 'leaf4'];
+const CLOTH = ['wood0', 'wood1', 'wood2', 'wood3'];
+const LINEN = ['parch0', 'parch1', 'parch', 'cream'];
 
-/** A shaded ball, used for every head and every rounded limb. Light upper-left. */
-function ball(b, cx, cy, r, lo, mid, hi, rim) {
-  for (let y = -r; y <= r; y++) {
-    for (let x = -r; x <= r; x++) {
-      if (x * x + y * y > r * r) continue;
-      const nx = x / r, ny = y / r;
-      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
-      const lam = nx * -0.55 + ny * -0.62 + nz * 0.56;
-      px(b, cx + x, cy + y, lam > 0.74 ? hi : lam > 0.34 ? mid : lam > -0.2 ? lo : (rim || lo));
-    }
-  }
-}
+/* ------------------------------------------------------------------- the body */
 
-/** A torso: a rounded trapezoid, wider at the shoulders. */
-function torso(b, y0, y1, halfTop, halfBot, lo, mid, hi) {
+/** A tapering torso. `top`/`bot` are half-widths; the lit side is the left. */
+function torso(b, y0, y1, top, bot, ramp) {
+  const [lo, mid, hi, br] = [ramp[0], ramp[1], ramp[2], ramp[3] || ramp[2]];
   for (let y = y0; y <= y1; y++) {
     const f = (y - y0) / Math.max(1, y1 - y0);
-    const hw = Math.round(halfTop + (halfBot - halfTop) * f);
-    rect(b, CX - hw, y, hw * 2, 1, mid);
-    rect(b, CX - hw, y, Math.max(1, Math.round(hw * 0.5)), 1, hi);
-    rect(b, CX + Math.round(hw * 0.45), y, Math.round(hw * 0.55), 1, lo);
+    // a slight waist: narrowest a third of the way down
+    const w = top + (bot - top) * f - Math.sin(f * Math.PI) * 0.8;
+    const hw = Math.max(2, Math.round(w));
+    for (let x = -hw; x <= hw; x++) {
+      const t = x / hw;
+      bset(b, CX + x, y, t < -0.45 ? hi : t < 0.25 ? mid : t < 0.7 ? lo : lo);
+    }
+    bset(b, CX - hw + 1, y, br);
   }
 }
 
 /** Two stubby legs with feet. */
-function legs(b, y0, y1, lo, mid, footC) {
+function legs(b, y0, y1, w, ramp, footKey, o = {}) {
+  const gap = o.gap === undefined ? 2 : o.gap;
   for (const side of [-1, 1]) {
-    const x = CX + side * 4 - 2;
-    rect(b, x, y0, 4, y1 - y0, mid);
-    rect(b, x, y0, 1, y1 - y0, lo);
-    rect(b, x - 1, y1 - 1, 6, 2, footC);
+    const x = side < 0 ? CX - gap - w : CX + gap;
+    for (let y = y0; y < y1; y++) {
+      for (let i = 0; i < w; i++) {
+        bset(b, x + i, y, i === 0 ? ramp[2] : i >= w - 1 ? ramp[0] : ramp[1]);
+      }
+    }
+    // a foot with a lit top and a dark sole, and one pixel of toe past the ankle
+    brect(b, x - 1, y1 - 3, w + 2, 3, footKey || ramp[0]);
+    brect(b, x - 1, y1 - 3, w + 2, 1, mix(P[footKey || ramp[0]], P.white, 0.25));
+    brect(b, x - 1, y1 - 1, w + 2, 1, 'ink');
   }
+  // the shadow between the legs, so they are two legs and not a column
+  for (let y = y0; y < y1 - 1; y++) brect(b, CX - gap, y, gap * 2, 1, 'ink');
 }
 
 /**
- * Arms.
- *
- * `shoulder` is the torso's half-width at the top, and the arm hangs from just OUTSIDE
- * it. The first version put the arms at a fixed offset that happened to be inside every
- * torso, so the whole cast appeared to have none: an arm the same colour as the chest it
- * is drawn on top of is not an arm.
+ * Arms, hung from just outside the shoulder so the silhouette stays open, with a mitten
+ * hand on the end. `pose` moves them, and that is most of what an animation IS here.
  */
-function arms(b, pose, lo, mid, hi, o = {}) {
-  const top = TORSO_Y + 3;
-  const len = o.len || 10;
-  const sh = (o.shoulder || 8) + 1;
+function arms(b, pose, ramp, o = {}) {
+  const sh = (o.shoulder || 9);
+  const top = TORSO_Y + 2;
+  const len = o.len || 12;
   for (const side of [-1, 1]) {
     const sx = CX + side * sh;
-    // hanging, angled a little away from the body so the silhouette stays open
     let ex = sx + side * 2, ey = top + len;
-    if (pose === 'react') { ex = sx + side * 4; ey = top - len + 3; }     // both up
-    else if (pose === 'happy') { ex = sx + side * 4; ey = top - 2; }
-    else if (pose === 'talk' && side === 1) { ex = sx + 5; ey = top + 2; }
-    line(b, sx, top, ex, ey, mid);
-    line(b, sx + side, top, ex + side, ey, side < 0 ? hi : lo);
-    disc(b, ex, ey, 2, mid);                                    // a mitten hand
-    px(b, ex - 1, ey - 1, hi);
-    px(b, ex + side, ey + 1, lo);
+    if (pose === 'react') { ex = sx + side * 5; ey = top - 7; }
+    else if (pose === 'happy') { ex = sx + side * 5; ey = top + 1; }
+    else if (pose === 'talk' && side === 1) { ex = sx + 6; ey = top + 3; }
+    const dark = o.edge || 'ink';
+    limb(b, sx, top, ex, ey, o.thick || 2, (o.thick || 2) - 0.4,
+      [ramp[0], ramp[1], ramp[2]], { edge: dark });
+    orb(b, ex, ey + 1, (o.thick || 2) + 0.6, orbShade(ramp), { edge: dark });
   }
 }
 
 /**
- * The face. Two dot eyes, a nose, a mouth, and two blush pixels.
+ * Hair, as a MASS.
  *
- * The blush is not decoration -- two warm pixels on the cheeks is the cheapest way to
- * make a pixel face read as friendly rather than blank, and it is why cozy games all
- * have it.
+ * The first version walked the skull's circumference laying single pixels, and the result
+ * was a bald head with a dotted line on it. Hair has volume: an orb slightly bigger than
+ * the head, sat slightly higher, then cut off at the brow -- and only THEN a few strands
+ * and a highlight, which is what a sixteen-pixel head can carry.
  */
-function faceOn(b, o) {
-  const { eye, ink, blush, mouth, blink, pose } = o;
-  const ey = o.eyeY !== undefined ? o.eyeY : EYE_Y;
-  const dx = o.eyeDx !== undefined ? o.eyeDx : EYE_DX;
-  for (const side of [-1, 1]) {
-    const ex = CX + side * dx;
-    if (blink) { rect(b, ex - 1, ey, 3, 1, ink); continue; }
-    if (pose === 'happy') { px(b, ex - 1, ey + 1, ink); px(b, ex, ey, ink); px(b, ex + 1, ey + 1, ink); continue; }
-    if (pose === 'react') {
-      rect(b, ex - 1, ey - 1, 3, 3, 'white');
-      px(b, ex, ey, eye);
-      continue;
+function hairCap(b, cy, r, ramp, o = {}) {
+  const cut = cy + (o.cut !== undefined ? o.cut : -2);         // the brow line
+  const lift = o.lift !== undefined ? o.lift : 2;
+  const shade = orbShade(ramp);
+  for (let y = -r - 1; y <= r + 1; y++) {
+    for (let x = -r - 1; x <= r + 1; x++) {
+      const d = x * x + y * y;
+      if (d > (r + 1) * (r + 1)) continue;
+      const py = cy - lift + y;
+      if (py > cut) continue;
+      const nx = x / (r + 1), ny = y / (r + 1);
+      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+      bset(b, CX + x, py, shade(nx, ny, nz));
     }
-    rect(b, ex, ey, 2, 2, eye);
-    px(b, ex, ey, mix(col(eye), P.white, 0.75));
   }
-  if (blush !== false) {
-    mpx(b, CX + dx + 2, ey + 2, o.blushC || 'pink');
-    mpx(b, CX + dx + 3, ey + 2, mix(col(o.blushC || 'pink'), P.white, 0.4));
+  // a fringe that dips over the brow, so the hairline is not a straight cut
+  const fr = o.fringe === undefined ? 3 : o.fringe;
+  for (let i = -r; i <= r; i++) {
+    if (Math.abs(i) > r - 1) continue;
+    // a broad sweep with one soft notch, not a comb: a high-frequency sine along the
+    // hairline gives a row of teeth, which reads as a wig
+    const t = i / r;
+    const dip = Math.round((1 - t * t) * fr + Math.sin(i * 0.42) * 0.9);
+    for (let k = 0; k < dip; k++) bset(b, CX + i, cut + k, k === dip - 1 ? ramp[0] : ramp[1]);
   }
-  // mouth: closed line, open oh, or a smile
-  const my = o.mouthY !== undefined ? o.mouthY : MOUTH_Y;
-  if (pose === 'happy') {
-    px(b, CX - 2, my, ink); px(b, CX - 1, my + 1, ink);
-    px(b, CX, my + 1, ink); px(b, CX + 1, my, ink);
-  } else if (mouth === 'open' || pose === 'react') {
-    ellipse(b, CX, my + 1, 2, 2, ink);
-    px(b, CX, my + 1, mix(col(ink), P.red1, 0.5));
-  } else {
-    rect(b, CX - 1, my, 3, 1, ink);
+  // one highlight sweep, upper left, which is where the light is
+  for (let i = 0; i < 6; i++) {
+    bset(b, CX - 6 + i, cy - lift - r + 3 + Math.round(i * 0.4), ramp[ramp.length - 1]);
   }
 }
 
-/* ==================================================================== the cast */
+/** Long hair falling behind the shoulders. Drawn BEFORE the body. */
+function hairFall(b, y0, y1, ramp, o = {}) {
+  for (let y = y0; y < y1; y++) {
+    const f = (y - y0) / (y1 - y0);
+    const hw = Math.round((o.w || 10) + Math.sin(f * 2.6) * 3 - f * 2);
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < (o.thick || 5); i++) {
+        const t = i / (o.thick || 5);
+        bset(b, CX + s * (hw - i), y, t < 0.2 ? ramp[0] : t < 0.6 ? ramp[1] : ramp[2]);
+      }
+    }
+  }
+}
+
+/* --------------------------------------------------------------------- faces */
+
+/**
+ * The face. Two dot eyes, a nose, a mouth, blush.
+ *
+ * The blush is not decoration: two warm pixels on the cheeks is the cheapest way to make
+ * a pixel face read as friendly rather than vacant, and it is why every cozy game has it.
+ */
+function face(b, o) {
+  const ink = o.ink || 'ink';
+  const shine = o.shine || 'white';
+  const blush = o.blush || 'pink';
+  const pose = o.pose;
+  const eyeY = o.eyeY !== undefined ? o.eyeY : EYE_Y;
+  const dx = o.dx !== undefined ? o.dx : EYE_DX;
+
+  if (o.blink) {
+    for (const s of [-1, 1]) {
+      const ex = CX + (s < 0 ? -dx - 1 : dx);
+      brect(b, ex, eyeY + 1, 2, 1, ink);
+    }
+  } else if (pose === 'happy') {
+    // ^^ eyes: two little arches
+    for (const s of [-1, 1]) {
+      const ex = CX + (s < 0 ? -dx - 1 : dx);
+      bset(b, ex, eyeY + 1, ink);
+      bset(b, ex + 1, eyeY, ink);
+      bset(b, ex + (s < 0 ? 2 : -1), eyeY + 1, ink);
+    }
+  } else {
+    const wide = pose === 'react';
+    for (const s of [-1, 1]) {
+      const ex = CX + (s < 0 ? -dx - 1 : dx);
+      brect(b, ex, eyeY, 2, wide ? 3 : 2, ink);
+      bset(b, ex, eyeY, shine);                       // the catch light
+      if (wide) bset(b, ex + 1, eyeY + 2, shine);
+    }
+  }
+
+  // brows: one pixel each, and they carry more expression than anything else on the face
+  if (o.brow) {
+    for (const s of [-1, 1]) {
+      const ex = CX + (s < 0 ? -dx - 1 : dx);
+      const lift = pose === 'react' ? -2 : pose === 'happy' ? -1 : 0;
+      brect(b, ex, eyeY - 2 + lift, 2, 1, o.brow);
+    }
+  }
+
+  // blush, tucked under the outside corner of each eye
+  for (const s of [-1, 1]) {
+    const bx = CX + s * (dx + 2);
+    bset(b, bx, eyeY + 2, blush);
+    bset(b, bx + (s < 0 ? -1 : 1), eyeY + 2, mix(P[blush], P.white, 0.35));
+  }
+
+  // nose: two pixels, shadowed underneath
+  if (o.nose !== false) {
+    bset(b, CX - 1, o.noseY || NOSE_Y, o.noseKey || ink);
+    bset(b, CX, (o.noseY || NOSE_Y) + 1, o.noseKey || ink);
+  }
+
+  // mouth
+  const my = o.mouthY || MOUTH_Y;
+  if (o.mouth === 'open') {
+    brect(b, CX - 2, my, 4, 2, ink);
+    brect(b, CX - 1, my + 1, 2, 1, o.tongue || 'red1');
+  } else if (pose === 'happy' || o.mouth === 'smile') {
+    bset(b, CX - 2, my, ink);
+    brect(b, CX - 1, my + 1, 2, 1, ink);
+    bset(b, CX + 2, my, ink);
+  } else if (pose === 'react') {
+    brect(b, CX - 1, my, 2, 2, ink);
+  } else if (o.mouthSmall) {
+    brect(b, CX - 1, my, 2, 1, ink);
+  } else {
+    brect(b, CX - 1, my, 3, 1, ink);
+  }
+}
+
+/* ------------------------------------------------------------------- the cast */
 
 const FOLK = {
   /**
-   * THE GOLEM. You.
-   *
-   * Big cute body, BIG NOSE, tiny dot eyes, chunky proportions. It is the only
-   * character wider than it is elegant -- the silhouette is a boulder with legs -- and
-   * the brass word plate on its brow is the brightest thing on it, because a golem story
-   * turns on the word it is carrying.
+   * THE GOLEM. The brief, verbatim: big cute body, BIG NOSE, tiny dot eyes, chunky
+   * proportions, mud. So the nose is an orb nearly half the width of his head and the
+   * eyes are single lit pixels in deep sockets -- the exact opposite ratio to everybody
+   * else, which is what makes him read as not-a-person at a glance.
    */
-  golem(b, pose, mouth, blink) {
-    // the head: a clay boulder, slightly squared at the top
-    ball(b, CX, HEAD_Y, HEAD_R + 1, 'clay1', 'clay2', 'clay3', 'clay0');
-    rect(b, CX - HEAD_R + 1, HEAD_Y - HEAD_R - 1, (HEAD_R - 1) * 2, 3, 'clay2');
-    rect(b, CX - HEAD_R + 1, HEAD_Y - HEAD_R - 1, HEAD_R - 1, 3, 'clay3');
-    // torso: broad, and broader at the shoulders than the hips
-    torso(b, TORSO_Y, HIP_Y, 11, 9, 'clay1', 'clay2', 'clay3');
-    legs(b, HIP_Y, FOOT_Y, 'clay0', 'clay1', 'clay0');
-    arms(b, pose, 'clay1', 'clay2', 'clay4', { shoulder: 11, len: 11 });
+  golem(b, o) {
+    // the head runs DARKER than the body on purpose: a pale nose needs something to
+    // stand against, and on the full clay ramp it disappeared into the lit cheek
+    const clay = orbShade(['clay0', 'clay1', 'clay1', 'clay2', 'clay3']);
+    legs(b, HIP_Y, FOOT_Y, 7, ['clay0', 'clay1', 'clay2'], 'clay0', { gap: 1 });
+    torso(b, TORSO_Y, HIP_Y + 1, 13, 12, CLAY);
 
-    // THE BIG NOSE. A round clay bulb, not a wedge -- a wedge merged into the head and
-    // read as a mask. Its own little shaded ball, sitting proud of the face.
-    ball(b, CX, NOSE_Y + 2, 4, 'clay2', 'clay3', 'clay4', 'clay1');
-    px(b, CX - 2, NOSE_Y, 'clay4');
-    px(b, CX - 1, NOSE_Y + 4, 'clay1');
-    px(b, CX + 2, NOSE_Y + 4, 'clay1');
-
-    // tiny lit sockets, set WIDE so the nose cannot crowd them out
-    for (const side of [-1, 1]) {
-      const ex = CX + side * 6;
-      if (blink) { rect(b, ex - 1, EYE_Y, 3, 1, 'clay0'); continue; }
-      rect(b, ex - 2, EYE_Y - 1, 4, 3, 'clay0');
-      rect(b, ex - 1, EYE_Y, 2, 2, pose === 'react' ? 'gold' : 'amber');
-      px(b, ex - 1, EYE_Y, 'white');
-      // a wisp of furnace light on the cheek below
-      px(b, ex, EYE_Y + 3, mix(P.clay3, P.orange, 0.4));
+    // clay TEXTURE. Cracks in clay0 against clay1 were invisible; a crack needs a dark
+    // line with a lit lip along its upper edge, the same as any groove in anything.
+    const crack = (x0, y0, x1, y1) => {
+      bline(b, x0, y0, x1, y1, 'clay0');
+      bline(b, x0, y0 - 1, x1, y1 - 1, 'clay4');
+    };
+    crack(CX - 9, TORSO_Y + 4, CX - 3, TORSO_Y + 7);
+    crack(CX + 6, TORSO_Y + 11, CX + 11, TORSO_Y + 7);
+    crack(CX - 11, HIP_Y - 4, CX - 5, HIP_Y - 2);
+    crack(CX + 2, TORSO_Y + 1, CX + 8, TORSO_Y + 2);
+    for (let i = 0; i < 20; i++) {
+      const gx = CX - 11 + ((i * 7) % 23), gy = TORSO_Y + ((i * 5) % 16);
+      bset(b, gx, gy, i % 4 === 0 ? 'clay4' : i % 4 === 1 ? 'clay0' : 'clay1');
     }
-    // no mouth: a carved line, and it never speaks
-    rect(b, CX - 3, MOUTH_Y + 2, 6, 1, 'clay0');
+    // the heart furnace, glowing out through a chipped hole in his chest
+    blob(b, CX + 1, TORSO_Y + 7, 4, 4, 'clay0');
+    orb(b, CX + 1, TORSO_Y + 7, 3, orbShade(['brass0', 'brass1', 'gold', 'white']));
+    bset(b, CX + 1, TORSO_Y + 6, 'white');
 
-    // the brass word, driven into the brow
-    const pw = 13, py = HEAD_Y - HEAD_R + 1;
-    rect(b, CX - pw / 2 - 1, py - 1, pw + 2, 6, 'ink');
-    rect(b, CX - pw / 2, py, pw, 5, 'brass1');
-    rect(b, CX - pw / 2, py, pw, 1, 'brass3');
-    for (let i = 0; i < 3; i++) rect(b, CX - pw / 2 + 2 + i * 4, py + 1, 1, 3, 'gold');
-    // the heart-furnace, and seams
-    disc(b, CX, TORSO_Y + 6, 3, 'orange');
-    disc(b, CX, TORSO_Y + 6, 1, 'amber');
-    for (const [sx, sy] of [[-7, 3], [5, 6], [-3, 9]]) {
-      for (let i = 0; i < 5; i++) px(b, CX + sx + i, TORSO_Y + sy + (i & 1), i & 1 ? 'amber' : 'clay0');
+    arms(b, o.pose, ['clay1', 'clay2', 'clay3'], { shoulder: 13, thick: 3, len: 13, edge: 'clay0' });
+
+    // --- the head: wider than tall, because a wide head is a heavy head
+    orb(b, CX, HEAD_CY, HEAD_R, clay, { squashY: 0.94 });
+
+    // A DEEP SOCKET BAND. Two lit specks on a smooth face read as sparkles on a cheek;
+    // set into a band of shadow they read as eyes a long way back in a big skull.
+    blob(b, CX, EYE_Y, 9, 3, 'clay0');
+    for (const s of [-1, 1]) {
+      const ex = CX + s * 5;
+      bset(b, ex, EYE_Y, 'gold');
+      bset(b, ex, EYE_Y - 1, 'brass2');
+      bset(b, ex + (s < 0 ? -1 : 1), EYE_Y, 'brass0');
     }
-    void mouth;
+
+    // THE NOSE. Twelve pixels across on a twenty-three pixel head: it is the first thing
+    // you see, which is the entire brief. Its own contour, its own light, and a hard
+    // shadow underneath so it reads as sticking OUT and not painted on.
+    // bounce OFF: the underside of a nose is the one surface with nothing below it to
+    // throw light back, and the default bounce lit it into a row of little teeth
+    orb(b, CX, NOSE_Y + 1, 5, orbShade(['clay1', 'clay2', 'clay3', 'clay4'], { bounce: 0 }),
+      { edge: 'clay0' });
+    brect(b, CX - 4, NOSE_Y + 6, 9, 1, 'clay0');
+    bmir(b, CX, CX - 3, NOSE_Y + 3, 'clay0');                  // nostrils
+    bset(b, CX - 3, NOSE_Y, 'cream');                          // the highlight on the bridge
+
+    // the brow: a plate of fired brass with three marks driven into it
+    brect(b, CX - 8, HEAD_CY - 7, 17, 4, 'brass1');
+    brect(b, CX - 8, HEAD_CY - 7, 17, 1, 'brass2');
+    brect(b, CX - 8, HEAD_CY - 4, 17, 1, 'brass0');
+    for (let i = 0; i < 3; i++) brect(b, CX - 5 + i * 4, HEAD_CY - 6, 1, 2, 'ink');
+
+    // no mouth: a seam, under the nose's shadow. He has never said anything.
+    brect(b, CX - 4, MOUTH_Y + 4, 9, 1, 'clay0');
+    if (o.pose === 'happy') {
+      bset(b, CX - 5, MOUTH_Y + 3, 'clay0');
+      bset(b, CX + 5, MOUTH_Y + 3, 'clay0');
+    }
+    if (o.pose === 'react') brect(b, CX - 2, MOUTH_Y + 4, 5, 2, 'clay0');
   },
 
-  /** NOAH. Six hundred years old, straw hat, enormous beard, out of patience. */
-  noah(b, pose, mouth, blink) {
-    ball(b, CX, HEAD_Y, HEAD_R, 'skin1', 'skin2', 'skin3', 'skin0');
-    torso(b, TORSO_Y, HIP_Y, 9, 8, 'cloth1', 'cloth2', 'cloth3');
-    legs(b, HIP_Y, FOOT_Y, 'wood0', 'wood1', 'wood0');
-    arms(b, pose, 'cloth1', 'cloth2', 'cloth3', { shoulder: 9 });
-    // a leather apron over the robe: he is a shipwright before he is a prophet
-    torso(b, TORSO_Y + 3, HIP_Y - 1, 6, 6, 'wood1', 'wood2', 'wood3');
-    faceOn(b, { eye: 'ink', ink: 'ink', blushC: 'red2', mouth, blink, pose, mouthY: MOUTH_Y - 1 });
-    // the beard, covering the jaw and spilling onto the chest
-    for (let i = 0; i < 9; i++) {
-      const hw = Math.round(6 * (1 - i / 11));
-      rect(b, CX - hw, MOUTH_Y + 1 + i, hw * 2, 1, i < 2 ? 'white' : 'bone');
-      if (i > 3) px(b, CX + hw - 1, MOUTH_Y + 1 + i, 'grey2');
+  /** ADAM. Made things with his hands, and looks it: wide shoulders, working arms. */
+  adam(b, o) {
+    const skin = orbShade(SKIN.dark);
+    legs(b, HIP_Y, FOOT_Y, 5, ['skin0', 'skin1', 'skin2'], 'skin0');
+    // the leaf wrap: overlapping fig leaves on a twisted cord
+    for (let i = 0; i < 7; i++) {
+      const lx = CX - 9 + i * 3;
+      blob(b, lx, HIP_Y + 3 + (i % 2), 2, 4, orbShade(LEAF));
     }
-    // the straw hat: a wide brim, which is the whole silhouette
-    ellipse(b, CX, HEAD_Y - HEAD_R + 1, 15, 4, 'ink');
-    ellipse(b, CX, HEAD_Y - HEAD_R, 15, 4, 'brass1');
-    ellipse(b, CX, HEAD_Y - HEAD_R - 1, 14, 3, 'brass2');
-    ellipse(b, CX, HEAD_Y - HEAD_R - 3, 7, 4, 'brass1');
-    ellipse(b, CX, HEAD_Y - HEAD_R - 5, 6, 3, 'brass2');
-    rect(b, CX - 7, HEAD_Y - HEAD_R - 3, 14, 1, 'wood1');
-    for (let i = -6; i <= 6; i += 3) px(b, CX + i, HEAD_Y - HEAD_R, 'brass3');
+    brect(b, CX - 10, HIP_Y - 1, 21, 2, 'leaf1');
+    brect(b, CX - 10, HIP_Y - 1, 21, 1, 'leaf3');
+    torso(b, TORSO_Y, HIP_Y, 9, 8, SKIN.dark);
+    // collarbones, ribs and a navel. A bare torso with no landmarks is a plank, and
+    // skin1 on a skin1..skin3 ramp was too close to see -- these use skin0.
+    brect(b, CX - 6, TORSO_Y + 2, 5, 1, 'skin0');
+    brect(b, CX + 2, TORSO_Y + 2, 5, 1, 'skin0');
+    bset(b, CX - 1, TORSO_Y + 3, 'skin0');
+    bmir(b, CX, CX - 4, TORSO_Y + 6, 'skin0');
+    for (let i = 0; i < 3; i++) {
+      bmir(b, CX, CX - 7, TORSO_Y + 9 + i * 2, 'skin1');
+    }
+    bset(b, CX, TORSO_Y + 12, 'skin0');
+    arms(b, o.pose, ['skin0', 'skin1', 'skin2'], { shoulder: 9, thick: 2, len: 13 });
+    // a cord round the neck with a river stone on it
+    brect(b, CX - 3, NECK_Y, 7, 1, 'wood2');
+    bset(b, CX, NECK_Y + 1, 'stone3');
+
+    orb(b, CX, HEAD_CY, HEAD_R, skin);
+    hairCap(b, HEAD_CY, HEAD_R, ['hair0', 'hair1', 'hair2'], { cut: -3, fringe: 4 });
+    // sideburns, which are what stop a mop reading as a helmet
+    for (const s2 of [-1, 1]) brect(b, CX + s2 * 10 - (s2 < 0 ? 1 : 0), HEAD_CY - 2, 2, 4, 'hair1');
+    face(b, {
+      pose: o.pose, mouth: o.mouth, blink: o.blink, brow: 'hair1', blush: 'red2',
+      mouthSmall: true,
+    });
+  },
+
+  /** EVE. Slighter, and the long hair is most of her silhouette. */
+  eve(b, o) {
+    const skin = orbShade(SKIN.warm);
+    legs(b, HIP_Y, FOOT_Y, 4, ['skin1', 'skin2', 'skin3'], 'skin1');
+    // hair BEHIND the shoulders first, so the head sits in front of it
+    hairFall(b, HEAD_CY - 2, HIP_Y + 2, ['hair0', 'hair1', 'hair2'], { w: 11, thick: 5 });
+    // the leaf wrap: a skirt, and a band across the chest
+    for (let i = 0; i < 6; i++) blob(b, CX - 7 + i * 3, HIP_Y + 3 + (i % 2), 2, 4, orbShade(LEAF));
+    brect(b, CX - 8, HIP_Y - 1, 17, 2, 'leaf1');
+    brect(b, CX - 8, HIP_Y - 1, 17, 1, 'leaf3');
+    torso(b, TORSO_Y, HIP_Y, 7, 7, SKIN.warm);
+    for (let i = 0; i < 5; i++) {
+      blob(b, CX - 5 + i * 3, TORSO_Y + 4, 2, 2, orbShade(['leaf1', 'leaf2', 'leaf3']));
+    }
+    arms(b, o.pose, ['skin1', 'skin2', 'skin3'], { shoulder: 7, thick: 2, len: 12 });
+
+    orb(b, CX, HEAD_CY, HEAD_R, skin);
+    hairCap(b, HEAD_CY, HEAD_R, ['hair0', 'hair1', 'hair2'], { cut: -4, fringe: 3, lift: 3 });
+    // a centre part, and two locks framing the face
+    brect(b, CX, HEAD_CY - HEAD_R - 1, 1, 5, 'hair0');
+    for (const s2 of [-1, 1]) {
+      for (let y = 0; y < 8; y++) {
+        brect(b, CX + s2 * (10 - Math.floor(y / 4)) - (s2 < 0 ? 1 : 0), HEAD_CY - 4 + y, 2, 1,
+          y % 3 === 0 ? 'hair2' : 'hair1');
+      }
+    }
+    // a flower behind one ear
+    orb(b, CX + 9, HEAD_CY - 1, 2, orbShade(['red1', 'pink', 'white']));
+    bset(b, CX + 9, HEAD_CY - 1, 'gold');
+    face(b, {
+      pose: o.pose, mouth: o.mouth, blink: o.blink, brow: 'hair1',
+      blush: 'pink', eyeY: EYE_Y, dx: EYE_DX,
+    });
   },
 
   /**
-   * ADAM. Cute, plain, and holding out a gift he does not explain.
-   * A woven leaf wrap at the hips, which is the point.
+   * THE SNAKE. Cute and MISCHIEVOUS, which are different jobs: cute is the big round
+   * head and the belly plates, mischievous is the asymmetry -- one brow up, the grin
+   * pulled to one side, the body coiled like it is about to be somewhere else.
    */
-  adam(b, pose, mouth, blink) {
-    ball(b, CX, HEAD_Y, HEAD_R, 'skin1', 'skin2', 'skin3', 'skin0');
-    torso(b, TORSO_Y, HIP_Y, 8, 7, 'skin1', 'skin2', 'skin3');
-    legs(b, HIP_Y + 4, FOOT_Y, 'skin0', 'skin2', 'skin1');
-    arms(b, pose, 'skin1', 'skin2', 'skin3', { shoulder: 8 });
-    faceOn(b, { eye: 'ink', ink: 'ink', mouth, blink, pose });
-    // short cropped hair, a cap of it
-    for (let i = 0; i < 10; i++) {
-      const hw = Math.round(Math.sqrt(Math.max(0, HEAD_R * HEAD_R - (HEAD_R - i) * (HEAD_R - i))));
-      rect(b, CX - hw, HEAD_Y - HEAD_R + i, hw * 2, 1, i < 3 ? 'hair2' : 'hair1');
-    }
-    for (let i = -6; i <= 6; i += 4) px(b, CX + i, HEAD_Y - HEAD_R + 2, 'hair3');
-    // a cord necklace with a stone, and collarbones: a bare chest needs SOMETHING or it
-    // reads as an unfinished sprite
-    for (let i = -5; i <= 5; i++) px(b, CX + i, TORSO_Y + 1 + Math.round(Math.abs(i) * 0.3), 'bark');
-    disc(b, CX, TORSO_Y + 4, 2, 'stone2');
-    px(b, CX - 1, TORSO_Y + 3, 'stone4');
-    for (const side of [-1, 1]) {
-      line(b, CX + side * 2, TORSO_Y + 2, CX + side * 6, TORSO_Y + 3, 'skin1');
-      px(b, CX + side * 4, TORSO_Y + 7, 'skin1');
-    }
-    // THE LEAF WRAP: overlapping leaves on a vine belt, low on the hips
-    rect(b, CX - 8, HIP_Y - 1, 16, 2, 'moss');
-    for (let i = 0; i < 7; i++) {
-      const lx = CX - 8 + i * 2.6;
-      ellipse(b, lx, HIP_Y + 3, 3, 4, i & 1 ? 'leaf2' : 'leaf1');
-      line(b, lx, HIP_Y, lx, HIP_Y + 6, 'leaf0');
-      px(b, lx - 1, HIP_Y + 2, 'leaf3');
-    }
-    ellipse(b, CX, HIP_Y + 4, 4, 5, 'leaf2');
-    line(b, CX, HIP_Y, CX, HIP_Y + 8, 'leaf0');
-    px(b, CX - 1, HIP_Y + 3, 'leaf4');
-  },
+  snake(b, o) {
+    const scale = orbShade(['cloth0', 'leaf0', 'leaf1', 'leaf2', 'leaf3']);
+    // one broad coil on the ground, and a second riding on it
+    blob(b, CX, FOOT_Y - 3, 16, 4, scale);
+    blob(b, CX + 3, FOOT_Y - 8, 12, 4, scale);
+    // belly plates along the front of both coils
+    for (let i = 0; i < 11; i++) brect(b, CX - 13 + i * 3, FOOT_Y - 2, 2, 2, 'leaf4');
+    for (let i = 0; i < 8; i++) brect(b, CX - 7 + i * 3, FOOT_Y - 7, 2, 1, 'leaf3');
 
-  /** EVE. The one who asked the question. Long hair, leaf wrap, and an apple. */
-  eve(b, pose, mouth, blink) {
-    // Hair behind, first, so the head sits in front of it. It has to HUG the skull for
-    // the first few rows and only then fall, or it reads as two boxy sideburns.
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 22; i++) {
-        const y = HEAD_Y - HEAD_R + 1 + i;
-        // follow the head's circle while we are beside it, then flare gently
-        const dy = y - HEAD_Y;
-        const onHead = Math.abs(dy) < HEAD_R;
-        const hw = onHead
-          ? Math.round(Math.sqrt(HEAD_R * HEAD_R - dy * dy)) + 2
-          : 9 + Math.round(Math.sin(i * 0.42) * 2);
-        rect(b, CX + side * hw - 1, y, 3, 1, i % 5 === 0 ? 'hair2' : 'hair1');
-        if (i % 7 === 3) px(b, CX + side * hw + 1, y, 'hair3');
+    // the neck: an S rising out of the coil to the head
+    for (let i = 0; i <= 22; i++) {
+      const f = i / 22;
+      const nx = CX + Math.sin(f * 3.1 + 0.4) * 6 - 2;
+      const ny = FOOT_Y - 9 - f * 17;
+      const r = 4.4 - f * 1.2;
+      for (let y = -Math.ceil(r + 1); y <= Math.ceil(r + 1); y++) {
+        for (let x = -Math.ceil(r + 1); x <= Math.ceil(r + 1); x++) {
+          if (x * x + y * y > (r + 1) * (r + 1)) continue;
+          bset(b, nx + x, ny + y, 'cloth0');
+        }
+      }
+      for (let y = -Math.ceil(r); y <= Math.ceil(r); y++) {
+        for (let x = -Math.ceil(r); x <= Math.ceil(r); x++) {
+          if (x * x + y * y > r * r) continue;
+          const t = x / r;
+          bset(b, nx + x, ny + y, t < -0.4 ? 'leaf2' : t < 0.3 ? 'leaf1' : 'leaf0');
+        }
+      }
+      if (i % 3 === 0) bset(b, nx - 1, ny, 'leaf3');
+    }
+
+    // the head: wide, low, with a snout that comes forward
+    const hy = HEAD_CY + 1;
+    blob(b, CX, hy, 11, 9, scale);
+    blob(b, CX + 1, hy + 3, 8, 5, orbShade(['leaf1', 'leaf2', 'leaf3', 'leaf4']));
+    // the hood: two flares that break the silhouette either side
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 5; i++) {
+        brect(b, CX + s * (9 + i), hy - 2 + i, 2, 4 - Math.floor(i / 2), i < 3 ? 'leaf1' : 'leaf0');
       }
     }
-    ball(b, CX, HEAD_Y, HEAD_R, 'skin2', 'skin3', 'skin4', 'skin1');
-    torso(b, TORSO_Y, HIP_Y, 7, 7, 'skin2', 'skin3', 'skin4');
-    legs(b, HIP_Y + 4, FOOT_Y, 'skin1', 'skin3', 'skin2');
-    arms(b, pose, 'skin2', 'skin3', 'skin4', { shoulder: 7 });
-    faceOn(b, { eye: 'ink', ink: 'ink', mouth, blink, pose, blushC: 'pink' });
-    // a fringe and a flower crown
-    for (let i = 0; i < 7; i++) {
-      const hw = Math.round(Math.sqrt(Math.max(0, HEAD_R * HEAD_R - (HEAD_R - i) * (HEAD_R - i))));
-      rect(b, CX - hw, HEAD_Y - HEAD_R + i, hw * 2, 1, i < 2 ? 'hair2' : 'hair1');
+    // chevrons down the back of the head
+    for (let i = 0; i < 3; i++) {
+      bline(b, CX - 5 + i * 5, hy - 7, CX - 3 + i * 5, hy - 4, 'cloth0');
     }
-    for (let i = -5; i <= 5; i += 2) px(b, CX + i, HEAD_Y - HEAD_R + 1, i % 4 === 0 ? 'pink' : 'white');
-    // a leaf band across the chest, and the hip wrap
-    rect(b, CX - 7, TORSO_Y + 4, 14, 3, 'leaf1');
-    for (let i = 0; i < 5; i++) px(b, CX - 6 + i * 3, TORSO_Y + 5, 'leaf3');
-    rect(b, CX - 8, HIP_Y - 1, 16, 2, 'moss');
-    for (let i = 0; i < 7; i++) {
-      const lx = CX - 8 + i * 2.6;
-      ellipse(b, lx, HIP_Y + 3, 3, 4, i & 1 ? 'leaf2' : 'leaf1');
-      line(b, lx, HIP_Y, lx, HIP_Y + 6, 'leaf0');
-      px(b, lx - 1, HIP_Y + 2, 'leaf3');
+
+    // the eyes: gold almonds with a slit, half-lidded, and NOT level with each other
+    for (const s of [-1, 1]) {
+      const ex = CX + s * 4;
+      const lift = s < 0 ? 0 : -1;                     // the asymmetry is the character
+      blob(b, ex, hy - 1 + lift, 3, 2, 'gold');
+      brect(b, ex - 1, hy - 2 + lift, 3, 1, 'brass2');
+      brect(b, ex, hy - 1 + lift, 1, 2, 'ink');        // the slit pupil
+      bset(b, ex - 1, hy - 2 + lift, 'white');
+      // the lid, and the brow ridge over it
+      brect(b, ex - 3, hy - 3 + lift, 6, 1, 'leaf1');
+      brect(b, ex - 3, hy - 4 + lift + (s > 0 ? -1 : 0), 6, 1, 'leaf0');
     }
-    // the apple, held out
-    const ax = CX + 10, ay = TORSO_Y + 4;
-    disc(b, ax, ay, 4, 'red1');
-    disc(b, ax - 1, ay - 1, 2, 'red2');
-    px(b, ax - 2, ay - 2, 'white');
-    rect(b, ax, ay - 5, 1, 2, 'wood2');
-    ellipse(b, ax + 2, ay - 5, 2, 1, 'leaf2');
+    // the grin, pulled to one side, with one fang showing
+    if (o.mouth === 'open') {
+      blob(b, CX + 1, hy + 5, 5, 2, 'red0');
+      brect(b, CX - 1, hy + 5, 3, 1, 'red2');
+      bset(b, CX + 4, hy + 4, 'white');
+    } else {
+      bline(b, CX - 5, hy + 4, CX + 2, hy + 5, 'ink');
+      bline(b, CX + 2, hy + 5, CX + 6, hy + 3, 'ink');
+      bset(b, CX + 5, hy + 4, 'white');
+    }
+    bset(b, CX - 6, hy + 2, 'leaf4');
+    if (o.blink) for (const s of [-1, 1]) brect(b, CX + s * 4 - 1, hy - 1, 3, 1, 'leaf1');
   },
 
-  /**
-   * THE SERPENT. Not a human, so it does not use the skeleton -- but it keeps the dot
-   * eyes and the too-big head, which is what makes it read as one of the cast.
-   * Cute, and obviously up to something.
-   */
-  snake(b, pose, mouth, blink) {
-    // ONE flat coil on the ground, wide and low, so it reads as a snake sitting on
-    // itself rather than as a tower of blobs.
-    ellipse(b, CX, FOOT_Y - 3, 15, 5, 'leaf0');
-    ellipse(b, CX, FOOT_Y - 4, 14, 4, 'leaf1');
-    ellipse(b, CX - 3, FOOT_Y - 5, 10, 3, 'leaf2');
-    for (let j = -12; j <= 12; j += 4) px(b, CX + j, FOOT_Y - 4, 'leaf3');
-    // the neck: a clear S from the coil up to the head, thick at the bottom
-    for (let i = 0; i < 17; i++) {
-      const f = i / 16;
-      const y = FOOT_Y - 7 - i;
-      const w = Math.round(6 - f * 2.2);
-      const wob = Math.round(Math.sin(f * 3.4) * 4);
-      rect(b, CX - w + wob, y, w * 2, 1, 'leaf1');
-      rect(b, CX - w + wob, y, Math.max(1, w), 1, 'leaf2');
-      px(b, CX + w + wob - 1, y, 'leaf0');
-      if (i % 4 === 0) px(b, CX + wob, y, 'leaf3');   // belly scales
-    }
-    // the head: a wide wedge, and the hood behind it
-    ellipse(b, CX, HEAD_Y + 2, 12, 9, 'leaf1');
-    ellipse(b, CX, HEAD_Y + 1, 10, 8, 'leaf2');
-    ellipse(b, CX - 2, HEAD_Y - 1, 7, 5, 'leaf3');
-    for (const side of [-1, 1]) ellipse(b, CX + side * 10, HEAD_Y + 4, 4, 3, 'leaf1');
-    // gold slit eyes, big and up to no good
-    for (const side of [-1, 1]) {
-      const ex = CX + side * 5, ey = HEAD_Y;
-      if (blink) { rect(b, ex - 2, ey, 5, 1, 'leaf0'); continue; }
-      disc(b, ex, ey, 3, 'gold');
-      disc(b, ex, ey, 2, 'amber');
-      rect(b, ex, ey - 2, 1, 5, 'ink');
-      px(b, ex - 1, ey - 1, 'white');
-      if (pose === 'happy') { px(b, ex - 2, ey - 3, 'leaf0'); px(b, ex - 1, ey - 3, 'leaf0'); }
-    }
-    // the smile, always upturned
-    for (let i = -5; i <= 5; i++) px(b, CX + i, HEAD_Y + 6 - (Math.abs(i) > 3 ? 1 : 0), 'leaf0');
-    // and the tongue, out on the talking poses
-    if (mouth === 'open' || pose === 'talk' || pose === 'happy') {
-      line(b, CX, HEAD_Y + 7, CX - 5, HEAD_Y + 11, 'red2');
-      px(b, CX - 6, HEAD_Y + 10, 'red2');
-      px(b, CX - 6, HEAD_Y + 12, 'red2');
-    }
-    // an apple in the coil, because of course
-    disc(b, CX + 11, HIP_Y + 2, 4, 'red1');
-    disc(b, CX + 10, HIP_Y + 1, 2, 'red2');
-    px(b, CX + 9, HIP_Y, 'white');
-  },
-
-  /** A CHERUB. Chubby, winged, haloed, and holding a sword far too big for it. */
-  cherub(b, pose, mouth, blink) {
-    // wings behind
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 9; i++) {
-        const h = 8 - Math.round(i * 0.7);
-        rect(b, CX + side * (7 + i) - (side < 0 ? 1 : 0), TORSO_Y - 4 + Math.round(i * 0.4), 1, h,
-          i < 3 ? 'white' : i < 6 ? 'cream' : 'bone');
+  /** NOAH. The hat and the beard do all the work; you know him from the silhouette. */
+  noah(b, o) {
+    legs(b, HIP_Y + 2, FOOT_Y, 5, ['wood0', 'wood1', 'wood2'], 'wood0');
+    // a long tunic over a rope belt
+    torso(b, TORSO_Y, HIP_Y + 6, 10, 12, LINEN);
+    // folds: a flat cream slab from chin to knee is a bedsheet, not a garment
+    for (let i = 0; i < 5; i++) {
+      const fx = CX - 8 + i * 4;
+      for (let y = TORSO_Y + 4; y < HIP_Y + 6; y++) {
+        if ((y + i) % 7 < 4) bset(b, fx + Math.round(Math.sin(y * 0.3) * 1), y, 'parch0');
       }
     }
-    ball(b, CX, HEAD_Y + 2, HEAD_R, 'skin2', 'skin3', 'skin4', 'skin1');
-    torso(b, TORSO_Y + 2, HIP_Y, 6, 5, 'skin2', 'skin3', 'skin4');
-    legs(b, HIP_Y, FOOT_Y - 3, 'skin1', 'skin3', 'skin2');
-    arms(b, pose, 'skin2', 'skin3', 'skin4', { shoulder: 6, len: 8 });
-    faceOn(b, { eye: 'ink', ink: 'ink', mouth, blink, pose, eyeY: EYE_Y + 2, mouthY: MOUTH_Y + 2 });
-    // curls
-    for (let i = 0; i < 7; i++) disc(b, CX - 6 + i * 2, HEAD_Y - HEAD_R + 3, 2, i & 1 ? 'hair3' : 'hair2');
-    // the halo, floating a little above
-    ellipseFrame(b, CX, HEAD_Y - HEAD_R - 1, 7, 2, 'gold');
-    ellipseFrame(b, CX, HEAD_Y - HEAD_R - 2, 6, 2, 'brass3');
-    // a small flaming sword
-    rect(b, CX + 9, TORSO_Y, 1, 12, 'grey2');
-    rect(b, CX + 7, TORSO_Y + 11, 5, 2, 'brass2');
-    for (let i = 0; i < 6; i++) px(b, CX + 9, TORSO_Y - i, i < 2 ? 'white' : i < 4 ? 'gold' : 'orange');
-    void mouth;
+    brect(b, CX - 12, HIP_Y + 5, 25, 1, 'parch0');
+    brect(b, CX - 11, HIP_Y - 1, 23, 2, 'wood2');
+    brect(b, CX - 11, HIP_Y - 1, 23, 1, 'wood3');
+    for (let i = 0; i < 6; i++) bset(b, CX - 9 + i * 4, HIP_Y, 'wood1');
+    // a leather over-vest, so he is not one flat colour from chin to knee
+    for (const s of [-1, 1]) {
+      for (let y = TORSO_Y + 1; y < HIP_Y; y++) {
+        brect(b, CX + s * 7 - (s < 0 ? 3 : 0), y, 3, 1, y % 4 === 0 ? 'wood1' : 'wood2');
+      }
+    }
+    arms(b, o.pose, ['parch0', 'parch1', 'parch'], { shoulder: 10, thick: 2, len: 12 });
+
+    orb(b, CX, HEAD_CY, HEAD_R, orbShade(SKIN.warm));
+    // THE BEARD: it covers the jaw, which is why he reads as old at eight pixels
+    for (let y = MOUTH_Y - 1; y < NECK_Y + 3; y++) {
+      const f = (y - MOUTH_Y + 1) / (NECK_Y + 3 - MOUTH_Y + 1);
+      const hw = Math.round(9 - f * 4 + Math.sin(f * 3) * 1.5);
+      for (let x = -hw; x <= hw; x++) {
+        const t = Math.abs(x) / hw;
+        bset(b, CX + x, y, t > 0.75 ? 'grey0' : t > 0.35 ? 'grey1' : 'grey2');
+      }
+    }
+    for (let i = 0; i < 7; i++) bset(b, CX - 6 + i * 2, MOUTH_Y + 3 + (i % 3), 'white');
+    // THE HAT: a wide straw brim and a rounded crown. Three flat rows read as a
+    // headband; a hat is a brim you can see the underside of and a dome above it.
+    orb(b, CX, HEAD_CY - 9, 8, orbShade(['brass0', 'brass1', 'brass2', 'brass3']), { squashY: 0.7 });
+    blob(b, CX, HEAD_CY - 5, 17, 3, orbShade(['brass0', 'brass1', 'brass2', 'brass3']));
+    brect(b, CX - 16, HEAD_CY - 4, 33, 1, 'brass0');          // the shaded underside
+    brect(b, CX - 9, HEAD_CY - 6, 19, 1, 'wood1');            // the band
+    for (let i = 0; i < 8; i++) bset(b, CX - 12 + i * 3, HEAD_CY - 6, 'brass3');
+    face(b, {
+      pose: o.pose, mouth: o.mouth, blink: o.blink, brow: 'grey1', blush: 'red2',
+      mouthY: MOUTH_Y, nose: true, noseKey: 'skin1',
+    });
+  },
+
+  /** THE CHERUBIM. Wings, halo, flame. Serene and slightly alarming, on purpose. */
+  cherub(b, o) {
+    // WINGS, behind everything. A FAN of feathers from one root, each a little shorter
+    // and a little steeper than the last, so the roots overlap into a mass and only the
+    // tips separate. Three parallel ranks read as bread rolls stuck to his shoulders.
+    for (const s of [-1, 1]) {
+      const rx = CX + s * 7, ry = TORSO_Y + 5;
+      for (let i = 0; i < 7; i++) {
+        const a = -0.30 - i * 0.19;
+        const len = 17 - i * 1.4;
+        limb(b, rx, ry,
+          rx + s * Math.cos(a) * len, ry + Math.sin(a) * len,
+          2.6 - i * 0.18, 1.1,
+          i % 2 ? ['parch1', 'cream', 'white'] : ['parch0', 'parch1', 'cream'],
+          { edge: 'parch0' });
+      }
+      // the tips, notched, which is where a wing shows it is made of feathers
+      for (let i = 0; i < 7; i++) {
+        const a = -0.30 - i * 0.19;
+        const len = 17 - i * 1.4;
+        bset(b, rx + s * Math.cos(a) * len, ry + Math.sin(a) * len + 1, 'parch0');
+      }
+    }
+    legs(b, HIP_Y, FOOT_Y, 4, ['skin1', 'skin2', 'skin3'], 'skin1', { gap: 2 });
+    torso(b, TORSO_Y, HIP_Y + 3, 8, 9, LINEN);
+    // folds in the linen rather than a diagonal stripe, which read as a zip
+    for (let i = 0; i < 4; i++) {
+      const fx = CX - 5 + i * 4;
+      for (let y = TORSO_Y + 3; y < HIP_Y + 3; y++) if ((y + i) % 6 < 3) bset(b, fx, y, 'parch0');
+    }
+    arms(b, o.pose, ['skin1', 'skin2', 'skin3'], { shoulder: 8, thick: 2, len: 11 });
+
+    // THE HALO, drawn BEHIND the head so the top arc rides over the curls and the sides
+    // peek out past the ears. Floated above the skull it ran off the top of the canvas
+    // and all that survived was two gold horns.
+    for (let a = 0; a < Math.PI * 2; a += 0.06) {
+      const hx = CX + Math.cos(a) * 13;
+      const hy = HEAD_CY - 5 - Math.sin(a) * 8;
+      const near = Math.sin(a) < 0;
+      bset(b, hx, hy, near ? 'gold' : 'brass1');
+      bset(b, hx, hy + 1, near ? 'brass2' : 'brass0');
+    }
+    orb(b, CX, HEAD_CY, HEAD_R, orbShade(SKIN.warm));
+    // gold hair: a cap for the mass, then curls along the hairline for the bounce
+    hairCap(b, HEAD_CY, HEAD_R, ['brass1', 'brass2', 'brass3'], { cut: -4, fringe: 3, lift: 2 });
+    for (let i = 0; i < 5; i++) {
+      orb(b, CX - 8 + i * 4, HEAD_CY - 8 + (i % 2), 2.4,
+        orbShade(['brass1', 'brass2', 'brass3', 'cream']));
+    }
+    face(b, {
+      pose: o.pose, mouth: o.mouth, blink: o.blink, brow: 'brass2', blush: 'pink',
+      shine: 'white', mouthSmall: true,
+    });
+
+    // and the flame it keeps in one hand
+    const fx2 = CX + 12, fy = TORSO_Y + 13;
+    orb(b, fx2, fy, 3, orbShade(['red1', 'orange', 'gold', 'white']), { edge: 'red0' });
+    bset(b, fx2, fy - 4, 'gold');
+    bset(b, fx2, fy - 5, 'white');
+    bset(b, fx2 - 1, fy - 3, 'orange');
   },
 };
 
 export const FOLK_IDS = Object.keys(FOLK);
 
-/* ------------------------------------------------------------------- baking */
+/* -------------------------------------------------------------------- baking */
 
 const cache = new Map();
 const CAP = 160;
 
-function bake(id, pose, mouth, blink) {
-  const fn = FOLK[id];
-  if (!fn) return null;
-  const mk = makeCanvas(FOLK_W, FOLK_H);
-  if (!mk) return null;
-  fn(mk.g, pose, mouth, blink);
-  return mk.canvas;
-}
-
 function sprite(id, pose, mouth, blink) {
-  const k = `${id}/${pose}/${mouth}/${blink ? 1 : 0}`;
-  let hit = cache.get(k);
-  if (hit === undefined) {
-    hit = bake(id, pose, mouth, blink);
-    if (cache.size > CAP) cache.clear();
-    cache.set(k, hit);
-  }
+  const key = `${id}/${pose}/${mouth}/${blink ? 1 : 0}`;
+  let hit = cache.get(key);
+  if (hit !== undefined) return hit;
+  const fn = FOLK[id];
+  const mk = fn ? makeCanvas(FOLK_W, FOLK_H) : null;
+  if (!mk) { cache.set(key, null); return null; }
+  const buf = makeBuf(FOLK_W, FOLK_H);
+  fn(buf, { pose, mouth, blink });
+  outline(buf, 'ink');
+  flush(buf, mk.g);
+  hit = mk.canvas;
+  if (cache.size > CAP) cache.clear();
+  cache.set(key, hit);
   return hit;
 }
 
@@ -430,18 +615,12 @@ export function folkCacheSize() { return cache.size; }
 /**
  * drawFolk(g, id, x, y, t, o)
  *   x, y   the character's FEET, which is what you actually place
- *   t      seconds; drives the bob, the blink and the live effects
- *   o      { pose, scale, flip, talking, alpha, mud, sparkle, wet }
- *
- * One blit. The bob is an integer offset rather than a separate bake, the blink is a
- * timer, and the mud, sparkle and wet are a handful of pixels.
+ *   o      { pose, scale, flip, talking, alpha, mud, sparkle, wet, phase }
  */
 export function drawFolk(g, id, x, y, t = 0, o = {}) {
   const sc = Math.max(1, Math.round(o.scale || 1));
   const pose = o.pose || 'idle';
-  // a slow bob, and a faster one while talking
   const bob = Math.round(Math.sin(t * (o.talking ? 5.5 : 1.6) + (o.phase || 0)) * (o.talking ? 1.2 : 1));
-  // blink about every four seconds, for a tenth of a second
   const blink = ((t * 0.9 + (o.phase || 0)) % 4) < 0.12;
   const mouth = o.talking && Math.floor(t * 7) % 2 === 0 ? 'open' : 'shut';
   const cv = sprite(id, pose, mouth, blink);
@@ -466,30 +645,34 @@ export function drawFolk(g, id, x, y, t = 0, o = {}) {
   if (o.mud) drawMud(g, x, dy, dw, dh, sc, t, o.mud);
   if (o.sparkle) drawSparkle(g, x, dy + dh * 0.4, sc, t, o.sparkle);
   if (o.wet) drawFolkWet(g, x, dy, dw, dh, sc, t);
+  if (id === 'snake') drawTongue(g, x, dy, dh, sc, t);
 }
 
 /**
- * Mud sliding off the golem. Four drips on their own loops, each leaving a splat ring
- * when it lands -- which is what sells it as wet clay rather than as brown pixels.
+ * Mud sliding off the golem. Four drips on their own loops, each leaving a splat when it
+ * lands -- which is what sells it as wet clay rather than as brown pixels.
  */
 function drawMud(g, x, dy, dw, dh, sc, t, amt) {
-  const n = Math.round(2 + clamp(amt, 0, 1) * 2);
+  const n = Math.round(2 + clamp(amt, 0, 1) * 3);
   for (let i = 0; i < n; i++) {
     const seed = i * 3.7;
     const k = (t * (0.55 + i * 0.16) + seed) % 1;
-    const ox = Math.round(((i % 3) - 1) * 7 + Math.sin(seed) * 3) * sc;
+    const ox = Math.round(((i % 3) - 1) * 8 + Math.sin(seed) * 3) * sc;
     const top = dy + Math.round(dh * (0.42 + (i % 2) * 0.18));
     const py = top + k * dh * 0.5;
-    px(g, x + ox, py, 'clay3');
-    px(g, x + ox, py + 1, 'clay1');
-    if (k > 0.9) {                                    // it lands
-      const fy = dy + dh - 1;
-      px(g, x + ox - 2, fy, 'clay2'); px(g, x + ox + 2, fy, 'clay2');
-      px(g, x + ox - 1, fy - 1, 'clay3');
+    rect(g, x + ox, py, sc, sc, 'clay3');
+    rect(g, x + ox, py + sc, sc, sc, 'clay1');
+    if (k > 0.9) {
+      const fy = dy + dh - sc;
+      rect(g, x + ox - 2 * sc, fy, sc, sc, 'clay2');
+      rect(g, x + ox + 2 * sc, fy, sc, sc, 'clay2');
+      rect(g, x + ox - sc, fy - sc, sc, sc, 'clay3');
     }
   }
-  // a wet sheen on the shoulders
-  for (let i = 0; i < 4; i++) px(g, x - Math.round(dw * 0.2) + i * sc, dy + Math.round(dh * 0.36), 'clay4');
+  // a wet sheen across the shoulders
+  for (let i = 0; i < 5; i++) {
+    rect(g, x - Math.round(dw * 0.22) + i * sc * 2, dy + Math.round(dh * 0.36), sc, sc, 'clay4');
+  }
 }
 
 /** Cozy magic motes, used by the cherubim and by the shepherd wand. */
@@ -499,27 +682,40 @@ export function drawSparkle(g, x, y, sc, t, amt) {
     const a = (i / n) * Math.PI * 2 + t * 1.1;
     const r = (7 + Math.sin(t * 2 + i) * 4) * sc;
     const sx = x + Math.cos(a) * r, sy = y + Math.sin(a) * r * 0.6;
-    px(g, sx, sy, i % 3 === 0 ? 'magic2' : i % 3 === 1 ? 'magic1' : 'gold');
+    rect(g, sx, sy, sc, sc, i % 3 === 0 ? 'magic2' : i % 3 === 1 ? 'magic1' : 'gold');
   }
 }
 
-/* -------------------------------------------------------------- the shepherd wand
+function drawFolkWet(g, x, dy, dw, dh, sc, t) {
+  for (let i = 0; i < 4; i++) {
+    const k = (t * (1.1 + i * 0.3) + i * 2.1) % 1;
+    const ox = Math.round(((i % 3) - 1) * 7) * sc;
+    rect(g, x + ox, dy + dh * 0.5 + k * dh * 0.45, sc, sc, 'foam');
+    rect(g, x + ox, dy + dh * 0.5 + k * dh * 0.45 + sc, sc, sc, 'water3');
+  }
+  void dw;
+}
 
-The tool the golem points at an animal. It replaced a pool cue, and the difference is
-the whole feel of the game: a cue is a stick you hit something with, and a crook is
-something you guide an animal home with. So it is short, warm, wooden, and it does its
-work in light rather than in force.
+/** The snake's tongue, because a still snake is a garden ornament. */
+function drawTongue(g, x, dy, dh, sc, t) {
+  const cyc = (t * 0.8) % 1;
+  if (cyc > 0.32) return;
+  const k = cyc / 0.32;
+  const tx = x + Math.round(4 * sc);
+  const ty = dy + Math.round(dh * 0.42);
+  const len = Math.round((2 + k * 5) * sc);
+  rect(g, tx, ty, len, sc, 'red2');
+  rect(g, tx + len, ty - sc, sc, sc, 'red2');
+  rect(g, tx + len, ty + sc, sc, sc, 'red2');
+}
 
-Drawn live rather than baked -- it is about thirty pixels and its whole job is to move.
+/* ------------------------------------------------------------- the shepherd wand
+
+The tool the golem points at an animal. It replaced a pool cue, and the difference is the
+whole feel of the game: a cue is a stick you hit something with, a crook is something you
+guide an animal home with. Short, warm, wooden, and it does its work in light.
 */
 
-/**
- * drawWand(g, x, y, angle, charge, t)
- *   x, y     the hand
- *   angle    where it points
- *   charge   0..1 how much power is wound into the flick
- *   o        { scale }
- */
 export function drawWand(g, x, y, angle, charge = 0, t = 0, o = {}) {
   const ch = clamp(charge, 0, 1);
   const sc = Math.max(1, Math.round(o.scale || 1));
@@ -527,7 +723,6 @@ export function drawWand(g, x, y, angle, charge = 0, t = 0, o = {}) {
   const ca = Math.cos(angle), sa = Math.sin(angle);
   const tipX = x + ca * len, tipY = y + sa * len;
 
-  // the shaft, tapering, with a bound grip at the hand
   for (let i = 0; i < len; i++) {
     const f = i / len;
     const px2 = x + ca * i, py2 = y + sa * i;
@@ -536,18 +731,14 @@ export function drawWand(g, x, y, angle, charge = 0, t = 0, o = {}) {
     }
     if (f < 0.28 && i % 3 === 0) px(g, px2 - sa * sc, py2 + ca * sc, 'brass1');
   }
-  // the crook: a half curl off the tip, which is what makes it a shepherd's
   for (let k = 0; k < 7 * sc; k++) {
     const a = angle - 0.5 + (k / sc) * 0.42;
     px(g, tipX + Math.cos(a) * 4 * sc, tipY + Math.sin(a) * 4 * sc, k < 2 * sc ? 'wood3' : 'wood4');
   }
-  // the light in the crook
-  const glow = 0.4 + ch * 0.6;
   const gx = tipX + ca * 3 * sc, gy = tipY + sa * 3 * sc;
-  if (glow > 0.5) disc(g, gx, gy, 2 * sc, 'magic1');
+  if (0.4 + ch * 0.6 > 0.5) disc(g, gx, gy, 2 * sc, 'magic1');
   disc(g, gx, gy, sc, 'magic2');
   drawSparkle(g, gx, gy, sc, t, 0.3 + ch);
-  // and, while it is charged, a couple of motes running UP the shaft toward the crook
   if (ch > 0.02) {
     for (let i = 0; i < 3; i++) {
       const ph = (t * 2.2 + i / 3) % 1;
@@ -556,22 +747,10 @@ export function drawWand(g, x, y, angle, charge = 0, t = 0, o = {}) {
   }
 }
 
-function drawFolkWet(g, x, dy, dw, dh, sc, t) {
-  for (let i = 0; i < 3; i++) {
-    const k = (t * (1.1 + i * 0.3) + i * 2.1) % 1;
-    const ox = Math.round(((i % 3) - 1) * 6) * sc;
-    px(g, x + ox, dy + dh * 0.5 + k * dh * 0.45, 'foam');
-    px(g, x + ox, dy + dh * 0.5 + k * dh * 0.45 + 1, 'water3');
-  }
-}
+/* ------------------------------------------------------------------ portraits */
 
-/**
- * A dialogue portrait. Same sprite, drawn at 4x and cropped to the shoulders, on a baked
- * ground. One art system for the walk-around character and the talking head, which is
- * why they can never drift apart.
- */
 const GROUNDS = {
-  golem: ['ink', 'shadow', 'clay0', 'clay1'],
+  golem: ['shadow', 'clay0', 'clay2', 'sand'],   // his head runs dark; a dark ground hid it
   noah: ['wood0', 'wood1', 'sand', 'sky'],
   adam: ['leaf0', 'leaf1', 'sand', 'gold'],
   eve: ['leaf0', 'leaf2', 'pink', 'gold'],
@@ -594,56 +773,50 @@ function ground(id, w, h) {
     rect(mk.g, 0, y, w, 1, mix(P[ramp[i]], P[ramp[i + 1]], lf));
     if (y % 4 === 1) rect(mk.g, 0, y, w, 1, mix(P[ramp[i]], P.white, 0.06));
   }
+  // a soft vignette, so the head reads against it wherever the frame is
+  for (let i = 0; i < 4; i++) {
+    wash(mk.g, 0, 0, w, h, 'ink', 0.04);
+    wash(mk.g, 0, h - 10 - i * 6, w, 10 + i * 6, 'ink', 0.05);
+  }
   hit = mk.canvas;
   if (bgCache.size > 40) bgCache.clear();
   bgCache.set(k, hit);
   return hit;
 }
 
+/**
+ * A dialogue portrait: the same sprite, scaled up and cropped to the shoulders, on a
+ * baked ground. One art system for the walk-around and the talking head, which is why
+ * they can never drift apart.
+ */
 export function drawFolkPortrait(g, id, x, y, w, h, t = 0, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   rect(g, x - 2, y - 2, w + 4, h + 4, 'ink');
   const bg = ground(id, w, h);
   if (bg) g.drawImage(bg, x, y);
 
-  // The figure, scaled so HEAD PLUS TORSO fits the frame exactly. Scaling to the head
-  // alone cropped the hats, halos and brow plates off the top -- which are precisely the
-  // details that tell the cast apart.
-  const SHOW = 34;                        // rows 0..34: everything above the knees
-  // clamped by WIDTH as well: scaling to the height alone overflowed a narrow frame and
-  // sliced the shoulders off, which is how a portrait box ends up cropping a hat
+  // Rows 0..36 is head plus shoulders. Scaling to the head alone cropped the hats,
+  // halos and brow plates off the top -- precisely the details that tell the cast apart.
+  const SHOW = 38;
   const sc = Math.max(1, Math.min(Math.floor(h / SHOW), Math.floor(w / FOLK_W)));
-  const pose = o.pose || 'idle';
-  const bob = Math.round(Math.sin(t * (o.talking ? 5 : 1.4)) * 1);
-  const blink = ((t * 0.9) % 4) < 0.12;
+  const pose = o.pose || (o.talking ? 'talk' : 'idle');
+  const blink = ((t * 0.8) % 4.4) < 0.12;
   const mouth = o.talking && Math.floor(t * 7) % 2 === 0 ? 'open' : 'shut';
   const cv = sprite(id, pose, mouth, blink);
-  if (cv) {
-    const dw = FOLK_W * sc;
-    const dx = Math.round(x + (w - dw) / 2);
-    const dy = Math.round(y + (h - SHOW * sc) / 2) + bob;
-    g.save();
-    g.beginPath();
-    g.rect(x, y, w, h);
-    g.clip();
-    g.drawImage(cv, 0, 0, FOLK_W, SHOW, dx, dy, dw, SHOW * sc);
-    g.restore();
-  }
-  if (o.mud) drawMud(g, x + w / 2, y + h * 0.2, w * 0.6, h * 0.8, 2, t, o.mud);
-  if (o.sparkle) drawSparkle(g, x + w / 2, y + h * 0.4, 2, t, o.sparkle);
+  if (!cv) return;
+  const bob = Math.round(Math.sin(t * 1.3) * 1);
+  const dw = FOLK_W * sc;
+  const dx = x + Math.round((w - dw) / 2);
+  const dy = y + h - SHOW * sc + bob;
+  g.save();
+  g.beginPath();
+  g.rect(x, y, w, h);
+  g.clip();
+  g.drawImage(cv, 0, 0, FOLK_W, SHOW, dx, dy, dw, SHOW * sc);
+  g.restore();
 
-  // vignette + a warm wooden frame, so a portrait reads as a framed picture
-  for (let i = 0; i < 4; i++) {
-    const a = 0.2 - i * 0.045;
-    wash(g, x, y + i, w, 1, 'ink', a);
-    wash(g, x, y + h - 1 - i, w, 1, 'ink', a);
-    wash(g, x + i, y, 1, h, 'ink', a);
-    wash(g, x + w - 1 - i, y, 1, h, 'ink', a);
-  }
-  rect(g, x - 2, y - 2, w + 4, 2, 'wood2');
-  rect(g, x - 2, y + h, w + 4, 2, 'wood1');
-  rect(g, x - 2, y - 2, 2, h + 4, 'wood2');
-  rect(g, x + w, y - 2, 2, h + 4, 'wood1');
-  for (const [dx2, dy2] of [[-2, -2], [w, -2], [-2, h], [w, h]]) rect(g, x + dx2, y + dy2, 2, 2, 'brass2');
-  void ring; void tri;
+  if (o.mud) drawMud(g, x + w / 2, dy, dw, SHOW * sc, sc, t, o.mud);
+  if (o.sparkle) drawSparkle(g, x + w / 2, y + h * 0.4, sc, t, o.sparkle);
+  ellipse(g, x + w / 2, y + h - 2, w * 0.4, 2, 'ink');
+  void col;
 }

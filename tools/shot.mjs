@@ -127,6 +127,45 @@ switch (which) {
     mouse(Number(process.env.MX || 480), Number(process.env.MY || 280));
     break;
   }
+  case 'zoom': {
+    // The one view that matters for judging pixel art: BIG. Everything else is a
+    // 32-pixel animal in a 960-pixel scene, which is how a blurry face gets shipped.
+    const F = await import('../src/render/folk.js');
+    const S = await import('../src/render/sprites.js');
+    const A = await import('../src/data/animals.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const who = (process.env.WHO || 'golem,adam,eve,snake,noah,cherub').split(',');
+    const which = (process.env.AN || 'cow,chicken,lion,elephant,penguin,octopus').split(',');
+    const mode = process.env.MODE || 'folk';
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, SW, SH, 'shadow');
+        if (mode === 'folk') {
+          // three at a time, whole, at 6x -- a figure cropped by its own frame tells you
+          // nothing about its silhouette, which is the thing you are here to judge
+          who.slice(0, 3).forEach((id, i) => {
+            const x = 165 + i * 315;
+            rect(g, x - 150, 20, 300, 480, i % 2 ? 'deep' : 'ink');
+            F.drawFolk(g, id, x, 480, 1.3, {
+              scale: 8, mud: id === 'golem' ? 1 : 0, sparkle: id === 'cherub' ? 1 : 0,
+            });
+            text(g, id.toUpperCase(), x, 506, 'brass3', { font: 7, center: true });
+          });
+        } else {
+          which.forEach((id, i) => {
+            const a = A.ANIMAL_BY_ID[id];
+            if (!a) return;
+            const x = 80 + (i % 3) * 300, y = 130 + Math.floor(i / 3) * 250;
+            rect(g, x - 74, y - 84, 290, 240, i % 2 ? 'deep' : 'ink');
+            S.drawAnimal(g, a, x + 60, y + 20, { scale: 6 });
+            text(g, a.name.toUpperCase(), x + 60, y + 130, 'brass3', { font: 5, center: true });
+          });
+        }
+      },
+    };
+    break;
+  }
   case 'isles': {
     const I = await import('../src/data/islands.js');
     const A = await import('../src/render/islandart.js');
@@ -193,25 +232,29 @@ switch (which) {
         rect(g, 0, 0, SW, SH, 'deep');
         text(g, 'THE CAST — sprites at 1x/2x/3x, then poses, then portraits',
           SW / 2, 8, 'gold', { center: true, font: 7 });
+        // 1x and 2x, so a silhouette can be judged small and large
         F.FOLK_IDS.forEach((id, i) => {
-          const x = 70 + i * 150;
-          // three scales, so the silhouette can be judged small and large
-          rect(g, x - 62, 30, 138, 128, 'shadow');
-          F.drawFolk(g, id, x - 40, 150, 1.2, { scale: 1 });
-          F.drawFolk(g, id, x, 150, 1.2, { scale: 2, mud: id === 'golem' ? 1 : 0,
-            sparkle: id === 'cherub' ? 1 : 0 });
-          text(g, id.toUpperCase(), x, 162, 'brass3', { font: 5, center: true });
-          // the four poses at 2x
-          F.POSES.forEach((pose, j) => {
-            const py = 200 + j * 80;
-            rect(g, x - 62, py - 68, 138, 76, j % 2 ? 'shadow' : 'ink');
-            F.drawFolk(g, id, x, py, 1.2 + j, { scale: 2, pose, talking: pose === 'talk' });
-            text(g, pose, x + 46, py - 12, 'grey2', { font: 3, right: true });
+          const x = 78 + i * 156;
+          rect(g, x - 70, 24, 150, 132, i % 2 ? 'shadow' : 'ink');
+          F.drawFolk(g, id, x - 44, 152, 1.2, { scale: 1 });
+          F.drawFolk(g, id, x + 14, 152, 1.2, {
+            scale: 2, mud: id === 'golem' ? 1 : 0, sparkle: id === 'cherub' ? 1 : 0,
+          });
+          text(g, id.toUpperCase(), x, 160, 'brass3', { font: 5, center: true });
+        });
+        // the four poses at 1x, in a row each
+        F.POSES.forEach((pose, j) => {
+          const py = 200 + j * 40;
+          rect(g, 8, py - 34, 470, 38, j % 2 ? 'shadow' : 'ink');
+          text(g, pose.toUpperCase(), 14, py - 12, 'grey2', { font: 3 });
+          F.FOLK_IDS.forEach((id, i) => {
+            F.drawFolk(g, id, 80 + i * 66, py, 1.2 + j, { scale: 1, pose, talking: pose === 'talk' });
           });
         });
-        // portraits along the bottom
+        // portraits along the right
         F.FOLK_IDS.forEach((id, i) => {
-          F.drawFolkPortrait(g, id, 24 + i * 150, 344, 120, 176, 1.4 + i,
+          F.drawFolkPortrait(g, id, 492 + (i % 3) * 156, 180 + Math.floor(i / 3) * 178,
+            148, 172, 1.4 + i,
             { talking: i === 1, mud: id === 'golem' ? 1 : 0, sparkle: id === 'cherub' ? 1 : 0 });
         });
       },

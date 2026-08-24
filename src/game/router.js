@@ -15,10 +15,12 @@ import { newVoyage, departIsland, endVoyage, CHAPTERS } from './voyage.js';
 import { makeMenuScene } from '../scenes/menu.js';
 import { makeOceanScene } from '../scenes/ocean.js';
 import { makeIslandScene } from '../scenes/island.js';
+import { makeChoiceScene } from '../scenes/choice.js';
 import { makeEdenScene } from '../scenes/eden.js';
 import { makeGameOverScene } from '../scenes/gameover.js';
 import { makeCutscene } from '../scenes/cutscene.js';
 import { getScript } from '../data/story.js';
+import { rollEncounter } from './choices.js';
 
 /**
  * createRouter(app, o)
@@ -76,11 +78,27 @@ export function createRouter(app, o = {}) {
      */
     island(island) {
       R.play(getScript('tutorial'), () => {
-        go(makeIslandScene(), {
-          voyage, island,
-          onDone: () => R.afterStop(),
-        }, 'curtain');
+        // something on the way in, about every other leg. It happens AFTER the crossing
+        // is committed, so a decision can never be dodged by choosing a different
+        // island -- you are already going there.
+        const enc = rollEncounter(voyage, island);
+        if (enc) {
+          go(makeChoiceScene(), {
+            voyage, island, encounter: enc,
+            onDone: () => R.rescue(island),
+          }, 'light');
+          return;
+        }
+        R.rescue(island);
       });
+    },
+
+    /** The rescue itself. Split out so an encounter can hand straight through to it. */
+    rescue(island) {
+      go(makeIslandScene(), {
+        voyage, island,
+        onDone: () => R.afterStop(),
+      }, 'curtain');
     },
 
     /** The garden: the only safe ground, and the only place anything is bought. */

@@ -108,7 +108,8 @@ export function newRescue(v, island, tag) {
     tide: 0,
     step: Math.max(0.03, tidePerAction(island) - relicBonus(v, 'patience')),
     dry: relicFlag(v, 'dry'),
-    spare: relicFlag(v, 'sure') ? 1 : 0,      // the first loss this island does not happen
+    // the dove's favour, and the whale that shadows you if you put the harpoon down
+    spare: (relicFlag(v, 'sure') ? 1 : 0) + (v.flags && v.flags.whale ? 1 : 0),
     strand: [],            // the animals to save: {ball, animalId, state}
     helpers: [],           // brought animals put down: {animalId, x, y, ability, obId}
     obstacles: [],

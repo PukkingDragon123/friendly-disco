@@ -85,13 +85,19 @@ export const NPC_BY_ID = Object.freeze(
   NPCS.reduce((m, n) => { m[n.id] = n; return m; }, {}),
 );
 
-/** The three the Cherubim will open for you now. Never one already standing in the garden. */
-export function rollGates(rng, v) {
-  const pool = NPCS.filter((n) => n.id !== 'cherub' && v.summoned.indexOf(n.id) < 0);
-  if (pool.length <= 3) return pool.slice();
+/**
+ * The doors the Cherubim will open for you now. Never one already standing in the garden,
+ * so the pool narrows every visit and the choice sharpens as the run goes on.
+ *
+ * `n` is normally three. Swearing at the gate opens a fourth, which -- since there are
+ * only four people who can come through -- means seeing the whole field at once.
+ */
+export function rollGates(rng, v, n = 3) {
+  const pool = NPCS.filter((x) => x.id !== 'cherub' && v.summoned.indexOf(x.id) < 0);
+  if (pool.length <= n) return pool.slice();
   const out = [];
   const rest = pool.slice();
-  while (out.length < 3 && rest.length) {
+  while (out.length < n && rest.length) {
     const i = rng.int(rest.length);
     out.push(rest[i]);
     rest.splice(i, 1);

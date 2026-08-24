@@ -18,6 +18,7 @@ import { GEAR_BY_ID, gearFrom } from '../data/gear.js';
 import { NPC_BY_ID, rollGates, dealSize } from '../data/npcs.js';
 import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say } from './voyage.js';
 import { QUESTS, currentQuest, questDone, progressOf } from '../data/quests.js';
+import { priceMod, gatesOpen } from './choices.js';
 
 /** How many times you have to sit with an animal before it will not leave you. */
 export const PETS_FOR_LOYALTY = 3;
@@ -32,7 +33,7 @@ export const PETS_FOR_LOYALTY = 3;
 export function enterGarden(v) {
   v.visits = (v.visits || 0) + 1;
   const rng = v.rng.fork(`eden/${v.visits}`);
-  v.gateOffer = rollGates(rng, v).map((n) => n.id);
+  v.gateOffer = rollGates(rng, v, gatesOpen(v)).map((n) => n.id);
   v.deals = {};
   for (const id of v.summoned) v.deals[id] = rollDeal(v, rng.fork(id), NPC_BY_ID[id]);
   v.pets = v.pets || {};
@@ -64,21 +65,26 @@ export function openGate(v, npcId) {
  * whole stock you have bought lays out nothing and says so, rather than selling you a
  * second identical apron.
  */
+/** What a thing costs YOU, which is not always what it costs. */
+export function priceOf(v, base) {
+  return Math.max(1, Math.round(base + priceMod(v)));
+}
+
 export function rollDeal(v, rng, npc) {
   if (!npc) return [];
   const n = dealSize(rng, npc);
   let stock = [];
   if (npc.sells === 'items') {
-    stock = itemsFrom(npc.id).map((it) => ({ kind: 'item', id: it.id, price: it.price }));
+    stock = itemsFrom(npc.id).map((it) => ({ kind: 'item', id: it.id, price: priceOf(v, it.price) }));
   } else if (npc.sells === 'gear') {
     const owned = ownedGear(v);
     stock = gearFrom(npc.id)
       .filter((r) => owned.indexOf(r.id) < 0)
-      .map((r) => ({ kind: 'gear', id: r.id, price: r.price }));
+      .map((r) => ({ kind: 'gear', id: r.id, price: priceOf(v, r.price) }));
   } else if (npc.sells === 'upgrades') {
     stock = UPGRADE_IDS
       .filter((u) => tierCost(v, u) !== null)
-      .map((u) => ({ kind: 'upgrade', id: u, price: tierCost(v, u) }));
+      .map((u) => ({ kind: 'upgrade', id: u, price: priceOf(v, tierCost(v, u)) }));
   }
   const out = [];
   const rest = stock.slice();
@@ -138,9 +144,12 @@ export function buyOffer(v, npcId, offer) {
     const relic = GEAR_BY_ID[offer.id];
     if (relic) { displaced = equip(v, relic); ok = true; }
   } else if (offer.kind === 'upgrade') {
-    // buyUpgrade takes its own money, so do not take it twice
+    // buyUpgrade takes the TIER price out of the purse; the blanket's price may be
+    // marked up or down by your reputation, so settle the difference here
+    const tier = tierCost(v, offer.id);
     ok = buyUpgrade(v, offer.id);
     if (ok) {
+      v.money = Math.max(0, v.money - (offer.price - (tier || 0)));
       const deal = (v.deals && v.deals[npcId]) || [];
       const ix = deal.indexOf(offer);
       if (ix >= 0) deal.splice(ix, 1);

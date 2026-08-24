@@ -93,7 +93,12 @@ export function capacity(v) {
   return Math.max(1, tierValue(v, 'capacity') + relicBonus(v, 'berths') + (v.bonusBerths || 0));
 }
 export function holdSize(v) { return Math.max(1, tierValue(v, 'hold') + relicBonus(v, 'basket')); }
-export function gardenSize(v) { return Math.max(1, tierValue(v, 'garden') + relicBonus(v, 'beds')); }
+export function gardenSize(v) {
+  // the choices' beds land here too: `bonusBeds` from a raft you towed, minus what the
+  // strongbox cost you in goodwill
+  return Math.max(1, tierValue(v, 'garden') + relicBonus(v, 'beds') + (v.bonusBeds || 0)
+    - (v.flags && v.flags.greedy ? 4 : 0));
+}
 export function hullMax(v) { return Math.max(1, tierValue(v, 'hull') + relicBonus(v, 'hull')); }
 /**
  * How much ground the flood gains per crossing.
@@ -104,7 +109,9 @@ export function hullMax(v) { return Math.max(1, tierValue(v, 'hull') + relicBonu
  * point of Sail you buy is the difference between that and a margin.
  */
 export function floodPerLeg(v) {
-  return 0.062 * tierValue(v, 'speed') * Math.max(0.3, 1 - relicBonus(v, 'sail'));
+  // the dove, if you let it go, flies ahead of the water
+  const dove = v.flags && v.flags.dove ? 0.85 : 1;
+  return 0.062 * tierValue(v, 'speed') * Math.max(0.3, 1 - relicBonus(v, 'sail')) * dove;
 }
 
 /**
@@ -172,6 +179,9 @@ export function newVoyage(seed) {
     lost: [],
     quests: [],
     flags: {},              // set by choices; read by later events
+    seenChoices: [],        // encounters already had, so none repeats in a voyage
+    lastEncounter: -9,      // the leg one last happened on
+    bonusBeds: 0,           // from choices; permanent
     log: [],
 
     stats: {

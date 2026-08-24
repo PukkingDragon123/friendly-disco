@@ -96,6 +96,24 @@ switch (which) {
     mouse(Number(process.env.MX || 480), Number(process.env.MY || 300));
     break;
   }
+  case 'choice': {
+    const V = await import('../src/game/voyage.js');
+    const I = await import('../src/data/islands.js');
+    const D = await import('../src/data/choices.js');
+    const { makeChoiceScene } = await import('../src/scenes/choice.js');
+    const voyage = V.newVoyage(seed);
+    voyage.money = 20;
+    const enc = D.CHOICE_BY_ID[process.env.ENC || 'shepherd'] || D.CHOICES[0];
+    scene = makeChoiceScene();
+    scene.enter({
+      voyage, encounter: enc,
+      island: I.ISLAND_BY_ID[process.env.ISLE || 'swamp'],
+      onDone: () => {},
+    }, app);
+    if (process.env.PICK) scene.debug().pick(Number(process.env.PICK));
+    mouse(Number(process.env.MX || 480), Number(process.env.MY || 240));
+    break;
+  }
   case 'island': {
     const V = await import('../src/game/voyage.js');
     const I = await import('../src/data/islands.js');

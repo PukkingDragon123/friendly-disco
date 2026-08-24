@@ -30,6 +30,7 @@ import { drawDeal, dealBox } from '../render/deal.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { abilityOf } from '../data/abilities.js';
 import { NPC_BY_ID } from '../data/npcs.js';
+import { activeFlags, priceMod } from '../game/choices.js';
 import { SLOT_INFO, bonusText } from '../data/gear.js';
 import {
   capacity, gardenSize, berthsFree, isLoyal, stow, unstow, sell, sellPrice, holdSize,
@@ -512,7 +513,14 @@ export function makeEdenScene() {
   function drawHud(g) {
     UI.panel(g, 0, 0, W, HUD_H, { style: 'wood', shadow: true, corners: false });
     text(g, 'THE GARDEN OF EDEN', 12, 5, 'leaf4', { font: 7, shadow: 'ink' });
-    text(g, 'the last dry ground, and the only safe one', 12, 24, 'parch1', { font: 3 });
+    // your reputation, where you are about to go shopping with it
+    const flags = activeFlags(v);
+    const rep = priceMod(v);
+    const repLine = flags.length
+      ? flags.slice(0, 2).map((f) => f.id.toUpperCase()).join(' · ')
+        + (rep ? `  (prices ${rep > 0 ? '+' : ''}${rep})` : '')
+      : 'the last dry ground, and the only safe one';
+    text(g, repLine, 12, 24, rep > 0 ? 'red2' : rep < 0 ? 'leaf4' : 'parch1', { font: 3 });
     UI.moneyPill(g, 330, 10, v.money, { font: 7, h: 16 });
     text(g, `CHAPTER ${v.chapter} · LEG ${v.leg}`, 420, 6, 'parch1', { font: 3 });
     text(g, `${v.lost.length} lost so far`, 420, 20, v.lost.length ? 'red2' : 'parch1', { font: 3 });

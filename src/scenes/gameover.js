@@ -17,6 +17,7 @@ import { drawAnimal } from '../render/sprites.js';
 import { drawFolk } from '../render/folk.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { CHAPTERS, LEGS_PER_CHAPTER, capacity, gardenSize } from '../game/voyage.js';
+import { activeFlags } from '../game/choices.js';
 
 export function makeGameOverScene() {
   let v = null, won = false, onDone = null;
@@ -118,7 +119,24 @@ export function makeGameOverScene() {
     // the loyal ones get a line of their own: they are the run's friendships
     if (v.loyal.length) {
       const msg = `${v.loyal.length} would not leave you`;
-      text(g, msg, W - 20, cy + ch + 84, 'gold', { font: 5, right: true, shadow: 'ink' });
+      text(g, msg, W - 20, cy + ch + 82, 'gold', { font: 5, right: true, shadow: 'ink' });
+    }
+
+    // WHAT IS TRUE OF YOU. The flags a run leaves behind are the only part of a summary
+    // that is about the player rather than about the numbers, so they go in plain words.
+    const flags = activeFlags(v);
+    if (flags.length) {
+      text(g, 'WHAT IS TRUE OF YOU', 22, cy + ch + 82, 'parch1', { font: 3, shadow: 'ink' });
+      let fx = 22;
+      for (const f of flags.slice(0, 4)) {
+        const label = f.text.split('.')[0];
+        const fw = textW(label, { font: 3 }) + 12;
+        if (fx + fw > W - 260) break;
+        wash(g, fx, cy + ch + 92, fw, 12, 'ink', 0.7);
+        rect(g, fx, cy + ch + 92, 2, 12, f.id === 'robbed' || f.id === 'greedy' ? 'red2' : 'leaf3');
+        text(g, label, fx + 7, cy + ch + 95, 'cream', { font: 3 });
+        fx += fw + 5;
+      }
     }
 
     const sw = textW('SEED  ' + v.seed, { font: 5 }) + 20;

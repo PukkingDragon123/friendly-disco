@@ -50,6 +50,7 @@ const M = {};
     ['rescue', '../src/game/rescue.js'], ['obart', '../src/render/obstacles.js'],
     ['gear', '../src/data/gear.js'], ['quests', '../src/data/quests.js'],
     ['npcs', '../src/data/npcs.js'], ['garden', '../src/game/garden.js'],
+    ['choicedata', '../src/data/choices.js'], ['choices', '../src/game/choices.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -1450,6 +1451,162 @@ if (section('garden') && M.garden && M.gear && M.quests && M.npcs) {
   }
 }
 
+/* ---------------------------------------------------------------- choices */
+
+if (section('choices') && M.choices && M.choicedata) {
+  const CH = M.choices;
+  const { CHOICES, CHOICE_BY_ID, FLAGS, EFFECT_KEYS } = M.choicedata;
+  const V = M.voyage;
+
+  // --- the content contract
+  for (const c of CHOICES) {
+    ok(!!c.title && (c.lines || []).length >= 1, `encounter ${c.id} is written`);
+    ok(c.options.length >= 2 && c.options.length <= 3,
+      `encounter ${c.id} offers two or three`, String(c.options.length));
+    if (c.needs) ok(!!FLAGS[c.needs], `encounter ${c.id} needs a real flag`, c.needs);
+    for (const o of c.options) {
+      ok(!!o.label && !!o.blurb && !!o.outcome, `${c.id}: option "${o.label}" is written`);
+      ok(!!o.cost, `${c.id}: option "${o.label}" says what it costs`);
+      ok((o.effects || []).length >= 1, `${c.id}: option "${o.label}" does something`);
+      for (const step of o.effects) {
+        for (const k of Object.keys(step)) {
+          ok(EFFECT_KEYS.indexOf(k) >= 0, `${c.id}: effect key ${k} is in the vocabulary`);
+          if (k === 'flag') ok(!!FLAGS[step[k]], `${c.id}: flag ${step[k]} is documented`);
+          if (k === 'gear') ok(!!M.gear.GEAR_BY_ID[step[k]], `${c.id}: gear ${step[k]} exists`);
+          if (k === 'item') ok(!!M.items.ITEM_BY_ID[step[k]], `${c.id}: item ${step[k]} exists`);
+          if (k === 'animal') {
+            ok(step[k] === 'wild' || !!M.animals.ANIMAL_BY_ID[step[k]],
+              `${c.id}: animal ${step[k]} exists`);
+          }
+        }
+      }
+    }
+    // NO OPTION IS FREE. An option that only gives is a prize with extra reading.
+    const gives = c.options.map((o) => o.effects.some((e) => (e.money > 0) || e.gear || e.item
+      || e.animal || e.loyal || e.beds || e.berths || (e.hull > 0) || (e.tide < 0)));
+    const takes = c.options.map((o) => o.effects.some((e) => (e.money < 0) || e.lose
+      || (e.hull < 0) || (e.tide > 0) || e.flag));
+    for (let i = 0; i < c.options.length; i++) {
+      ok(gives[i] || takes[i], `${c.id}: option ${i} moves something`);
+      ok(takes[i] || (c.options[i].cost || '').length > 0,
+        `${c.id}: option ${i} that only gives at least admits it`);
+    }
+  }
+  ok(CHOICES.length >= 8, 'enough encounters to fill a voyage', String(CHOICES.length));
+  ok(CHOICES.filter((c) => c.needs).length >= 3,
+    'and some of them are pay-offs for earlier ones',
+    String(CHOICES.filter((c) => c.needs).length));
+
+  // --- every effect key does something real
+  {
+    const mk = () => { const x = V.newVoyage('EFF'); x.money = 20; return x; };
+    let v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.chartroom, 1);        // money + flag
+    ok(v1.money > 20, 'money moves the purse');
+    ok(v1.flags.greedy, 'a flag sticks');
+    ok(V.gardenSize(v1) < V.gardenSize(mk()), 'and the greedy flag really shrinks the garden');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.dove, 0);             // an animal aboard
+    ok(v1.aboard.indexOf('dove') >= 0, 'an animal joins the deck');
+
+    v1 = mk();
+    const before = V.floodPerLeg(v1);
+    CH.applyOption(v1, CHOICE_BY_ID.dove, 1);             // the dove flag
+    ok(v1.flags.dove && V.floodPerLeg(v1) < before,
+      'letting the dove go really slows the flood', `${before} -> ${V.floodPerLeg(v1)}`);
+
+    v1 = mk();
+    const cap0 = V.capacity(v1), hull0 = v1.hull;
+    CH.applyOption(v1, CHOICE_BY_ID.pens_broken, 0);      // berths + hull damage
+    ok(V.capacity(v1) > cap0, 'berths moves the pens');
+    ok(v1.hull < hull0, 'and it cost the hull');
+
+    v1 = mk();
+    const deck0 = v1.aboard.length;
+    CH.applyOption(v1, CHOICE_BY_ID.pens_broken, 1);      // lose one
+    ok(v1.aboard.length === deck0 - 1, 'lose really takes one off the deck');
+    ok(v1.lost.length === 1, 'and it is on the list of the lost');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.gate_oath, 0);        // loyal + a flag
+    ok(v1.loyal.length === 2, 'loyal makes two of them loyal');
+    ok(CH.gatesOpen(v1) === 4, 'and swearing opens a fourth door');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.the_kind_word, 0);    // an item
+    ok(v1.hold.indexOf('green_apple') >= 0, 'an item lands in the basket');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.shepherd_returns, 0); // gear
+    ok(v1.slots.hold && v1.slots.hold.id === 'long_crook', 'gear is equipped');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.raft, 2);             // tide + beds
+    ok(v1.flood > 0, 'tide really lets the water in');
+    ok(V.gardenSize(v1) > V.gardenSize(mk()), 'and beds really grow the garden');
+
+    v1 = mk();
+    CH.applyOption(v1, CHOICE_BY_ID.whale, 0);            // the whale
+    const r1 = M.rescue.newRescue(v1, M.islands.ISLANDS[0], 'w');
+    ok(r1.spare >= 1, 'the whale shadows you into a rescue');
+  }
+
+  // --- reputation is felt at every blanket
+  {
+    const kind = V.newVoyage('REP-K');
+    const mean = V.newVoyage('REP-R');
+    kind.flags.kind = true;
+    mean.flags.robbed = true;
+    ok(M.garden.priceOf(kind, 10) < 10, 'a kindness knocks a coin off');
+    ok(M.garden.priceOf(mean, 10) > 10, 'and a theft puts two on');
+    kind.summoned.push('snake'); mean.summoned.push('snake');
+    M.garden.enterGarden(kind); M.garden.enterGarden(mean);
+    const k0 = (kind.deals.snake || [])[0];
+    const m0 = (mean.deals.snake || [])[0];
+    if (k0 && m0 && k0.id === m0.id) ok(m0.price > k0.price, 'and the snake really charges more');
+  }
+
+  // --- rolling: never twice running, never the same one twice, gated on flags
+  {
+    const v1 = V.newVoyage('ROLL');
+    const island = M.islands.ISLANDS[0];
+    ok(CH.rollEncounter(v1, M.islands.CHERUBIM) === null, 'nothing happens on the way to the gate');
+    let got = 0, dupes = 0;
+    const seen = new Set();
+    for (let leg = 0; leg < 40; leg++) {
+      v1.stats.legs = leg;
+      v1.leg = (leg % 4) + 1;
+      v1.chapter = 1 + Math.floor(leg / 4);
+      const e = CH.rollEncounter(v1, island);
+      if (!e) continue;
+      if (seen.has(e.id)) dupes++;
+      seen.add(e.id);
+      if (e.needs && !v1.flags[e.needs]) dupes++;
+      CH.applyOption(v1, e, 0);
+      got++;
+    }
+    ok(dupes === 0, 'no encounter repeats and none jumps its gate', String(dupes));
+    ok(got >= 4, 'a voyage sees several of them', String(got));
+    const v2 = V.newVoyage('ROLL2');
+    v2.stats.legs = 5;
+    v2.lastEncounter = 5;
+    ok(CH.rollEncounter(v2, island) === null, 'and never two legs running');
+  }
+
+  // --- the flags are all documented, and all of them are reachable
+  {
+    const used = new Set();
+    for (const c of CHOICES) {
+      for (const o of c.options) {
+        for (const step of o.effects) if (step.flag) used.add(step.flag);
+      }
+    }
+    for (const k of Object.keys(FLAGS)) ok(used.has(k), `flag ${k} is reachable from a choice`);
+    for (const k of used) ok(!!FLAGS[k], `flag ${k} is documented`);
+  }
+}
+
 /* ------------------------------------------------------------ render smoke */
 
 if (section('render') && M.pixel) {
@@ -1462,6 +1619,11 @@ if (section('render') && M.pixel) {
     })],
     ['ocean', '../src/scenes/ocean.js', 'makeOceanScene', () => ({
       voyage: M.voyage.newVoyage('RENDER-ocean'), onArrive: () => {}, onOver: () => {},
+    })],
+    ['choice', '../src/scenes/choice.js', 'makeChoiceScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-choice'),
+      encounter: M.choicedata.CHOICE_BY_ID.raft,
+      island: M.islands.ISLAND_BY_ID.swamp, onDone: () => {},
     })],
     ['island', '../src/scenes/island.js', 'makeIslandScene', () => ({
       voyage: M.voyage.newVoyage('RENDER-island'),

@@ -101,6 +101,7 @@ function where() {
   const d = dbg();
   if (d.scriptId !== undefined) return 'cutscene';
   if (d.rescue) return 'island';
+  if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
   if (d.rects && d.rects.cards && d.at && d.at.isles) return 'ocean';
   if (d.won !== undefined) return 'summary';
@@ -274,6 +275,32 @@ function playIsland() {
 }
 
 /**
+ * A decision on the way in. The bot rotates which option it takes so a long run of
+ * voyages exercises every branch -- including the ones that set the flags the later
+ * encounters need, which is the only way the follow-ups ever get played at all.
+ */
+function playChoice() {
+  paint();
+  const d = dbg();
+  const cards = (d.rects && d.rects.cards) || [];
+  if (!cards.length) { errors.push('choice: no options to take'); return false; }
+  snap('choice');
+  const pick = (d.voyage.stats.legs + cards.length) % cards.length;
+  const [x, y] = centre(cards[pick]);
+  clickAt(x, y);
+  tick(6);
+  paint();
+  if (dbg().taken !== pick) errors.push('choice: clicking an option did not take it');
+  if (!(dbg().told || []).length) errors.push('choice: an option reported doing nothing');
+  const go = dbg().rects && dbg().rects.go;
+  if (!go) { errors.push('choice: no way ashore'); return false; }
+  const [gx, gy] = centre(go);
+  clickAt(gx, gy);
+  tick(8);
+  return true;
+}
+
+/**
  * The garden. Stow what the boat is carrying, open a gate if one is on offer, buy
  * whatever we can afford, then back to sea.
  */
@@ -366,7 +393,7 @@ function playVoyage(seed) {
   router.menu();
   tick(4);
 
-  const seen = { cutscene: 0, ocean: 0, island: 0, eden: 0 };
+  const seen = { cutscene: 0, ocean: 0, island: 0, eden: 0, choice: 0 };
   // click NEW RUN to prove the button works, then start OUR seed on purpose: the menu's
   // own seed is derived from a fixed string, so every voyage the bot played by clicking
   // through the title screen was the same voyage.
@@ -381,6 +408,7 @@ function playVoyage(seed) {
     if (process.env.TRACE) console.log('   step', guard, w, Object.keys(dbg()).join(','));
     if (w === 'cutscene') { seen.cutscene++; playCutscene(); continue; }
     if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
+    if (w === 'choice') { seen.choice++; playChoice(); continue; }
     if (w === 'island') { seen.island++; playIsland(); continue; }
     if (w === 'eden') { seen.eden++; playEden(); continue; }
     if (w === 'summary') { playSummary(); break; }
@@ -409,7 +437,9 @@ for (let i = 0; i < SEEDS; i++) {
   const s = v.stats;
   const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
-    + `  paths ${s.obstaclesCleared}  [ocean ${out.seen.ocean} island ${out.seen.island} eden ${out.seen.eden}]`;
+    + `  paths ${s.obstaclesCleared}`
+    + `  [ocean ${out.seen.ocean} island ${out.seen.island} eden ${out.seen.eden}`
+    + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;
   if (errors.length) {
     failed++;
     console.log(`  ${line}   <-- ${errors.length} error(s)`);

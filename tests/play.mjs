@@ -105,6 +105,32 @@ function chooseShot(world, gates) {
   return best;
 }
 
+/**
+ * The ramp: pick the eight head with the best board coverage. The scene's own
+ * auto-fill does exactly this, so the bot mostly exists to prove that CLICKING the
+ * cards works -- it takes four by hand and lets the fill finish the job.
+ */
+function playDraft(app) {
+  const d = app.scene.debug();
+  snap('ramp');
+  const rects = d.rects.cards || [];
+  let taken = 0;
+  for (let i = 0; i < rects.length && taken < 4; i++) {
+    const r = rects[i];
+    if (!r) continue;
+    const [cx, cy] = centre(r);
+    pressAt(cx, cy); tick(app, 2); releaseNow(); tick(app, 2);
+    taken++;
+  }
+  const after = app.scene.debug();
+  if (after.chosen.length !== taken) errors.push(`ramp: clicked ${taken} cards, chose ${after.chosen.length}`);
+  const [bx, by] = centre(d.rects.board);
+  pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 8);
+  const run = after.run || null;
+  void run;
+  return 'boarded';
+}
+
 function playDeck(app, log) {
   let guard = 0;
   while (guard++ < 400) {
@@ -242,6 +268,7 @@ for (let s = 0; s < SEEDS; s++) {
   for (let guard = 0; guard < 80; guard++) {
     const d = app.scene.debug ? app.scene.debug() : {};
     if (d.scriptId !== undefined) { playCutscene(app, d.scriptId); continue; }  // dialogue
+    if (d.stock !== undefined) { playDraft(app); continue; }             // the ramp
     if (d.rects && d.rects.crates) { playDock(app); continue; }         // dock
     if (d.rects && d.rects.again) {                                      // summary
       outcome = d.won ? 'WON THE RUN' : `died on ante ${d.run.ante}`;

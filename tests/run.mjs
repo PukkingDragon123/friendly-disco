@@ -471,6 +471,50 @@ if (section('physics') && M.physics) {
 
 /* ------------------------------------------------------------------ scoring */
 
+if (section('draft') && M.run && M.animals) {
+  const A = M.animals, R = M.run;
+  ok(Array.isArray(A.STARTER_STOCK) && A.STARTER_STOCK.length === 13, 'stock is 13 head', A.STARTER_STOCK && A.STARTER_STOCK.length);
+  ok(A.DRAFT_SIZE === 8, 'the ramp takes 8', A.DRAFT_SIZE);
+  ok((A.STARTER_STOCK || []).every((id) => A.ANIMAL_BY_ID[id]), 'stock ids all real');
+  const counts = {};
+  for (const id of A.STARTER_STOCK || []) counts[id] = (counts[id] || 0) + 1;
+  ok(counts.chicken === 5 && counts.pig === 3 && counts.cow === 3 && counts.sheep === 2,
+    'stock is 5 chickens, 3 pigs, 3 cows, 2 sheep', JSON.stringify(counts));
+  // the four species must want DIFFERENT things, or the draft is a coin flip
+  const sig = ['chicken', 'pig', 'cow', 'sheep'].map((id) => (A.ANIMAL_BY_ID[id].likes || []).join('/'));
+  ok(new Set(sig).size === 4, 'the four starter species want different conditions', sig.join(' | '));
+
+  const run = R.newRun('DRAFT-SPEC');
+  ok(run.caravan.length === 0, 'a fresh run boards nothing until the draft', run.caravan.length);
+  const d = R.beginDraft(run);
+  ok(d.stock.length === 13 && d.size === 8, 'beginDraft reports the stock and the ramp size');
+  ok(Object.keys(d.assignment).length === 6, 'the draft previews six berths');
+  // the preview must be stable: it cannot re-roll under the player mid-decision
+  const again = R.beginDraft(run);
+  ok(JSON.stringify(again.assignment) === JSON.stringify(d.assignment), 'the previewed board never re-rolls');
+  // and it must be reachable by the stock, or the preview is a lie
+  let reachable = 0;
+  for (const hid of Object.values(d.assignment)) {
+    if (d.stock.some((id) => M.habitats.likeness(A.ANIMAL_BY_ID[id], hid) >= 0.999)) reachable++;
+  }
+  ok(reachable >= 2, 'at least two previewed berths are a favourite of something you own', reachable);
+
+  R.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
+  ok(run.caravan.length === 8, 'the ramp takes exactly eight', run.caravan.length);
+  ok(run.left.length === 5, 'five are left on the bank', run.left.length);
+  ok(run.drafted === true, 'the run knows it has been drafted');
+  // duplicate and out-of-range indices must not corrupt the caravan
+  const r2 = R.newRun('DRAFT-SPEC-2');
+  R.beginDraft(r2);
+  R.commitDraft(r2, [0, 0, 0, 99, -1, 1, 2, 3, 4, 5, 6, 7, 8]);
+  ok(r2.caravan.length === 8, 'duplicate and bogus indices are dropped, not counted', r2.caravan.length);
+  ok(new Set(r2.caravan).size <= 8, 'no index is drafted twice');
+  // a blind must rack the drafted caravan and nothing else
+  R.startBlind(r2);
+  ok(r2.hand.length + r2.stash.length === 8, 'a blind racks exactly what boarded',
+    `${r2.hand.length}+${r2.stash.length}`);
+}
+
 if (section('flood') && M.flood) {
   const F = M.flood;
   // dry until the water is over the rail, then one pool per step, never a wall of them
@@ -540,7 +584,7 @@ if (section('scoring') && M.scoring && M.animals) {
   }, extra));
 
   const sheep = A.ANIMAL_BY_ID.sheep;
-  const exact = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'tame' } }]);
+  const exact = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'bushy' } }]);
   const wrong = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'briny' } }]);
   ok(exact.totalScore > wrong.totalScore * 3, 'exact habitat pays far more than wrong', `${exact.totalScore} vs ${wrong.totalScore}`);
   ok(exact.entries[0].match === 'exact', 'exact match detected');
@@ -548,9 +592,9 @@ if (section('scoring') && M.scoring && M.animals) {
   ok(exact.totalMoney >= 1, 'exact pot pays money');
 
   const combo = mk([
-    { ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'tame' } },
+    { ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'bushy' } },
     { ball: { bounces: 0 }, animalId: 'cow', gate: { habitatId: 'tame' } },
-    { ball: { bounces: 0 }, animalId: 'pig', gate: { habitatId: 'tame' } },
+    { ball: { bounces: 0 }, animalId: 'pig', gate: { habitatId: 'soaked' } },
   ]);
   ok(combo.totalScore > exact.totalScore * 3, 'combos compound', `${combo.totalScore}`);
   ok(combo.perfect === true, 'all-exact multi-pot is perfect');
@@ -595,6 +639,13 @@ if (section('scoring') && M.scoring && M.animals) {
 function autoPlay(seed, verbose) {
   const PH = M.physics, A = M.animals, T = M.table;
   const run = M.run.newRun(seed);
+  // the bot has to walk up the ramp like everyone else: take the eight head with the
+  // best coverage of the previewed board
+  const d = M.run.beginDraft(run);
+  const open = Object.values(d.assignment);
+  const cover = (id) => (A.ANIMAL_BY_ID[id].likes || []).filter((tr) => open.indexOf(tr) >= 0).length;
+  const order = d.stock.map((id, i) => i).sort((x, y) => cover(d.stock[y]) - cover(d.stock[x]));
+  M.run.commitDraft(run, order.slice(0, d.size));
   const world = PH.createWorld({});
   const log = [];
 

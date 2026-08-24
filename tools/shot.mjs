@@ -21,7 +21,7 @@ const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 
 // run.js pulls in every data module, so only load it for the scenes that need it
-const NEEDS_RUN = ['table', 'shop', 'over'];
+const NEEDS_RUN = ['table', 'shop', 'over', 'draft'];
 void NEEDS_RUN;
 let newRun = () => ({}), startBlind = () => {}, advance = () => {};
 if (NEEDS_RUN.includes(which)) {
@@ -59,6 +59,17 @@ switch (which) {
       if (d.syncHazards) d.syncHazards();
     }
     mouse(560, 130);
+    break;
+  }
+  case 'draft': {
+    const { makeDraftScene } = await import('../src/scenes/draft.js');
+    scene = makeDraftScene();
+    scene.enter({ run, onDone: () => {} }, app);
+    if (process.env.PICK) {
+      const d = scene.debug();
+      for (const i of process.env.PICK.split(',')) d.toggle(Number(i));
+    }
+    mouse(480, 300);
     break;
   }
   case 'shop': {

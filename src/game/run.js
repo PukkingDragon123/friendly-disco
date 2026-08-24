@@ -5,7 +5,7 @@
 // mutation goes through a function here so relics/vouchers/upgrades have one place to hook.
 
 import { makeRng, randomSeedString } from '../core/rng.js';
-import { ANIMAL_BY_ID, STARTER_DECK } from '../data/animals.js';
+import { ANIMAL_BY_ID, STARTER_STOCK, DRAFT_SIZE } from '../data/animals.js';
 import { HABITATS, HABITAT_BY_ID, GATE_LAYOUT } from '../data/habitats.js';
 import { RELIC_BY_ID } from '../data/relics.js';
 import { ANTES, BLIND_KINDS, blindTarget, rollBoss, neutralEffect } from '../data/blinds.js';
@@ -24,8 +24,15 @@ function baseRun(seed) {
     won: false,
     dead: false,
 
-    // --- caravan
-    caravan: STARTER_DECK.slice(),
+    // --- the flock you own, and the eight you chose to bring
+    //
+    // STOCK is everything on the farm: five chickens, three pigs, three cows, two
+    // sheep. CARAVAN is the eight head you actually walked up the ramp, chosen in the
+    // draft, and it is what a blind racks. The other five stay behind and drown,
+    // which is the first real decision of the run and is not a nice one.
+    stock: STARTER_STOCK.slice(),
+    caravan: [],
+    drafted: false,
     hand: [],                   // animal ids currently racked
     stash: [],                  // caravan ids not yet drawn this blind
     vitrine: {},                // habitatId -> [animal ids] delivered this blind
@@ -122,6 +129,62 @@ export function rollAssignment(run, rng, closed = []) {
   const assignment = {};
   GATE_LAYOUT.forEach((slot, i) => { assignment[slot] = shuffled[i % shuffled.length]; });
   return assignment;
+}
+
+/* ------------------------------------------------------------------ draft */
+
+/**
+ * What the draft screen needs to show.
+ *
+ * The berths for the first blind are rolled HERE, from the stock rather than from the
+ * (still empty) caravan, and cached on the run. That is what turns the draft from a
+ * blind guess into a decision: you can see the six conditions the deck is going to
+ * offer before you pick which eight animals to walk up the ramp.
+ */
+export function beginDraft(run) {
+  if (!run.draftAssignment) {
+    const rng = run.rng.fork('draft');
+    // roll against the stock, since the caravan does not exist yet
+    const saved = run.caravan;
+    run.caravan = run.stock.slice();
+    run.draftAssignment = rollAssignment(run, rng, []);
+    run.caravan = saved;
+  }
+  return {
+    stock: run.stock.slice(),
+    size: DRAFT_SIZE,
+    assignment: run.draftAssignment,
+  };
+}
+
+/**
+ * Commit a set of stock INDICES as the caravan. Indices rather than ids because the
+ * stock has duplicates -- five chickens are five separate animals you can choose
+ * between, not one entry with a count.
+ */
+export function commitDraft(run, indices) {
+  const picked = [];
+  const seen = new Set();
+  for (const i of indices || []) {
+    if (seen.has(i)) continue;
+    const id = run.stock[i];
+    if (!id) continue;
+    seen.add(i);
+    picked.push(id);
+    if (picked.length >= DRAFT_SIZE) break;
+  }
+  // A short draft is legal -- if a harness or an impatient player boards with six, the
+  // run must still work -- but it is never padded behind their back.
+  run.caravan = picked;
+  run.left = run.stock.filter((_, i) => !seen.has(i));
+  run.drafted = true;
+  run.log.push({ text: `${picked.length} aboard, ${run.left.length} left on the bank.`, color: 'brass2' });
+  return run.caravan;
+}
+
+/** How many the ramp still has room for. */
+export function draftRoom(run) {
+  return Math.max(0, DRAFT_SIZE - run.caravan.length);
 }
 
 /* ----------------------------------------------------------------- blinds */

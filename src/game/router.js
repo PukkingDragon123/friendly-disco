@@ -1,4 +1,4 @@
-// Scene routing for a run: menu -> deck -> dock -> deck -> ... -> summary.
+// Scene routing for a run: menu -> ramp -> deck -> Eden -> deck -> ... -> summary.
 //
 // Kept out of main.js so a headless harness can drive the whole game without a DOM
 // bootstrap or a requestAnimationFrame loop. main.js is then just the browser shell.
@@ -9,6 +9,7 @@ import { makeTableScene } from '../scenes/table.js';
 import { makeShopScene } from '../scenes/shop.js';
 import { makeGameOverScene } from '../scenes/gameover.js';
 import { makeCutscene } from '../scenes/cutscene.js';
+import { makeDraftScene } from '../scenes/draft.js';
 import { getScript, anteScript, bossScript } from '../data/story.js';
 
 /**
@@ -35,8 +36,18 @@ export function createRouter(app, o = {}) {
     startRun(seed) {
       run = newRun(seed);
       if (o.onRun) o.onRun(run);
-      // The prologue, then the lesson, then the deck. Both are one-shot per run.
-      R.play(getScript('prologue'), () => R.play(getScript('tutorial'), () => R.deck()));
+      // Noah's problem, then the ramp (pick eight of thirteen), then the lesson, then
+      // the deck. The draft sits BEFORE the tutorial on purpose: the tutorial explains
+      // berth traits, and you have just spent a minute reading them off a board.
+      R.play(getScript('prologue'), () => R.draft());
+    },
+
+    /** The ramp: choose which eight head of stock board the ark. */
+    draft() {
+      go(makeDraftScene(), {
+        run,
+        onDone: () => R.play(getScript('tutorial'), () => R.deck()),
+      }, 'curtain');
     },
 
     /** Play a dialogue script, then continue. A null script just continues. */

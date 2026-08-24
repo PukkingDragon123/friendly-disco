@@ -1184,7 +1184,36 @@ const TAG_LIKES = [
   ['armored', 'dusty'],
 ];
 
+// Where derivation is not good enough. A biome plus tags gets 86 of the 90 animals
+// right, but the four head of starter stock ALL derive to tame-first, which would make
+// the opening draft a choice between four identical animals. These are hand-set so the
+// first decision in the run is a real one, and a few others earn an override because a
+// tag is doing a poor job of describing what the animal actually wants.
+const LIKES_OVERRIDE = {
+  chicken: ['tame', 'lofty', 'dusty'],    // roosts high, bathes in dust
+  pig:     ['soaked', 'tame', 'gloomy'],  // the wallow comes first and it is not close
+  cow:     ['tame', 'bushy', 'warm'],     // pasture and a warm barn
+  sheep:   ['bushy', 'tame', 'lofty'],    // hill grazing
+  camel:   ['dusty', 'warm', 'lofty'],
+  hippo:   ['soaked', 'warm', 'tame'],
+  owl:     ['gloomy', 'bushy', 'lofty'],
+  bat:     ['gloomy', 'lofty', 'warm'],
+  mole:    ['gloomy', 'soaked', 'tame'],
+  penguin: ['frozen', 'briny', 'tame'],
+  seal:    ['briny', 'frozen', 'soaked'],
+  goat:    ['lofty', 'dusty', 'tame'],    // it is on the roof again
+  duck:    ['soaked', 'tame', 'lofty'],
+  beaver:  ['soaked', 'bushy', 'gloomy'],
+  crab:    ['briny', 'soaked', 'dusty'],
+  dove:    ['lofty', 'bushy', 'tame'],
+  raven:   ['gloomy', 'lofty', 'dusty'],
+  locust:  ['dusty', 'warm', 'bushy'],
+  scarab:  ['dusty', 'gloomy', 'warm'],
+};
+
 function deriveLikes(a) {
+  const forced = LIKES_OVERRIDE[a.id];
+  if (forced) return forced.slice();
   const seed = BIOME_LIKES[a.home] || ['tame', 'warm', 'bushy'];
   const promoted = [];
   const tags = a.tags || [];
@@ -1246,12 +1275,29 @@ export function animalsByTag(tag) {
 }
 const EMPTY = Object.freeze([]);
 
-/* ------------------------------------------------------------ starter deck */
+/* ----------------------------------------------------------- starter stock */
 
-// 22 head of stock: two habitats deep enough to actually score (farm, forest), a
-// spread of four more so no gate roll is a dead blind, and deliberate pairs —
-// fox + two rabbits (an eat), cow + pig + chicken (a set), sheep x2 + sheepdog
-// (a flock), chicken x2 (a flock). One uncommon so the caravan is not flat.
+// The farm. Not a deck -- a FLOCK, and a bigger one than you can take.
+//
+// Five chickens, three pigs, three cows, two sheep: thirteen head, and the ramp only
+// takes eight. Everything left on the bank drowns, so the first decision of the run is
+// which five animals you are not going to save. The four species are deliberately
+// hand-tuned in LIKES_OVERRIDE to want different conditions -- chickens roost high and
+// dust-bathe, pigs want the wallow before anything else, cows want pasture and a warm
+// barn, sheep want hillside scrub -- because a draft between four identical animals is
+// not a draft.
+export const STARTER_STOCK = [
+  'chicken', 'chicken', 'chicken', 'chicken', 'chicken',
+  'pig', 'pig', 'pig',
+  'cow', 'cow', 'cow',
+  'sheep', 'sheep',
+];
+
+/** How many head the ramp takes. */
+export const DRAFT_SIZE = 8;
+
+// Kept as the old name for anything that just wants a plausible spread of ids (the
+// physics rack self-test, balance fuzzing). It is not what a run starts with.
 export const STARTER_DECK = [
   'cow', 'pig', 'chicken', 'chicken', 'sheep', 'sheep', 'sheepdog',
   'fox', 'rabbit', 'rabbit', 'deer', 'squirrel', 'hedgehog',
@@ -1261,8 +1307,6 @@ export const STARTER_DECK = [
   'marmot',
   'fennecfox',
 ];
-
-
 
 /* --------------------------------------------------------------- the roller */
 

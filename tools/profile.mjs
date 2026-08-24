@@ -9,7 +9,7 @@ const { SoftCanvas } = await import('./softcanvas.mjs');
 const { W, H } = await import('../src/core/pixel.js');
 
 const which = process.argv.slice(2);
-const SCENES = which.length ? which : ['menu', 'deck-dry', 'deck-flood', 'eden', 'draft', 'dock', 'cut', 'ocean'];
+const SCENES = which.length ? which : ['menu', 'deck-dry', 'deck-flood', 'eden', 'draft', 'dock', 'cut', 'ocean', 'island'];
 
 const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
@@ -58,6 +58,15 @@ for (const name of SCENES) {
     voyage.aboard = voyage.stock.slice(0, V.capacity(voyage));
     V.rollChoices(voyage);
     scene = makeOceanScene(); scene.enter({ voyage, onArrive() {}, onOver() {} }, app);
+  } else if (name === 'island') {
+    const V = await import('../src/game/voyage.js');
+    const I = await import('../src/data/islands.js');
+    const { makeIslandScene } = await import('../src/scenes/island.js');
+    const voyage = V.newVoyage('PROF-0001');
+    for (const k of V.UPGRADE_IDS) voyage.tiers[k] = 3;
+    const island = I.ISLAND_BY_ID.jungle;
+    scene = makeIslandScene(); scene.enter({ voyage, island, onDone() {} }, app);
+    scene.debug().advance(4);
   } else if (name === 'sea') {
     const { createSeascape } = await import('../src/render/seascape.js');
     const sea = createSeascape('prof/sea', {});

@@ -493,13 +493,66 @@ function drawMud(g, x, dy, dw, dh, sc, t, amt) {
 }
 
 /** Cozy magic motes, used by the cherubim and by the shepherd wand. */
-function drawSparkle(g, x, y, sc, t, amt) {
+export function drawSparkle(g, x, y, sc, t, amt) {
   const n = Math.round(3 + clamp(amt, 0, 1) * 4);
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + t * 1.1;
     const r = (7 + Math.sin(t * 2 + i) * 4) * sc;
     const sx = x + Math.cos(a) * r, sy = y + Math.sin(a) * r * 0.6;
     px(g, sx, sy, i % 3 === 0 ? 'magic2' : i % 3 === 1 ? 'magic1' : 'gold');
+  }
+}
+
+/* -------------------------------------------------------------- the shepherd wand
+
+The tool the golem points at an animal. It replaced a pool cue, and the difference is
+the whole feel of the game: a cue is a stick you hit something with, and a crook is
+something you guide an animal home with. So it is short, warm, wooden, and it does its
+work in light rather than in force.
+
+Drawn live rather than baked -- it is about thirty pixels and its whole job is to move.
+*/
+
+/**
+ * drawWand(g, x, y, angle, charge, t)
+ *   x, y     the hand
+ *   angle    where it points
+ *   charge   0..1 how much power is wound into the flick
+ *   o        { scale }
+ */
+export function drawWand(g, x, y, angle, charge = 0, t = 0, o = {}) {
+  const ch = clamp(charge, 0, 1);
+  const sc = Math.max(1, Math.round(o.scale || 1));
+  const len = (20 + ch * 5) * sc;
+  const ca = Math.cos(angle), sa = Math.sin(angle);
+  const tipX = x + ca * len, tipY = y + sa * len;
+
+  // the shaft, tapering, with a bound grip at the hand
+  for (let i = 0; i < len; i++) {
+    const f = i / len;
+    const px2 = x + ca * i, py2 = y + sa * i;
+    for (let k = 0; k < sc; k++) {
+      px(g, px2 - sa * k, py2 + ca * k, f < 0.28 ? 'wood1' : f < 0.7 ? 'wood2' : 'wood3');
+    }
+    if (f < 0.28 && i % 3 === 0) px(g, px2 - sa * sc, py2 + ca * sc, 'brass1');
+  }
+  // the crook: a half curl off the tip, which is what makes it a shepherd's
+  for (let k = 0; k < 7 * sc; k++) {
+    const a = angle - 0.5 + (k / sc) * 0.42;
+    px(g, tipX + Math.cos(a) * 4 * sc, tipY + Math.sin(a) * 4 * sc, k < 2 * sc ? 'wood3' : 'wood4');
+  }
+  // the light in the crook
+  const glow = 0.4 + ch * 0.6;
+  const gx = tipX + ca * 3 * sc, gy = tipY + sa * 3 * sc;
+  if (glow > 0.5) disc(g, gx, gy, 2 * sc, 'magic1');
+  disc(g, gx, gy, sc, 'magic2');
+  drawSparkle(g, gx, gy, sc, t, 0.3 + ch);
+  // and, while it is charged, a couple of motes running UP the shaft toward the crook
+  if (ch > 0.02) {
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 2.2 + i / 3) % 1;
+      px(g, x + ca * ph * len, y + sa * ph * len, i % 2 ? 'magic1' : 'gold');
+    }
   }
 }
 

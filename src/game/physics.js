@@ -101,6 +101,8 @@ export function createWorld(opts = {}) {
     driftY: num(o.driftY, 0),
     cue: null,                          // optional: this game has no dedicated cue ball
     hazards: null,                      // {pools, storm} from game/flood.js, or null
+    posts: [],                          // static circles: boulders, trunks, columns
+    zones: [],                          // ground that changes the rules: mud, ice, current
     time: 0,
     shotId: 0,
     nextId: 1,
@@ -187,6 +189,61 @@ export function setHazards(world, hazards) {
   return world.hazards;
 }
 
+/**
+ * Static circles the balls bounce off: a boulder, a fallen trunk, a broken column.
+ *
+ * A post is a ball of infinite mass, which is why this is eleven lines rather than a
+ * second solver -- the same normal, the same separation, no impulse shared back. `e` is
+ * per post because a mossy trunk should not throw an animal the way bare rock does.
+ */
+export function setPosts(world, posts) {
+  if (!world) return [];
+  const out = [];
+  for (const p of posts || []) {
+    if (!p || p.gone) continue;
+    out.push({
+      id: p.id != null ? p.id : `p${out.length}`,
+      x: num(p.x, 0), y: num(p.y, 0), r: Math.max(1, num(p.r, 10)),
+      e: clamp(num(p.e, 0.62), 0, 1), kind: p.kind || 'rock', data: p.data || null,
+    });
+  }
+  world.posts = out;
+  return out;
+}
+
+/**
+ * Ground that changes the rules inside a circle. `physics` is one of the words in
+ * data/obstacles.js and each one is a couple of lines in rollStep:
+ *
+ *   slow    heavy drag: you cross, and arrive with nothing left
+ *   slick   almost no friction: you do not stop where you meant to
+ *   push    a steady shove along `angle` -- a current, a gale
+ *   pull    dragged toward the middle, and the middle keeps what it gets
+ *   kill    an animal that comes to rest in it is lost
+ *   gap     open air: an animal that enters it is gone at once
+ *   strike  lightning comes back to this patch of ground
+ *
+ * The last three do nothing to the motion. They emit a `zone` event on entry and the
+ * scene decides what that costs, because "lost" is a game rule, not a physics one.
+ */
+export function setZones(world, zones) {
+  if (!world) return [];
+  const out = [];
+  for (const z of zones || []) {
+    if (!z || z.gone) continue;
+    out.push({
+      id: z.id != null ? z.id : `z${out.length}`,
+      x: num(z.x, 0), y: num(z.y, 0), r: Math.max(1, num(z.r, 12)),
+      physics: z.physics || 'slow',
+      strength: num(z.strength, 1),
+      angle: num(z.angle, 0),
+      kind: z.kind || null, data: z.data || null,
+    });
+  }
+  world.zones = out;
+  return out;
+}
+
 export function setGates(world, gates) {
   if (!world) return [];
   const out = [];
@@ -211,6 +268,52 @@ export function setCue(world, ball) {
 
 /* ------------------------------------------------------------------- motion */
 
+/**
+ * How much the ground under this ball scales the friction. Mud multiplies it, ice
+ * divides it, and everywhere else is 1 -- which is the common case and costs one loop
+ * over a list that is usually three long.
+ */
+function zoneFriction(world, b) {
+  const zs = world.zones;
+  if (!zs || !zs.length) return 1;
+  let f = 1;
+  for (const z of zs) {
+    if (z.physics !== 'slow' && z.physics !== 'slick') continue;
+    const dx = b.x - z.x, dy = b.y - z.y;
+    if (dx * dx + dy * dy > z.r * z.r) continue;
+    f *= z.physics === 'slow' ? (1 + 5.5 * z.strength) : (0.12 / Math.max(0.2, z.strength));
+  }
+  return f;
+}
+
+/** The currents: a steady shove one way, or a drag toward a middle that keeps things. */
+function zoneForce(world, b, h, out) {
+  const zs = world.zones;
+  out.x = 0; out.y = 0;
+  if (!zs || !zs.length) return out;
+  for (const z of zs) {
+    if (z.physics !== 'push' && z.physics !== 'pull') continue;
+    const dx = b.x - z.x, dy = b.y - z.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > z.r * z.r) continue;
+    const fall = 1 - Math.sqrt(d2) / z.r;
+    if (z.physics === 'push') {
+      const f = TUNING.waterPull * 1.6 * z.strength * fall * h;
+      out.x += Math.cos(z.angle) * f;
+      out.y += Math.sin(z.angle) * f;
+    } else {
+      const d = Math.sqrt(d2);
+      if (d < 0.01) continue;
+      const f = TUNING.waterPull * 2.2 * z.strength * fall * h;
+      out.x -= (dx / d) * f;
+      out.y -= (dy / d) * f;
+    }
+  }
+  return out;
+}
+
+const ZF = { x: 0, y: 0 };
+
 /** One sub-step of pure motion for one ball: english, friction, drift, translate. */
 function rollStep(b, h, world) {
   let vx = b.vx, vy = b.vy;
@@ -228,12 +331,15 @@ function rollStep(b, h, world) {
     // Rolling friction: constant term + linear drag. The constant term is the important
     // one — it is what lets a ball reach exactly zero instead of asymptotically crawling.
     const sp2 = hyp(vx, vy);
-    const dec = (TUNING.rollA + TUNING.dragK * sp2) * Math.max(0.05, num(world.friction, 1)) * h;
+    const dec = (TUNING.rollA + TUNING.dragK * sp2)
+      * Math.max(0.05, num(world.friction, 1)) * zoneFriction(world, b) * h;
     if (sp2 <= dec) { vx = 0; vy = 0; } else { const f = (sp2 - dec) / sp2; vx *= f; vy *= f; }
     b.spin = spin * (1 - TUNING.spinDecay * h);
   }
   vx += num(world.driftX, 0) * h;
   vy += num(world.driftY, 0) * h;
+  zoneForce(world, b, h, ZF);
+  vx += ZF.x; vy += ZF.y;
 
   // --- standing water and the hurricane (game/flood.js supplies world.hazards)
   const hz = world.hazards;
@@ -329,6 +435,60 @@ function rails(world, b, events) {
   else if (b.x > world.w - b.r) railHit(world, b, 'right', -1, 0, b.x - (world.w - b.r), events);
   if (b.y < b.r) railHit(world, b, 'top', 0, 1, b.r - b.y, events);
   else if (b.y > world.h - b.r) railHit(world, b, 'bottom', 0, -1, b.y - (world.h - b.r), events);
+}
+
+/**
+ * A ball against a post. Same maths as a cushion: separate along the normal, reflect the
+ * normal component, leave the tangent alone. The post never moves, so there is no
+ * impulse to share back -- which is the whole reason a boulder is a post and not a very
+ * heavy ball.
+ */
+function posts(world, b, events) {
+  const ps = world.posts;
+  if (!ps || !ps.length) return;
+  for (const p of ps) {
+    const dx = b.x - p.x, dy = b.y - p.y;
+    const rr = b.r + p.r;
+    const d2 = dx * dx + dy * dy;
+    if (d2 >= rr * rr) continue;
+    const d = Math.sqrt(d2) || 0.0001;
+    const nx = dx / d, ny = dy / d;
+    b.x = p.x + nx * rr;
+    b.y = p.y + ny * rr;
+    const vn = b.vx * nx + b.vy * ny;
+    if (vn >= 0) continue;
+    const speed = -vn;
+    b.vx -= (1 + p.e) * vn * nx;
+    b.vy -= (1 + p.e) * vn * ny;
+    b.spin = num(b.spin, 0) * 0.6;
+    b.squash = Math.min(TUNING.squashMax, num(b.squash, 0) + speed / 380);
+    b.lastHit = { kind: 'post', id: p.id };
+    if (speed >= TUNING.railCountMin) b.bounces = num(b.bounces, 0) + 1;
+    if (hyp(b.vx, b.vy) >= TUNING.stopSpeed) b.resting = false;
+    if (speed >= TUNING.railEventMin && events) {
+      events.push({ type: 'post', ball: b, post: p, speed, x: b.x, y: b.y });
+    }
+  }
+}
+
+/**
+ * Which zone a ball is standing in, and an event the FIRST sub-step it arrives. Only on
+ * change, because "entered the deep water" is one thing that happened and reporting it
+ * sixty times a second is not.
+ */
+function zoneEnter(world, b, events) {
+  const zs = world.zones;
+  if (!zs || !zs.length) { b.zone = null; return; }
+  let now = null;
+  for (const z of zs) {
+    const dx = b.x - z.x, dy = b.y - z.y;
+    if (dx * dx + dy * dy <= z.r * z.r) { now = z; break; }
+  }
+  const was = b.zone || null;
+  b.zone = now;
+  if (now && now !== was && events) {
+    events.push({ type: 'zone', ball: b, zone: now, x: b.x, y: b.y, speed: hyp(b.vx, b.vy) });
+  }
 }
 
 /* -------------------------------------------------------------------- gates */
@@ -522,7 +682,9 @@ function integrate(world, h, events) {
     rollStep(b, h, world);
     const g = gateAlong(world, b, px, py);
     if (g) { sinkBall(world, b, g, events); continue; }
+    posts(world, b, events);
     rails(world, b, events);
+    zoneEnter(world, b, events);
   }
   // 2. contacts and 3. de-overlap
   collide(world, events);

@@ -463,10 +463,98 @@ function bakeBack(island, w, h, horizon) {
     rect(b, 0, y, w, 1, mix(P[G[i]], P[G[i + 1]], f * (G.length - 1) - i));
     if (y % 7 === 3) rect(b, 0, y, w, 1, mix(P[G[i]], P.white, 0.05));
   }
+  groundDetail(b, island, groundY, w, h);
   // scenery along the shoreline, at backdrop scale
   scenery(b, island, w * 0.22, groundY + 6, w * 0.5, h * 0.4, 2);
   scenery(b, island, w * 0.78, groundY + 4, w * 0.45, h * 0.35, 2);
   return mk.canvas;
+}
+
+/* ------------------------------------------------------------- ground detail
+
+A rescue is played on this, so it cannot be a painted rectangle: a flat field makes the
+animals look like counters on a board. It is all baked into the backdrop, so the texture
+is free at run time -- a few hundred pixels of tuft, pebble, crack and ripple, chosen by
+biome and placed by a hash so the same island always looks like itself.
+*/
+function groundDetail(b, island, y0, w, h) {
+  const G = island.ground || ['moss', 'leaf2', 'leaf1'];
+  const band = h - y0;
+  if (band < 8) return;
+  let seedN = 7;
+  for (let i = 0; i < island.id.length; i++) seedN += island.id.charCodeAt(i) * (i + 5);
+
+  // big soft patches of a neighbouring tone: the thing that stops it reading as one
+  // colour, and the cheapest texture there is
+  for (let i = 0; i < 16; i++) {
+    const px2 = H2(seedN + i * 3) * w;
+    const py2 = y0 + H2(seedN + i * 5) * band;
+    const rw = 30 + H2(seedN + i * 7) * 90;
+    const rh = 4 + H2(seedN + i * 11) * 10;
+    // kept faint on purpose: any stronger and a patch reads as a stain or a shadow
+    // cast by nothing, which is worse than a flat field
+    const tone = mix(P[G[i % G.length]], i % 3 ? P.ink : P.white, 0.045 + H2(seedN + i) * 0.035);
+    ellipse(b, px2, py2, rw, rh, tone);
+  }
+
+  const biome = island.biome;
+  const n = Math.round((w * band) / 620);
+  for (let i = 0; i < n; i++) {
+    const x = Math.round(H2(seedN + i * 13) * w);
+    const y = Math.round(y0 + H2(seedN + i * 17) * band);
+    const k = H2(seedN + i * 19);
+    switch (biome) {
+      case 'grassland': case 'jungle': case 'sacred':
+        // tufts: three blades leaning the same way
+        for (let j = 0; j < 3; j++) {
+          rect(b, x + j, y - (j === 1 ? 3 : 2), 1, j === 1 ? 3 : 2, k < 0.5 ? 'leaf3' : 'leaf1');
+        }
+        if (k > 0.94) { px(b, x + 1, y - 4, 'gold'); px(b, x, y - 3, 'white'); }
+        break;
+      case 'desert':
+        // wind ripples, and the odd pebble
+        rect(b, x, y, 5 + Math.round(k * 7), 1, mix(P.sand, P.ink, 0.13));
+        if (k > 0.9) { px(b, x, y - 1, 'stone2'); px(b, x + 1, y - 1, 'stone1'); }
+        break;
+      case 'swamp':
+        if (k > 0.6) { ellipse(b, x, y, 4, 2, 'water0'); px(b, x, y, 'leaf2'); }
+        else rect(b, x, y - 3, 1, 3, 'moss');
+        break;
+      case 'snow':
+        if (k > 0.75) { rect(b, x, y, 4, 1, 'white'); px(b, x + 4, y + 1, 'snow0'); }
+        else px(b, x, y, 'ice');
+        break;
+      case 'volcano':
+        if (k > 0.86) { px(b, x, y, 'lava1'); px(b, x + 1, y, 'lava0'); }
+        else { rect(b, x, y, 2 + Math.round(k * 3), 1, 'ash'); px(b, x, y, 'stone0'); }
+        break;
+      case 'ruins':
+        // flagstones, half swallowed
+        if (k > 0.62) {
+          rect(b, x, y, 10, 6, mix(P.stone2, P.ink, 0.12));
+          rect(b, x, y, 10, 1, 'stone3');
+          rect(b, x, y + 5, 10, 1, 'stone0');
+        } else px(b, x, y, 'moss');
+        break;
+      case 'coral':
+        if (k > 0.7) { ellipse(b, x, y, 3, 2, 'coral1'); px(b, x, y - 1, 'coral0'); }
+        else rect(b, x, y, 6, 1, 'foam');
+        break;
+      case 'storm':
+        rect(b, x, y, 3 + Math.round(k * 4), 1, k > 0.5 ? 'stone1' : 'ash');
+        if (k > 0.93) px(b, x, y - 1, 'water3');
+        break;
+      case 'mountain':
+        if (k > 0.7) { px(b, x, y, 'stone3'); px(b, x + 1, y + 1, 'stone1'); }
+        else rect(b, x, y, 4, 1, mix(P.stone2, P.ink, 0.2));
+        break;
+      default:
+        px(b, x, y, mix(P[G[0]], P.white, 0.1));
+        break;
+    }
+  }
+  // and a shoreline of wet sand along the very bottom, so the field has a lip
+  for (let y = h - 4; y < h; y++) rect(b, 0, y, w, 1, y === h - 4 ? 'sand' : mix(P.sand, P.ink, 0.3));
 }
 
 export function clearIslandCache() { farCache.clear(); backCache.clear(); }

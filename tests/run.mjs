@@ -46,7 +46,8 @@ const M = {};
     ['abilities', '../src/data/abilities.js'], ['obstacles', '../src/data/obstacles.js'],
     ['islands', '../src/data/islands.js'], ['voyage', '../src/game/voyage.js'],
     ['boatart', '../src/render/boat.js'], ['islandart', '../src/render/islandart.js'],
-    ['folk', '../src/render/folk.js'],
+    ['folk', '../src/render/folk.js'], ['items', '../src/data/items.js'],
+    ['rescue', '../src/game/rescue.js'], ['obart', '../src/render/obstacles.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -974,7 +975,9 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
 
   // --- the starting deck is a set of TOOLS, not five of the same animal
   const v0 = V.newVoyage('VOY-0001');
-  ok(v0.aboard.length === V.capacity(v0), 'the boat starts full');
+  ok(v0.aboard.length === 4 && V.berthsFree(v0) >= 4,
+    'the boat starts half empty, because the empty half is what a rescue fills',
+    `${v0.aboard.length}/${V.capacity(v0)}`);
   const startAb = new Set(v0.aboard.map((id) => abilityOf(M.animals.ANIMAL_BY_ID[id]).id));
   ok(startAb.size >= 3, 'the starting deck carries at least three abilities',
     [...startAb].join(','));
@@ -998,7 +1001,9 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
   // a kind that appears ONCE on the deck, so "moved" and "still there" cannot both be
   // true off the back of a duplicate
   const first = v.aboard.find((id) => v.aboard.filter((o) => o === id).length === 1);
+  while (V.berthsFree(v) > 0) ok(V.takeAboard(v, 'cow'), 'a berth takes an animal');
   ok(!V.takeAboard(v, 'cow'), 'a full boat refuses another animal');
+  ok(V.sell(v, 'cow', 'aboard') > 0, 'and one can be sold off the deck to make room');
   ok(V.stow(v, first), 'stowing moves an animal into the garden');
   ok(v.eden.indexOf(first) >= 0 && v.aboard.indexOf(first) < 0, 'and it is in exactly one place');
   ok(V.unstow(v, first), 'and it can come back out');
@@ -1029,7 +1034,7 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
     ok(steps === 4, `${id} has four purchasable steps`, String(steps));
     ok(V.buyUpgrade(v5, id) === false, `${id} cannot be bought past the top`);
   }
-  ok(V.capacity(v5) === 15 && V.hullMax(v5) === 11, 'a fully upgraded boat is at its numbers');
+  ok(V.capacity(v5) === 18 && V.hullMax(v5) === 11, 'a fully upgraded boat is at its numbers');
   const v6 = V.newVoyage('VOY-POOR');
   v6.money = 0;
   ok(V.buyUpgrade(v6, 'capacity') === false, 'you cannot buy what you cannot afford');
@@ -1081,6 +1086,173 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
   }
 }
 
+/* ----------------------------------------------------------------- rescue */
+
+if (section('rescue') && M.rescue && M.voyage && M.islands) {
+  const RS = M.rescue;
+  const V = M.voyage;
+  const { ISLANDS, CHERUBIM } = M.islands;
+  const { abilityOf } = M.abilities;
+
+  /**
+   * The greedy shepherd: always flick whoever the water is about to take, aimed at the
+   * nearest pen, at the power that just about gets there. Not a good player -- a
+   * PREDICTABLE one, which is what a balance test needs.
+   */
+  function autoRescue(v, island, tag, o = {}) {
+    const r = RS.newRescue(v, island, tag);
+    let guard = 0;
+    // spend one carried animal on anything it answers, while there is a spare berth
+    if (o.clear !== false) {
+      for (const id of v.aboard.slice()) {
+        const ab = abilityOf(M.animals.ANIMAL_BY_ID[id]);
+        const ob = r.obstacles.find((x) => !x.cleared && x.ob.clearedBy === ab.id);
+        if (ob) { RS.placeHelper(r, id, ob); break; }
+      }
+    }
+    while (!r.over && RS.remaining(r).length && V.berthsFree(v) > 0 && guard++ < 40) {
+      const e = RS.remaining(r).slice().sort((a, b) => b.ball.x - a.ball.x)[0];
+      const gy = Math.round(e.ball.y / (RS.FIELD_H / 3)) * (RS.FIELD_H / 3) + RS.FIELD_H / 6;
+      const ang = Math.atan2(gy - e.ball.y, RS.GANGWAY_X - e.ball.x);
+      const dist = Math.hypot(e.ball.x - RS.GANGWAY_X, e.ball.y - gy);
+      RS.flick(r, e, ang, RS.shotPower(Math.min(1, dist / 700)));
+      let t = 0;
+      while (!RS.isSettled(r.world) && t < 14) { RS.update(r, 1 / 60); t += 1 / 60; }
+      ok(t < 13.9, `${island.id}: a flick settles`, `${t.toFixed(1)}s`);
+    }
+    RS.endRescue(r, 'test');
+    return r;
+  }
+
+  // --- the geometry is inside the field, on every island
+  for (const island of ISLANDS.concat([CHERUBIM])) {
+    const v = V.newVoyage('RESC-' + island.id);
+    const r = RS.newRescue(v, island, 'g');
+    let bad = 0;
+    for (const o of r.obstacles) {
+      if (o.x - o.r < 0 || o.x + o.r > RS.FIELD_W || o.y - o.r < 0 || o.y + o.r > RS.FIELD_H) bad++;
+      if (o.x - o.r < RS.GANGWAY_X + 40) bad++;      // never blocking the pens themselves
+    }
+    ok(bad === 0, `${island.id}: obstacles sit inside the field and clear of the pens`, String(bad));
+    let out = 0;
+    for (const s2 of r.strand) {
+      if (s2.ball.x < RS.GANGWAY_X + 40 || s2.ball.x > RS.FIELD_W - 20) out++;
+      if (s2.ball.y < 10 || s2.ball.y > RS.FIELD_H - 10) out++;
+    }
+    ok(out === 0, `${island.id}: the stranded start reachable and on the island`, String(out));
+    ok(r.strand.length === (island.animals || 0), `${island.id}: the right number are ashore`);
+    // the tide starts off the far shore, so nobody is already dead on arrival
+    ok(RS.tideX(r) > RS.FIELD_W, `${island.id}: the water starts off the far shore`);
+  }
+
+  // --- a full level plays, saves somebody, and ends
+  let totalSaved = 0, totalLost = 0;
+  for (const island of ISLANDS) {
+    const v = V.newVoyage('PLAY-' + island.id);
+    const before = v.aboard.length;
+    const r = autoRescue(v, island, 'p');
+    const res = RS.result(r);
+    ok(r.over, `${island.id}: the level ends`);
+    ok(res.rescued.length > 0, `${island.id}: the greedy shepherd saves somebody`,
+      JSON.stringify(res));
+    ok(v.aboard.length >= before, `${island.id}: the deck never shrinks from a rescue`);
+    ok(v.aboard.length <= V.capacity(v), `${island.id}: never more aboard than there are pens`);
+    ok(res.rescued.length + res.drowned.length + res.spent.length >= island.animals,
+      `${island.id}: every animal ashore is accounted for`);
+    totalSaved += res.rescued.length;
+    totalLost += res.drowned.length;
+  }
+  ok(totalSaved >= 11, 'a greedy pass saves at least one an island', String(totalSaved));
+  ok(totalLost > 0, 'and the water still gets some', String(totalLost));
+  console.log(`  greedy shepherd across eleven islands: ${totalSaved} saved, ${totalLost} lost`);
+
+  // --- the tide is the clock, and it takes what it reaches
+  {
+    const v = V.newVoyage('TIDE-R');
+    const r = RS.newRescue(v, ISLANDS[0], 't');
+    const n0 = RS.remaining(r).length;
+    RS.advanceTide(r, 20);
+    ok(r.tide >= 1, 'the tide can run out');
+    ok(r.over, 'and that ends the level');
+    ok(RS.remaining(r).length < n0, 'the water took somebody', `${n0} -> ${RS.remaining(r).length}`);
+  }
+
+  // --- a loyal animal is never taken, which is the whole promise of the apple
+  {
+    const v = V.newVoyage('LOYAL-R');
+    const r = RS.newRescue(v, ISLANDS[3], 'l');
+    for (const s2 of r.strand) V.makeLoyal(v, s2.animalId);
+    RS.advanceTide(r, 30);
+    ok(RS.remaining(r).length === r.strand.length, 'the flood never takes a loyal animal');
+    RS.endRescue(r, 'test');
+    ok(r.drowned.length === 0, 'not even when you cast off and leave it there');
+  }
+
+  // --- placing an animal: right answer clears, wrong answer costs nothing
+  {
+    const v = V.newVoyage('PLACE-R');
+    const island = ISLANDS.find((i) => i.obstacles.length);
+    const r = RS.newRescue(v, island, 'pl');
+    const ob = r.obstacles.find((o) => o.ob.clearedBy);
+    const right = v.aboard.find((id) => abilityOf(M.animals.ANIMAL_BY_ID[id]).id === ob.ob.clearedBy);
+    const wrong = v.aboard.find((id) => abilityOf(M.animals.ANIMAL_BY_ID[id]).id !== ob.ob.clearedBy);
+    const tide0 = r.tide, deck0 = v.aboard.length;
+    ok(RS.placeHelper(r, wrong, ob) === false, 'the wrong animal does not clear it');
+    ok(r.tide === tide0 && v.aboard.length === deck0,
+      'and getting it wrong costs neither tide nor animal');
+    if (right) {
+      ok(RS.placeHelper(r, right, ob), 'the right animal clears it');
+      ok(ob.cleared, 'and it stays cleared');
+      ok(r.tide > tide0, 'and that cost tide');
+      ok(v.aboard.length === deck0 - 1, 'and the animal is standing on the island now');
+      ok(r.world.posts.every((p) => p.id !== ob.id) && r.world.zones.every((z) => z.id !== ob.id),
+        'and the solver no longer has it in the way');
+    }
+  }
+
+  // --- the basket
+  {
+    const v = V.newVoyage('APPLE-R');
+    for (const id of ['loyal_apple', 'green_apple']) V.addItem(v, id);
+    const r = RS.newRescue(v, ISLANDS[0], 'a');
+    const e = r.strand[0];
+    ok(RS.useApple(r, 'loyal_apple', e), 'a loyal apple lands');
+    ok(V.isLoyal(v, e.animalId), 'and the animal is loyal for good');
+    ok(RS.useApple(r, 'loyal_apple', e) === false, 'and it is gone from the basket');
+    RS.advanceTide(r, 3);
+    const t1 = r.tide;
+    ok(RS.useApple(r, 'green_apple'), 'a green apple pushes the water back');
+    ok(r.tide < t1, 'and the tide really moves', `${t1.toFixed(2)} -> ${r.tide.toFixed(2)}`);
+    ok(v.hold.length === 0, 'the basket is empty now');
+    ok(RS.useApple(r, 'green_apple') === false, 'and you cannot spend what you have not got');
+  }
+
+  // --- items data
+  for (const it of M.items.ITEMS) {
+    ok(!!it.name && !!it.blurb && !!it.use, `item ${it.id} is written`);
+    ok(['loyal', 'tide', 'call', 'free', 'mend'].indexOf(it.effect) >= 0,
+      `item ${it.id} has a known effect`, it.effect);
+    ok(it.price > 0, `item ${it.id} costs something`);
+    ok(M.palette.palKeys().indexOf(it.color) >= 0, `item ${it.id} colour is a palette key`, it.color);
+  }
+
+  // --- the obstacle art takes every kind, cleared and not
+  if (M.obart) {
+    const cv = new SoftCanvas(400, 200);
+    const g = cv.getContext('2d');
+    let threw = null;
+    try {
+      for (const o of M.obstacles.OBSTACLES) {
+        for (const cleared of [false, true]) {
+          M.obart.drawObstacle(g, { kind: o.id, ob: o, r: Math.round(o.r * 1.7), cleared, seed: 3, angle: 0 },
+            200, 100, 1.4, {});
+        }
+      }
+    } catch (e) { threw = e; }
+    ok(!threw, 'every obstacle draws, cleared and not', threw && threw.message);
+  }
+}
+
 /* ------------------------------------------------------------ render smoke */
 
 if (section('render') && M.pixel) {
@@ -1091,6 +1263,10 @@ if (section('render') && M.pixel) {
     ['gameover', '../src/scenes/gameover.js', 'makeGameOverScene', (run) => ({ run, won: true, onDone: () => {} })],
     ['ocean', '../src/scenes/ocean.js', 'makeOceanScene', () => ({
       voyage: M.voyage.newVoyage('RENDER-ocean'), onArrive: () => {}, onOver: () => {},
+    })],
+    ['island', '../src/scenes/island.js', 'makeIslandScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-island'),
+      island: M.islands.ISLAND_BY_ID.jungle, onDone: () => {},
     })],
   ];
   const { Input } = await import('../src/core/input.js');

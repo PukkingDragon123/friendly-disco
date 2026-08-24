@@ -35,7 +35,7 @@ export const BOAT_UPGRADES = {
   capacity: {
     name: 'Pens', icon: 'crate', color: 'wood3',
     desc: 'Another berth below deck. More animals aboard at once.',
-    steps: [6, 8, 10, 12, 15],
+    steps: [8, 10, 12, 15, 18],
     cost: [0, 14, 26, 44, 70],
   },
   speed: {
@@ -177,7 +177,14 @@ export function newVoyage(seed) {
   // decision on the map meaningless before the run has started. Round-robin over the
   // kinds instead, so six berths are six different animals and therefore six tools.
   v.stock = STARTER_STOCK.slice();
-  v.aboard = spreadStock(STARTER_STOCK, capacity(v));
+  // ...and FOUR of them, not a full boat.
+  //
+  // Every berth an animal occupies is a berth a rescue cannot fill, and the boat is the
+  // only limit on how many you can save. Arriving at the first island with the pens full
+  // means the first thing the game does is refuse to let you play it. Four is one of
+  // each kind on the farm -- four abilities, four tools -- and it leaves half the boat
+  // empty, which is the half the island is for.
+  v.aboard = spreadStock(STARTER_STOCK, Math.min(4, capacity(v)));
   rollChoices(v);
   return v;
 }

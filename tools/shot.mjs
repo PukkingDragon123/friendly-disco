@@ -225,6 +225,35 @@ switch (which) {
     }
     break;
   }
+  case 'island': {
+    const V = await import('../src/game/voyage.js');
+    const I = await import('../src/data/islands.js');
+    const { makeIslandScene } = await import('../src/scenes/island.js');
+    const voyage = V.newVoyage(seed);
+    if (process.env.TIER) {
+      const n = Number(process.env.TIER);
+      for (const k of V.UPGRADE_IDS) voyage.tiers[k] = n;
+      voyage.hull = V.hullMax(voyage);
+      voyage.aboard = V.spreadStock(voyage.stock, V.capacity(voyage));
+    }
+    if (process.env.APPLES) for (const id of process.env.APPLES.split(',')) V.addItem(voyage, id);
+    const island = I.ISLAND_BY_ID[process.env.ISLE || 'meadow'] || I.ISLANDS[0];
+    voyage.at = island;
+    scene = makeIslandScene();
+    scene.enter({ voyage, island, onDone: () => {} }, app);
+    const d = scene.debug();
+    if (process.env.TIDE) d.advance(Number(process.env.TIDE));
+    if (process.env.PLACE) {
+      const [id, ix] = process.env.PLACE.split(',');
+      d.place(id, Number(ix));
+    }
+    if (process.env.SHOOT) {
+      const [ix, ang, pow] = process.env.SHOOT.split(',');
+      d.aimAt(Number(ix), Number(ang), Number(pow));
+    }
+    mouse(Number(process.env.MX || 700), Number(process.env.MY || 300));
+    break;
+  }
   case 'ocean': {
     const V = await import('../src/game/voyage.js');
     const { makeOceanScene } = await import('../src/scenes/ocean.js');

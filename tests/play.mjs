@@ -73,6 +73,19 @@ function tick(app, n = 1) {
   }
 }
 
+/**
+ * Force a draw so the scene's hit rectangles exist.
+ *
+ * Every scene builds its clickable rects DURING draw(), and tick() only draws on a
+ * 1-in-DRAW_EVERY cadence, so a bot that enters a scene and immediately reads
+ * debug().rects gets an empty array and throws. Anything that clicks something has to
+ * call this first.
+ */
+function paint(app) {
+  if (app.scene && app.scene.draw) app.scene.draw(g, app);
+  if (app.scene && app.scene.drawUI) app.scene.drawUI(g, app);
+}
+
 function snap(name) {
   if (!SHOTS) return;
   if (app.scene && app.scene.draw) app.scene.draw(g, app);
@@ -111,6 +124,7 @@ function chooseShot(world, gates) {
  * cards works -- it takes four by hand and lets the fill finish the job.
  */
 function playDraft(app) {
+  paint(app);
   const d = app.scene.debug();
   snap('ramp');
   const rects = d.rects.cards || [];
@@ -137,6 +151,7 @@ function playDraft(app) {
  * shake, click the eye, and take one of the three.
  */
 function playEden(app) {
+  paint(app);
   const d0 = app.scene.debug();
   snap('eden');
   const money0 = d0.run.money;
@@ -144,7 +159,7 @@ function playEden(app) {
   // buy the cheapest apple we can afford
   let bought = -1;
   for (let i = 0; i < d0.apples.length; i++) {
-    if (d0.run.money >= d0.apples[i].price) {
+    if (d0.run.money >= d0.apples[i].price && d0.rects.apples[i]) {
       const [ax, ay] = centre(d0.rects.apples[i]);
       pressAt(ax, ay); tick(app, 2); releaseNow(); tick(app, 3);
       if (app.scene.debug().basket.length) { bought = i; break; }
@@ -153,7 +168,9 @@ function playEden(app) {
   if (bought >= 0) {
     if (app.scene.debug().run.money >= money0) errors.push('eden: apple was free');
     // plant it in the first bush
-    const [bx, by] = centre(app.scene.debug().rects.bushes[0]);
+    const bush0 = app.scene.debug().rects.bushes[0];
+    if (!bush0) { errors.push('eden: no bush to plant in'); return; }
+    const [bx, by] = centre(bush0);
     pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 4);
     let rv = app.scene.debug().reveal;
     if (!rv) errors.push('eden: planting did not open a bush');
@@ -204,19 +221,22 @@ function playEden(app) {
   // buy a blessing and a tool if we can, then cast off
   const d1 = app.scene.debug();
   for (let i = 0; i < d1.rects.cards.length; i++) {
-    if (d1.cards[i] && d1.run.money >= d1.cards[i].price && !d1.run.blessing) {
+    if (d1.cards[i] && d1.rects.cards[i] && d1.run.money >= d1.cards[i].price && !d1.run.blessing) {
       const [x2, y2] = centre(d1.rects.cards[i]);
       pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
     }
   }
   const d2 = app.scene.debug();
   for (let i = 0; i < d2.rects.tools.length; i++) {
-    if (d2.tools[i] && d2.run.money >= d2.tools[i].price) {
+    if (d2.tools[i] && d2.rects.tools[i] && d2.run.money >= d2.tools[i].price) {
       const [x2, y2] = centre(d2.rects.tools[i]);
       pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
     }
   }
-  const [sx2, sy2] = centre(app.scene.debug().rects.sail);
+  paint(app);
+  const sail = app.scene.debug().rects.sail;
+  if (!sail) { errors.push('eden: no way to cast off'); return; }
+  const [sx2, sy2] = centre(sail);
   pressAt(sx2, sy2); tick(app, 2); releaseNow(); tick(app, 8);
 }
 
@@ -290,6 +310,7 @@ function playCutscene(app, id) {
 }
 
 function playDock(app) {
+  paint(app);
   tick(app, 20);
   snap('dock');
   const d0 = app.scene.debug ? app.scene.debug() : null;

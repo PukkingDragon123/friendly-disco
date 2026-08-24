@@ -1,18 +1,35 @@
-# ARK & ANVIL — "Habitat Break"
+# POCKET ARK
 ### A 2.5D pixel-art roguelike pool game
 
-You are the Keeper of a floating ark. Animals are racked on a tilted felt deck.
-Sink each animal into the **habitat** where it belongs. Animals **interact** —
-a fox that lands beside a rabbit eats well; a sheep beside a wolf loses its nerve.
-Beat escalating **blinds** (Balatro-style Chips × Mult), then pick a **cargo crate**
-from the manifest and watch the supply boat sail in and unload it.
+Noah finished the ark and the animals will not board. He is given hands that do not
+get tired and cannot be argued with: **you are a golem**, river clay with a word
+driven into your brow, and you last exactly as long as the word does.
+
+Thirteen head of stock stand on the bank and the ramp takes **eight** — that is the
+run's first decision, and the five you leave behind drown. Aboard, animals are racked
+on a tilted felt deck with six **berths** around the rail. A berth does not claim to
+be anywhere; it advertises what it is *like* — warm, bushy, soaked — and every animal
+wants two or three of those conditions in a ranked order. Shove each one into a berth
+it can live in. They **interact**: a fox that lands beside a rabbit eats well, a sheep
+beside a wolf loses its nerve.
+
+Beat escalating **blinds** (Balatro-style Chips × Mult) before the flood takes the
+deck, then go ashore in the **Garden of Eden**, where a serpent sells apples that are
+really rarity tables, Adam and Eve hold out relics, and the Cherubim deal tarot
+blessings that last exactly one round. Clear a boss and the supply freighter comes out
+to you with a crate as well.
+
+There is **no aiming line**. You get a power gauge and your own eye.
 
 ---
 
 ## 0. NON-NEGOTIABLE TECH CONTRACT
 
 * **Vanilla ES modules. Canvas2D. Zero dependencies. No build step.**
-* Internal resolution is **640 × 360**, integer-scaled (`imageSmoothingEnabled = false`).
+* Internal resolution is **960 × 540**, integer-scaled where it fits (`imageSmoothingEnabled
+  = false`). 960×540 is 1.5× the original 640×360, so ×2 lands exactly on 1920×1080. The
+  extra pixels went into **detail**, not into fitting more on screen: animals are baked at
+  32px rather than 20, and body text is the 7px face rather than the 5px.
   Everything is drawn on integer pixel coordinates. **Never** use `ctx.arc`, gradients,
   `filter`, or sub-pixel coords for game art — use the helpers in `src/core/pixel.js`.
 * No external assets. **All art is procedurally drawn pixel art.** All audio is
@@ -28,24 +45,50 @@ from the manifest and watch the supply boat sail in and unload it.
 
 ### Frame contract
 Every scene gets `update(dt, ctx)` and `draw(g)` where
-`dt` is seconds (clamped ≤ 1/30), `g` is the 640×360 CanvasRenderingContext2D.
+`dt` is seconds (clamped ≤ 1/30), `g` is the 960×540 CanvasRenderingContext2D.
+
+### Performance contract
+**A frame is a call budget, not a pixel budget.** Canvas2D costs per call, so anything
+static is baked into an offscreen canvas once and blitted from then on. Four things are
+cached, and adding a fifth is usually the right fix for a slow scene:
+
+| what | where | keyed by |
+|---|---|---|
+| text runs | `core/pixel.js` `cachedRun` | string, font, scale, colour, shadow/outline |
+| panels | `render/uikit.js` `bakedPanel` | style, size, flags, title |
+| the seascape | `render/seascape.js` | rendered at HALF resolution, blitted at 2× |
+| portrait grounds | `render/portraits.js` | portrait id, size |
+
+Soft edges are drawn as **spans, not pixels**: a foam band eight pixels wide is three
+`rect`s, not eight `wash`es per row per side.
+
+`node tools/profile.mjs` reports calls per frame per scene with per-layer attribution
+for the deck. Target: **under 10,000 calls a frame**. Headless Chromium presents at
+~24ms regardless of what you draw (no GPU), so measure `scene.draw()` time — which
+`tests/browser.mjs` does — never its reported fps.
 
 ---
 
-## 1. SCREEN LAYOUT (640 × 360)
+## 1. SCREEN LAYOUT (960 × 540)
+
+The deck is laid out as a **ship's console**, not as a scaled-up 640×360. The console
+never overlaps the felt; at the old size it had to, and the corner berths sat under a
+drop shadow.
 
 ```
-+---------------------------------------------------------------+
-| HUD RAIL (x 0..148)          |  DECK / TABLE VIEW (x 148..640) |
-|  blind banner + target       |                                 |
-|  CHIPS x MULT readout        |     tilted 2.5D felt deck       |
-|  score bar                   |     6 habitat gates             |
-|  shots / reracks             |     animals as shaded orbs      |
-|  money / ante / relics row   |                                 |
-|  habitat vitrine (residents) |     power + spin widget (bottom) |
-+---------------------------------------------------------------+
+ y   0.. 18   title bar: the ark's name, the blessing in force, the seed
+ y  20..102   the CHIPS x MULT readout, aligned to the deck's own width
+ y 106..390   the deck itself (DECK.x .. DECK.x+w, from render/table.js)
+ y 394..536   controls: power gauge, english, re-rack, feeds, the loaded animal
+
+ x   0..152   the left console: score, the FLOOD clock, shots, berths, log
+ x 155..885   the deck and the readout above it, sharing an edge
+ x 888..960   the far rail: relics, stacked vertically
 ```
-Relic ribbon runs along the very top (y 0..14) across the full width.
+
+Other scenes: **the ramp** (draft) puts the berth board across the top and thirteen
+cards below it; **Eden** is three stalls across the top and three bushes below;
+**the freighter** is the old dock, sea above and pier below.
 
 ---
 
@@ -54,14 +97,23 @@ Relic ribbon runs along the very top (y 0..14) across the full width.
 Physics happens in flat **table units**: the playfield is `TABLE_W = 232` by
 `TABLE_H = 116` units, origin at its top-left corner.
 
-Projection is an **orthographic tilt** (not isometric — we want a tilted rectangle,
-not a diamond), defined once in `src/render/table.js`:
+Projection is an **orthographic tilt plus a mild horizontal perspective** (not
+isometric — we want a tilted trapezoid, not a diamond), defined once in
+`src/render/table.js`. The scale invariant: `BALL_R * VIEW.xs` must equal
+`SPRITE_SIZE / 2`, so an animal sprite drops onto a ball at scale 1 with no
+resampling — 5.2 × 3 = 15.6 ≈ 32 / 2.
 
 ```js
-export const VIEW = { ox: 158, oy: 96, tilt: 0.62, zScale: 1.0 };
-// screenX = ox + tx
-// screenY = oy + ty * tilt - tz
+export const VIEW = { ox: 172, oy: 123, xs: 3, tilt: 2, zs: 3, persp: 0.17 };
+
+scaleAt(ty) = 1 - persp * (1 - ty / TABLE_H)          // 1 at the near rail
+screenX     = cx + (tx - TABLE_W / 2) * xs * scaleAt(ty)
+screenY     = oy + ty * tilt - tz * zs
 ```
+
+The horizontal perspective term is what actually sells the 2.5D read: an affine tilt
+alone leaves a rectangle on screen and looks top-down however the rails are shaded.
+Balls are drawn at `scaleAt()` too, so an animal at the far rail is genuinely smaller.
 
 Consequences every module must respect:
 * Depth sort by `ty` ascending — far animals draw first.
@@ -87,24 +139,34 @@ src/core/loop.js              fixed-step loop + scene stack           [SPINE]
 src/core/juice.js             shake, timescale, flash, tweens         [SPINE]
 src/core/audio.js             procedural SFX + music                  [AGENT audio]
 src/core/particles.js         particle system                         [AGENT particles]
-src/render/font.js            5x7 + 3x5 bitmap fonts                  [AGENT font]
-src/render/sprites.js         procedural animal sprite factory        [AGENT sprites]
+src/render/font.js            7x9 + 5x7 + 3x5 bitmap fonts            [AGENT font]
+src/render/sprites.js         32px animal sprite factory + 16px icons [AGENT sprites]
+src/render/portraits.js       live speaker portraits (10)             [SPINE]
 src/render/uikit.js           panels, buttons, cards, bars, icons     [AGENT uikit]
 src/render/seascape.js        animated sky/water/parallax backdrop    [AGENT seascape]
-src/render/table.js           2.5D deck + habitat gates renderer      [SPINE]
-src/data/habitats.js          9 habitats + affinity matrix            [AGENT content-animals]
-src/data/animals.js           ~48 animals w/ sprite recipes           [AGENT content-animals]
-src/data/interactions.js      ~55 interaction rules                   [AGENT content-inter]
-src/data/relics.js            ~44 relics with hooks                   [AGENT content-relics]
-src/data/blinds.js            ante curve + ~14 boss blinds            [AGENT content-blinds]
+src/render/table.js           2.5D deck + berth gates + the flood     [SPINE]
+src/data/habitats.js          9 BERTH TRAITS + resemblance matrix     [AGENT content-animals]
+src/data/animals.js           90 animals w/ sprite recipes + likes    [AGENT content-animals]
+src/data/interactions.js      124 interaction rules                   [AGENT content-inter]
+src/data/relics.js            57 relics with hooks (10 are Eden's)    [AGENT content-relics]
+src/data/blinds.js            ante curve + 16 boss blinds             [AGENT content-blinds]
 src/data/cargo.js             crate types + manifest roller           [AGENT content-cargo]
-src/game/physics.js           deterministic ball physics              [AGENT physics]
+src/data/eden.js              apples, the bush roll, tarot blessings  [SPINE]
+src/data/story.js             dialogue scripts + speakers             [SPINE]
+src/game/physics.js           deterministic ball physics + hazards    [AGENT physics]
+src/game/flood.js             surge pools + the hurricane             [SPINE]
 src/game/scoring.js           chips x mult resolution pipeline        [SPINE]
-src/game/run.js               run state machine                       [SPINE]
+src/game/run.js               run state machine, draft, blessings     [SPINE]
+src/game/router.js            scene graph (menu->ramp->deck->Eden)    [SPINE]
 src/scenes/menu.js            title screen                            [SPINE]
+src/scenes/draft.js           THE RAMP: pick 8 of 13                  [SPINE]
 src/scenes/table.js           gameplay scene (the heart)              [SPINE]
-src/scenes/shop.js            cargo manifest + boat delivery          [AGENT shop]
+src/scenes/eden.js            the Garden: serpent, Adam & Eve, tarot  [SPINE]
+src/scenes/shop.js            the freighter: cargo manifest + boat    [AGENT shop]
+src/scenes/cutscene.js        dialogue + cinematics                   [SPINE]
 src/scenes/gameover.js        run summary                             [SPINE]
+tools/profile.mjs             frame call-count profiler               [SPINE]
+tools/shot.mjs                headless scene screenshotter            [SPINE]
 tests/*.mjs                   headless node tests                     [AGENT tests]
 ```
 
@@ -137,11 +199,19 @@ px(g,x,y,c) rect(g,x,y,w,h,c) frame(g,x,y,w,h,c) line(g,x0,y0,x1,y1,c)
 disc(g,cx,cy,r,c) ring(g,cx,cy,r,c) ellipse(g,cx,cy,rx,ry,c) ringEllipse(...)
 tri(g,x0,y0,x1,y1,x2,y2,c) vgrad(g,x,y,w,h,keys) dither(g,x,y,w,h,cA,cB,level)
 shadeDisc(g,cx,cy,r,{base,light,dark,rim})           // shaded sphere
-text(g,str,x,y,c,{font:5|3, spacing, shadow, center, right, maxW, wave, t})
-textW(str,{font,spacing}) -> width
+text(g,str,x,y,c,{font:7|5|3, scale, spacing, shadow, outline, center, right, alpha, wave, t})
+textW(str,{font,spacing,scale}) -> width
+textH({font,scale}) -> line height
 wrap(str,maxW,{font}) -> [lines]
 clip(g,x,y,w,h,fn)  // scissor helper
+makeCanvas(w,h) -> {canvas,g} | null      // offscreen, for baking
+blit(g,src,x,y)
+clearTextCache() textCacheSize()          // the run cache; see the perf contract
 ```
+
+`font: 7` is the body and heading face, `5` is for dense labels, `3` for the smallest
+captions. Anything drawn through `text()` is **cached as a baked run**, so a string
+costs one blit; `wave` opts out because it moves each glyph independently.
 
 ## 6. `src/core/rng.js` API
 ```js
@@ -177,6 +247,23 @@ Input.consume()   // called once per frame by loop, at END of frame
 ---
 
 ## 9. DATA CONTRACTS  (agents: match these EXACTLY)
+
+> **The trait rework.** Habitats used to be places and potting was right-or-wrong,
+> which made the deck a memory test. A berth now advertises a **condition** and every
+> animal wants two or three of them, ranked. `habitats.js` still exports `HABITATS` /
+> `HABITAT_BY_ID` / `affinity` under those names — the ids are trait ids now
+> (`warm frozen bushy briny dusty tame soaked lofty gloomy`), and the scoring call is
+> `likeness(animal, berthTrait)`, which takes the best of
+> `rankWeight(rank) * resemblance(like, trait)` across everything the animal asked
+> for. So a second choice satisfied exactly can beat a favourite half-matched, there
+> is always a good berth open, and there is always a wrong one.
+>
+> `animal.likes` is **derived once at import** from the animal's biome and tags, with
+> hand-set overrides in `LIKES_OVERRIDE` where derivation is wrong (the four starter
+> species all derived to tame-first, i.e. identical, which would make the opening
+> draft a coin flip). `animal.home` is re-pointed at `likes[0]` so every existing
+> consumer keeps working and now means "favourite condition". `animal.biome` keeps the
+> authored value for flavour and shop grouping.
 
 ### 9.1 Habitat  (`src/data/habitats.js`)
 ```js
@@ -371,17 +458,44 @@ tight. Include `tests/physics.test.mjs`-style self-check in your file's bottom
 ## 10. SCORING PIPELINE (`src/game/scoring.js`, SPINE — for reference)
 
 For each ball sunk, in the order they were sunk during a shot:
-1. `match = affinity(animal.home, gate.habitatId)` -> `exact` (1), `partial` (>0), `wrong` (0)
+1. `aff = likeness(animal, gate.habitatId)` -> `exact` (1), `partial` (>0), `wrong` (0).
+   A Cherubim blessing (`run.blessAllHome`) can force `exact` for one round, and it is
+   applied HERE so the whole pipeline downstream agrees about what happened.
 2. base `chips = animal.chips`, `mult = animal.mult`, `xmult = 1`
-3. match modifier: exact -> `chips *= 3, mult += 2`; partial -> `chips *= 1 + a`,
-   `mult += 1`; wrong -> `chips *= 0.25, mult -= 1` (floor 0.1 total mult)
-4. interactions, in scope order `shot`, `habitat`, `table`, `deck`
-5. relic `onScoreAnimal` hooks in owned order
-6. bounce bonus: `chips += ball.bounces * run.railChips`
-7. combo: `xmult *= 1 + 0.35 * (indexInShot)`
-8. boss `chipsMul` / `multMul`
-9. `score += floor(chips * max(0.1, mult) * xmult)`
+3. feeds bought at Eden, then this round's blessing (`blessChips`, `blessRailMult`)
+4. match modifier: exact -> `chips *= 3, mult += 2`; partial -> `chips *= 1 + aff`, and
+   `mult += 1 + (2 - rank) * 0.5` when the berth is one the animal actually asked for
+   (CONTENT) versus `+0.5` when it merely resembles one (SETTLES FOR); wrong ->
+   `chips *= 0.25, mult -= 1` (floor 0.1 total mult)
+5. interactions, in scope order `shot`, `habitat`, `table`, `deck`.
+   `run.blessInteract` (The Lovers) scales the POSITIVE gains only — doubling a debuff
+   would turn a blessing into a trap.
+6. relic `onScoreAnimal` hooks in owned order
+7. bounce bonus: `chips += ball.bounces * run.railChips`
+8. combo: `xmult *= 1 + 0.35 * (indexInShot)`
+9. boss `chipsMul` / `multMul`
+10. whole-animal blessings last, so they multiply what the round built rather than being
+    buried inside it: `blessXMult` (The Magician), `blessTripleFirst` (The Tower)
+11. `score += floor(chips * max(0.1, mult) * xmult)`
 Every step pushes a log line, and the table scene animates the readout per step.
+
+### The flood
+The flood is the clock AND a hazard. `run.flood` climbs one `floodPerShot` per shot and
+`game/flood.js` derives, purely from `(seed, level)`, the water on the felt: **surge
+pools** (five times the drag inside, a pull toward the middle, and an animal that comes
+to REST in one is washed back to the hold) and, past halfway, a **hurricane** eye that
+drags everything near it around the spiral. Pools are placed clear of the six gate
+mouths on purpose — water that plugged a pocket would delete a berth, which is a worse
+mechanic than water that makes reaching one harder. Nothing about the flood covers the
+camera.
+
+### Blessings are one round, guaranteed
+Every `bless*` field is listed once in `BLESS_FIELDS` (`game/run.js`), wiped by
+`clearBlessing()` at the top of every blind, and re-applied from the card. Because a
+blessing physically cannot survive into a second round, it is allowed to be enormous —
+and no card's `apply()` has to undo itself. The same fields are initialised in
+`baseRun()` so a fresh run and a just-finished round have identical shape; otherwise
+"did the blessing leak" is not a question a test can answer by comparing two runs.
 
 ---
 
@@ -458,7 +572,14 @@ Content agents: still give these normal data; the engine layers the special rule
 
 ---
 
-## APPENDIX B — THE DOCK SCENE CONTRACT (`src/scenes/shop.js`)
+## APPENDIX B — THE FREIGHTER (`src/scenes/shop.js`)
+
+> This is now the **post-boss** stop, not the only shop. Clearing a boss earns the
+> ante's supply run and the boat comes out to the ark with a crate; small and big
+> blinds tie up in the Garden of Eden instead (`src/scenes/eden.js`). Two shops with
+> different jobs: **Eden sells choices, the freighter sells equipment.**
+> Everything below still holds, except that it runs at 960×540 and the relic ribbon is
+> y 0..22.
 
 The spine is finished; read it before writing the scene. `src/scenes/table.js`,
 `src/scenes/menu.js` and `src/scenes/gameover.js` are working reference scenes —
@@ -495,7 +616,7 @@ scene.exit()
 5. A **CAST OFF** button ends the visit -> `onDone()`.
 
 ### Rules for the scene
-* Runs at 640x360. HUD conventions from `src/scenes/table.js`: relic ribbon along y 0..15,
+* Runs at 960x540. HUD conventions from `src/scenes/table.js`: relic ribbon along y 0..22,
   money pill, `uikit` panels, `pixel.text` for every word.
 * Never mutate `run` except through the exported helpers in `src/game/run.js`
   (`spend`, `deliverCrate`, `addCue`, `addFeed`, `addVoucher`, `sellRelic`,
@@ -507,3 +628,88 @@ scene.exit()
 * `Audio.sfx` names available: crate_open crate_land crane boat_horn boat_engine splash
   wave gull coin cash click hover back error upgrade sparkle levelup whoosh lock unlock.
   `Audio.music('dock')` on enter.
+
+---
+
+## APPENDIX C — THE RAMP (`src/scenes/draft.js`)
+
+The run's opening decision. You own a **flock**, not a deck: five chickens, three pigs,
+three cows, two sheep. The ramp takes **eight** and the rest drown.
+
+What stops it being a coin flip is the **berth board** across the top: the six
+conditions the *first* blind will actually offer, rolled from the stock by
+`beginDraft(run)` before you pick and cached on the run so it cannot re-roll under you.
+Every card then reads its **coverage** against that board — how many of its three wants
+this deck can offer — because that is the number that matters. An animal with all three
+covered can be routed anywhere as the board fills; a one-of-three specialist is who you
+will be fighting to place on the last shot.
+
+The first verdict written here said FAVOURITE for anything whose top want was open,
+which with six of nine berths open was every animal on the bank. Useless. Coverage
+differentiates: against `briny/frozen/warm/soaked/tame/bushy` the cows read 3/3, the
+pigs and sheep 2/3, the chickens 1/3.
+
+`commitDraft(run, indices)` takes stock **indices**, not ids, because the stock has
+duplicates — five chickens are five separate animals you choose between, not one entry
+with a count. Duplicate and out-of-range indices are dropped, never counted.
+
+---
+
+## APPENDIX D — THE GARDEN OF EDEN (`src/scenes/eden.js`, `src/data/eden.js`)
+
+Three traders, and each one is a different **kind** of transaction rather than three
+price lists.
+
+**THE SERPENT** sells apples. An apple is *odds*, not an animal: the card shows its
+rarity table as four coloured bars, so you can see exactly what you are buying. Two are
+cheap because they cost something other than money — the cursed apple gives rare odds
+for four coins and whatever comes out carries −1 Mult forever; the poison apple is two
+coins and one animal already aboard does not survive it.
+
+**THE REVEAL** is what the scene is built around. Plant an apple, and:
+
+1. the bush **shakes**, harder and harder;
+2. an **EYE** opens in it, and the eye is already the colour of the tier you are about
+   to get — so the payoff lands *before* you know what the animal is. It ignores a click
+   until it has finished opening, on purpose;
+3. click it and it **bursts**;
+4. **three animals** fan out and you take exactly one, paying a feeding fee that scales
+   with what came out. A legendary knows what it is worth. The other two go back into
+   the leaves.
+
+The rarity is rolled **once for the whole bush** rather than per animal — that is what
+makes step 2 work at all.
+
+**LEAVE IT** exists because the bot found the hole: you could buy an apple, fail to
+afford any of the three lures, and lose the money for nothing. The apple stays in the
+bush, and bushes live on the `run` rather than the scene, so it is still growing when
+you come back richer.
+
+**ADAM AND EVE** hold out ten scripture-shaped relics with every ability printed on the
+card, because a relic you cannot read is a relic you cannot build around. The
+**Shepherd's Staff** is the shape they all follow: ×1.5 Mult per sheep berthed, and
+when a sheep goes in *another follows it*. A relic hook cannot deliver that second half
+— hooks may only touch the numbers on the animal being scored — so `flockFollows()` in
+the table scene walks a second sheep into the same berth, which lands it in the same
+shot's ledger and compounds with everything else in it.
+
+**THE CHERUBIM** deal eighteen major arcana. One round each, and enormous because of it
+(see the one-round guarantee in section 10).
+
+---
+
+## APPENDIX E — THE STORY
+
+Noah finished the ark. The animals will not board. He has spent a hundred years on the
+hull and four days losing arguments with an ostrich, so he is given hands that do not
+get tired and cannot be argued with.
+
+You are **the golem**: river clay with a word driven into your brow, and you last
+exactly as long as the word does. You have no voice — the golem's lines are actions in
+brackets — and the one word on your forehead is the only thing you ever say.
+
+Speakers live in `src/data/story.js` (`SPEAKERS`) with portraits drawn live in
+`src/render/portraits.js`. The golem's portrait carries the whole figure on its
+**silhouette**, because it is one colour family throughout: shoulders far wider than
+the head, a hard dark gap where a neck would be, an outline pass around everything, and
+a brass brow plate that is the brightest object in the frame.

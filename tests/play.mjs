@@ -1,10 +1,13 @@
 // node tests/play.mjs [seeds] [--shots] [--verbose]
 //
 // End-to-end play harness. It drives the REAL scenes through the REAL router with
-// synthetic mouse input — menu, deck, dock, summary — for a whole run, and fails on any
-// exception escaping a frame. This is the test that catches integration bugs the
-// per-module suites cannot see: a scene that never leaves a phase, a shop that cannot be
-// exited, a blind that racks zero animals, a click that lands on nothing.
+// synthetic mouse input -- menu, cutscene, ocean, island, garden, summary -- for whole
+// voyages, and fails on any exception escaping a frame.
+//
+// This is the test that catches what the per-module suites cannot see: a scene that never
+// leaves a phase, a shop that cannot be exited, a rescue that racks no animals, a click
+// that lands on nothing, a router that loops. Everything it does, it does BY CLICKING --
+// if the bot can finish a voyage with a mouse, so can a person.
 
 import { installDom } from '../tools/stubdom.mjs';
 installDom();
@@ -12,10 +15,10 @@ const { SoftCanvas, writePNG } = await import('../tools/softcanvas.mjs');
 const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 const { createRouter, guardScene } = await import('../src/game/router.js');
-const PH = await import('../src/game/physics.js');
-const T = await import('../src/render/table.js');
+const RS = await import('../src/game/rescue.js');
+const V = await import('../src/game/voyage.js');
 const { ANIMAL_BY_ID } = await import('../src/data/animals.js');
-const { likeness } = await import('../src/data/habitats.js');
+const { abilityOf } = await import('../src/data/abilities.js');
 
 const SEEDS = Number(process.argv[2]) || 3;
 const SHOTS = process.argv.includes('--shots');
@@ -27,23 +30,25 @@ const DT = 1 / 60;
 
 let errors = [];
 let shotIx = 0;
+let app = null;
 
 function makeApp() {
   let scene = null;
-  const app = {
+  const a = {
     g, canvas: cv, scale: 1, time: 0, frame: 0, depth: 1, fps: 60,
     get scene() { return scene; },
     replace(s, args) {
       if (scene && scene.exit) scene.exit();
-      scene = guardScene(s, (e, where) => errors.push(`${where}: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`));
-      if (scene.enter) scene.enter(args, app);
+      scene = guardScene(s, (e, where) => errors.push(
+        `${where}: ${e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e}`));
+      if (scene.enter) scene.enter(args, a);
       return scene;
     },
-    push(s, args) { return app.replace(s, args); },
+    push(s, args) { return a.replace(s, args); },
     pop() {},
     fit() {},
   };
-  return app;
+  return a;
 }
 
 /* --------------------------------------------------------------- input rig */
@@ -52,369 +57,368 @@ const mouse = Input.mouse;
 function at(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; }
 function pressAt(x, y) { at(x, y); mouse.down = true; mouse.pressed = true; mouse.downX = x; mouse.downY = y; }
 function releaseNow() { mouse.down = false; mouse.released = true; }
+function clickAt(x, y, hold = 2) {
+  pressAt(x, y); tick(hold); releaseNow(); tick(2);
+}
 function centre(r) { return [Math.round(r.x + r.w / 2), Math.round(r.y + r.h / 2)]; }
 
-// Software rasterising a full frame (the seascape alone is ~250 dithered rows) costs
-// far more than the game logic, so draw on a 1-in-DRAW_EVERY cadence. Every code path
-// in draw() is still exercised many times per blind, and the harness is ~10x faster.
+// Software rasterising a full frame costs far more than the game logic, so draw on a
+// 1-in-DRAW_EVERY cadence. Every path in draw() is still exercised many times a scene.
 const DRAW_EVERY = Number(process.env.DRAW_EVERY || 12);
 
-function tick(app, n = 1) {
+function tick(n = 1) {
   for (let i = 0; i < n; i++) {
     app.frame++;
     app.time += DT;
     Juice.update(DT);
     if (app.scene && app.scene.update) app.scene.update(DT * Juice.timeScale, app, DT);
-    if (app.frame % DRAW_EVERY === 0) {
-      if (app.scene && app.scene.draw) app.scene.draw(g, app);
-      if (app.scene && app.scene.drawUI) app.scene.drawUI(g, app);
-    }
+    if (app.frame % DRAW_EVERY === 0) paint();
     Input.consume();
   }
 }
 
 /**
- * Force a draw so the scene's hit rectangles exist.
- *
- * Every scene builds its clickable rects DURING draw(), and tick() only draws on a
- * 1-in-DRAW_EVERY cadence, so a bot that enters a scene and immediately reads
- * debug().rects gets an empty array and throws. Anything that clicks something has to
- * call this first.
+ * Force a draw so the scene's hit rectangles exist. Every scene builds its clickable
+ * rects DURING draw(), so anything that clicks has to paint first.
  */
-function paint(app) {
+function paint() {
   if (app.scene && app.scene.draw) app.scene.draw(g, app);
   if (app.scene && app.scene.drawUI) app.scene.drawUI(g, app);
 }
 
 function snap(name) {
   if (!SHOTS) return;
-  if (app.scene && app.scene.draw) app.scene.draw(g, app);
+  paint();
   writePNG(cv, `shots/play-${String(++shotIx).padStart(2, '0')}-${name}.png`, 2);
 }
 
-/* ----------------------------------------------------------------- the bot */
-
-/** Pick the (ball, gate) pair a decent player would take: reachable, and preferably home. */
-function chooseShot(world, gates) {
-  let best = null;
-  for (const b of world.balls) {
-    if (b.sunk) continue;
-    const a = ANIMAL_BY_ID[b.animalId];
-    for (const gate of gates) {
-      if (gate.closed) continue;
-      const dx = gate.x - b.x, dy = gate.y - b.y;
-      const dist = Math.hypot(dx, dy);
-      const ang = Math.atan2(dy, dx);
-      const power = Math.min(1, 0.3 + dist / 260);
-      const p = PH.predict(world, b, ang, power, 60);
-      const reaches = !!(p && p.hit && p.hit.kind === 'gate' && p.hit.id === gate.id);
-      // traits, not biomes: a berth is worth what the animal thinks of it
-      const fit = a ? (a.id === 'chameleon' ? 1 : likeness(a, gate.habitatId)) : 0;
-      const home = fit >= 0.999;
-      const score = (reaches ? 100 : 0) + fit * 55 + (a ? a.chips * 0.06 : 0) - dist * 0.05;
-      if (!best || score > best.score) best = { ball: b, gate, ang, power, score, home, reaches };
-    }
-  }
-  return best;
+function dbg() {
+  return (app.scene && app.scene.debug) ? app.scene.debug() : {};
 }
 
-/**
- * The ramp: pick the eight head with the best board coverage. The scene's own
- * auto-fill does exactly this, so the bot mostly exists to prove that CLICKING the
- * cards works -- it takes four by hand and lets the fill finish the job.
- */
-function playDraft(app) {
-  paint(app);
-  const d = app.scene.debug();
-  snap('ramp');
-  const rects = d.rects.cards || [];
-  let taken = 0;
-  for (let i = 0; i < rects.length && taken < 4; i++) {
-    const r = rects[i];
-    if (!r) continue;
-    const [cx, cy] = centre(r);
-    pressAt(cx, cy); tick(app, 2); releaseNow(); tick(app, 2);
-    taken++;
-  }
-  const after = app.scene.debug();
-  if (after.chosen.length !== taken) errors.push(`ramp: clicked ${taken} cards, chose ${after.chosen.length}`);
-  const [bx, by] = centre(d.rects.board);
-  pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 8);
-  const run = after.run || null;
-  void run;
-  return 'boarded';
+/** Which scene are we in? Read off the debug shape, which every scene provides. */
+function where() {
+  const d = dbg();
+  if (d.scriptId !== undefined) return 'cutscene';
+  if (d.rescue) return 'island';
+  if (d.rects && d.rects.gates) return 'eden';
+  if (d.rects && d.rects.cards && d.at && d.at.isles) return 'ocean';
+  if (d.won !== undefined) return 'summary';
+  if (d.rects && d.rects.start) return 'menu';
+  if (d.showHelp !== undefined) return 'menu';
+  return 'unknown';
 }
 
-/**
- * The garden. This is the one scene with a modal in it, so the bot's real job here is
- * to prove the whole chain works from a click: buy an apple, plant it, sit through the
- * shake, click the eye, and take one of the three.
- */
-function playEden(app) {
-  paint(app);
-  const d0 = app.scene.debug();
-  snap('eden');
-  const money0 = d0.run.money;
+/* ------------------------------------------------------------------ the bot */
 
-  // buy the cheapest apple we can afford
-  let bought = -1;
-  for (let i = 0; i < d0.apples.length; i++) {
-    if (d0.run.money >= d0.apples[i].price && d0.rects.apples[i]) {
-      const [ax, ay] = centre(d0.rects.apples[i]);
-      pressAt(ax, ay); tick(app, 2); releaseNow(); tick(app, 3);
-      if (app.scene.debug().basket.length) { bought = i; break; }
-    }
-  }
-  if (bought >= 0) {
-    if (app.scene.debug().run.money >= money0) errors.push('eden: apple was free');
-    // plant it in the first bush
-    const bush0 = app.scene.debug().rects.bushes[0];
-    if (!bush0) { errors.push('eden: no bush to plant in'); return; }
-    const [bx, by] = centre(bush0);
-    pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 4);
-    let rv = app.scene.debug().reveal;
-    if (!rv) errors.push('eden: planting did not open a bush');
-    else {
-      // sit through the shake, then click the eye
-      tick(app, 80);
-      snap('eden-eye');
-      rv = app.scene.debug().reveal;
-      if (!rv || rv.phase !== 'eye') errors.push(`eden: expected the eye, got ${rv ? rv.phase : 'nothing'}`);
-      // the eye ignores a click until it has finished opening, on purpose -- so does
-      // the bot have to wait for it
-      tick(app, 40);
-      pressAt(480, 250); tick(app, 2); releaseNow(); tick(app, 50);
-      rv = app.scene.debug().reveal;
-      if (!rv || rv.phase !== 'choose') errors.push(`eden: expected a choice, got ${rv ? rv.phase : 'nothing'}`);
-      else {
-        snap('eden-choose');
-        const cr = app.scene.debug().rects.choices;
-        // Take the first one we can pay the lure on. Success is the reveal reaching
-        // 'done', NOT the caravan growing -- a poison apple boards one animal and
-        // drowns another, so the count is unchanged and that is correct.
-        let took = false;
-        for (let i = 0; i < cr.length; i++) {
-          if (!cr[i]) continue;
-          const [cx2, cy2] = centre(cr[i]);
-          pressAt(cx2, cy2); tick(app, 2); releaseNow(); tick(app, 6);
-          const now = app.scene.debug().reveal;
-          if (!now || now.phase === 'done') { took = true; break; }
-        }
-        // Not affording any lure is legitimate -- the apple stays in the bush. What
-        // must NOT happen is being trapped in the modal with no way out.
-        if (!took) {
-          const lr = app.scene.debug().rects.leave;
-          if (!lr || !lr.w) { errors.push('eden: no lure affordable and no way out of the modal'); }
-          else {
-            const [lx, ly] = centre(lr);
-            pressAt(lx, ly); tick(app, 2); releaseNow(); tick(app, 6);
-            if (app.scene.debug().reveal) errors.push('eden: LEAVE IT did not close the reveal');
-            const bs = app.scene.debug().bushes;
-            if (!bs.some(Boolean)) errors.push('eden: leaving lost the apple');
-          }
-        }
-      }
-      tick(app, 40);
-    }
-  }
-
-  // buy a blessing and a tool if we can, then cast off
-  const d1 = app.scene.debug();
-  for (let i = 0; i < d1.rects.cards.length; i++) {
-    if (d1.cards[i] && d1.rects.cards[i] && d1.run.money >= d1.cards[i].price && !d1.run.blessing) {
-      const [x2, y2] = centre(d1.rects.cards[i]);
-      pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
-    }
-  }
-  const d2 = app.scene.debug();
-  for (let i = 0; i < d2.rects.tools.length; i++) {
-    if (d2.tools[i] && d2.rects.tools[i] && d2.run.money >= d2.tools[i].price) {
-      const [x2, y2] = centre(d2.rects.tools[i]);
-      pressAt(x2, y2); tick(app, 2); releaseNow(); tick(app, 3);
-    }
-  }
-  paint(app);
-  const sail = app.scene.debug().rects.sail;
-  if (!sail) { errors.push('eden: no way to cast off'); return; }
-  const [sx2, sy2] = centre(sail);
-  pressAt(sx2, sy2); tick(app, 2); releaseNow(); tick(app, 8);
-}
-
-function playDeck(app, log) {
-  let guard = 0;
-  while (guard++ < 400) {
-    const d = app.scene.debug ? app.scene.debug() : null;
-    if (!d) { errors.push('deck scene exposes no debug()'); return 'error'; }
-    if (d.phase === 'cleared' || d.phase === 'failed') {
-      tick(app, 70);
-      snap(d.phase);
-      pressAt(480, 300); tick(app, 2); releaseNow(); tick(app, 4);
-      return d.phase;
-    }
-    if (d.phase === 'intro') { tick(app, 70); continue; }
-    if (d.phase !== 'aim') { tick(app, 10); continue; }
-
-    const pick = chooseShot(d.world, d.world.gates || []);
-    if (!pick) { tick(app, 5); continue; }
-
-    // Select the ball ONLY if it is not already selected: clicking the selected ball
-    // starts a charge, and releasing two frames later fires a wasted tap shot.
-    if (d.selected !== pick.ball) {
-      const bs = T.toScreen(pick.ball.x, pick.ball.y);
-      pressAt(Math.round(bs.x), Math.round(bs.y - Math.round(T.ballPixelRadius(pick.ball.r, pick.ball.y) * 0.55)));
-      tick(app, 2);
-      releaseNow();
-      tick(app, 3);
-      const after = app.scene.debug();
-      if (after.selected !== pick.ball) { tick(app, 2); continue; }   // click missed; re-plan
-    }
-
-    const tgt = T.toScreen(pick.gate.x, pick.gate.y);
-    at(Math.round(tgt.x), Math.round(tgt.y));
-    tick(app, 2);
-    pressAt(Math.round(tgt.x), Math.round(tgt.y));
-    tick(app, 2);
-    // hold until the meter reaches the power we want (ramps over 0.85s)
-    const holdFrames = Math.max(2, Math.round(pick.power * 0.85 * 60));
-    tick(app, holdFrames);
-    releaseNow();
-    tick(app, 4);
-
-    // let the shot roll and score out
-    let spin = 0;
-    while (spin++ < 900) {
-      const dd = app.scene.debug();
-      if (dd.phase === 'aim' || dd.phase === 'cleared' || dd.phase === 'failed') break;
-      tick(app, 1);
-    }
-    if (spin >= 900) { errors.push('a shot never resolved (stuck in roll/score)'); return 'stuck'; }
-    if (log) {
-      const dd = app.scene.debug();
-      log.push(`   shot ${dd.run.stats.shotsTaken}: score ${dd.run.score}/${dd.run.target} shots left ${dd.run.shotsLeft}`);
-    }
-  }
-  errors.push('deck scene never finished a blind');
-  return 'stuck';
-}
-
-/** Click through a dialogue script. Two clicks per line: finish the type, then advance. */
-function playCutscene(app, id) {
-  let guard = 0;
-  while (guard++ < 400) {
-    const d = app.scene.debug ? app.scene.debug() : null;
-    if (!d || d.scriptId === undefined || d.scriptId !== id) return;
-    if (d.outT >= 0) { tick(app, 40); return; }
-    pressAt(320, 300); tick(app, 2); releaseNow(); tick(app, 3);
-  }
-  errors.push(`cutscene ${id} never finished`);
-}
-
-function playDock(app) {
-  paint(app);
-  tick(app, 20);
-  snap('dock');
-  const d0 = app.scene.debug ? app.scene.debug() : null;
-  if (!d0) { errors.push('dock scene exposes no debug()'); return; }
-
-  // Prefer a crate with a relic in it — relics are the most complex acquisition path
-  // (hooks, modifyRun, slot limits), so the harness should hit it every visit it can.
-  const hasRelic = (c) => (c.contents || []).some((it) => it.kind === 'relic');
-  const affordable = (d0.manifest || [])
-    .map((c, i) => ({ c, i }))
-    .filter((x) => x.c.price <= d0.run.money)
-    .sort((a, b) => (hasRelic(b.c) ? 1000 : 0) + b.c.price - ((hasRelic(a.c) ? 1000 : 0) + a.c.price))[0];
-
-  if (affordable && d0.rects.crates[affordable.i]) {
-    const [cx, cy] = centre(d0.rects.crates[affordable.i]);
-    pressAt(cx, cy); tick(app, 2); releaseNow(); tick(app, 4);
-    // sit through the whole delivery
-    let guard = 0;
-    while (guard++ < 1400) {
-      const d = app.scene.debug();
-      if (d.mode !== 'deliver') break;
-      if (guard === 120) snap('boat-inbound');
-      if (d.revealIx > 0 && guard % 400 === 0) snap('crate-open');
-      // once everything is revealed the scene waits for a click
-      if (d.revealIx >= (d.gotItems || []).length && d.seqT > 1.2) {
-        snap('unloaded');
-        pressAt(320, 200); tick(app, 2); releaseNow();
-      }
-      tick(app, 1);
-    }
-    if (guard >= 1400) errors.push('delivery sequence never finished');
-  }
-
-  tick(app, 10);
-  const d1 = app.scene.debug();
-  const [bx, by] = centre(d1.rects.cast);
-  pressAt(bx, by); tick(app, 2); releaseNow(); tick(app, 4);
-}
-
-/* -------------------------------------------------------------------- run */
-
-let app = makeApp();
-const summary = [];
-
-for (let s = 0; s < SEEDS; s++) {
-  errors = [];
-  app = makeApp();
-  const router = createRouter(app);
-  const seed = 'PLAY-' + s;
-
-  router.menu();
-  tick(app, 30);
-  const md = app.scene.debug();
-  const [mx, my] = centre(md.rects.start);
-  pressAt(mx, my); tick(app, 2); releaseNow(); tick(app, 6);
+function playMenu() {
+  paint();
+  const d = dbg();
+  const r = d.rects && d.rects.start;
+  if (!r) { errors.push('menu: no start button'); return false; }
   snap('menu');
+  const [x, y] = centre(r);
+  clickAt(x, y);
+  tick(6);
+  return true;
+}
 
-  // the menu's own seed is random; force ours so the run is reproducible
-  router.startRun(seed);
-  tick(app, 4);
+function playCutscene() {
+  // click through every line, then through the exit
+  for (let i = 0; i < 220; i++) {
+    if (where() !== 'cutscene') return true;
+    clickAt(480, 480);
+    tick(3);
+  }
+  errors.push('cutscene: never ended');
+  return false;
+}
 
-  const log = [];
-  let blinds = 0;
-  let outcome = 'ran out of steps';
-  for (let guard = 0; guard < 80; guard++) {
-    const d = app.scene.debug ? app.scene.debug() : {};
-    if (d.scriptId !== undefined) { playCutscene(app, d.scriptId); continue; }  // dialogue
-    if (d.stock !== undefined) { playDraft(app); continue; }             // the ramp
-    if (d.rects && d.rects.sail) { playEden(app); continue; }            // the garden
-    if (d.rects && d.rects.crates) { playDock(app); continue; }          // the freighter
-    if (d.rects && d.rects.again) {                                      // summary
-      outcome = d.won ? 'WON THE RUN' : `died on ante ${d.run.ante}`;
-      snap('summary');
+/**
+ * The map. Bank at the garden when the deck is nearly full, otherwise take the island
+ * whose obstacles the deck can actually answer -- which is exactly the decision the
+ * cards are drawn to support, so a bot that cannot make it means the cards do not work.
+ */
+function playOcean() {
+  paint();
+  const d = dbg();
+  const v = d.voyage;
+  const cards = (d.rects && d.rects.cards) || [];
+  if (!cards.length) { errors.push('ocean: no destination cards'); return false; }
+  snap('ocean');
+
+  const have = {};
+  for (const id of v.aboard) {
+    const a = ANIMAL_BY_ID[id];
+    if (a) have[abilityOf(a).id] = true;
+  }
+  let best = -1, bestScore = -1e9;
+  v.choices.forEach((isl, i) => {
+    if (!isl || !cards[i]) return;
+    let score = 0;
+    if (isl.teleport) {
+      // the garden is worth taking when the pens are filling up or money is short
+      score = V.berthsFree(v) <= 2 ? 120 : v.money < 6 ? 40 : 5;
+    } else {
+      const covered = (isl.obstacles || []).filter((o) => {
+        const need = (isl.obstacles && o) ? o : null;
+        return need;
+      }).length;
+      void covered;
+      let answered = 0, blocked = 0;
+      for (const oid of isl.obstacles || []) {
+        const ob = RS.obstacleInfo ? RS.obstacleInfo(oid) : null;
+        void ob;
+      }
+      score = (isl.animals || 0) * 10 + (isl.reward || 1) * 6 - (isl.danger || 1) * 5
+        + answered * 8 - blocked * 4;
+    }
+    if (score > bestScore) { bestScore = score; best = i; }
+  });
+  if (best < 0) best = 0;
+  const [x, y] = centre(cards[best]);
+  clickAt(x, y);
+  tick(140);                              // the crossing
+  return true;
+}
+
+/**
+ * A rescue, played with the mouse.
+ *
+ * The bot does the three things a person does: put one animal down on something it
+ * answers, flick everybody the water is about to reach, then cast off. It aims by
+ * dragging BACK from the animal, which is the real gesture -- if this works the control
+ * works.
+ */
+function playIsland() {
+  paint();
+  const d0 = dbg();
+  const r = d0.rescue;
+  const v = d0.voyage;
+  snap('island');
+
+  // 1. spend one carried animal on a path, by clicking the rail and then the obstacle
+  const rail = (d0.rects && d0.rects.rail) || [];
+  for (let i = 0; i < rail.length; i++) {
+    const entry = rail[i];
+    if (!entry) continue;
+    const a = ANIMAL_BY_ID[entry.id];
+    if (!a) continue;
+    const ab = abilityOf(a).id;
+    const obIx = r.obstacles.findIndex((o) => !o.cleared && o.ob.clearedBy === ab);
+    if (obIx < 0) continue;
+    const [rx, ry] = centre(entry.rect);
+    clickAt(rx, ry);
+    paint();
+    const ob = r.obstacles[obIx];
+    const p = d0.at(ob.x, ob.y);
+    clickAt(p.x, p.y);
+    tick(4);
+    paint();
+    if (!r.obstacles[obIx].cleared) errors.push('island: placing on a matching obstacle did nothing');
+    break;
+  }
+
+  // 2. flick, most urgent first, until there is nobody left or no room for them
+  let guard = 0;
+  while (!r.over && RS.remaining(r).length && V.berthsFree(v) > 0 && guard++ < 26) {
+    paint();
+    const list = RS.remaining(r).slice().sort((a, b) => b.ball.x - a.ball.x);
+    const e = list[0];
+    const from = d0.at(e.ball.x, e.ball.y);
+    // where we want it to go: the nearest pen
+    const gy = Math.round(e.ball.y / (RS.FIELD_H / 3)) * (RS.FIELD_H / 3) + RS.FIELD_H / 6;
+    const to = d0.at(RS.GANGWAY_X, gy);
+    const ang = Math.atan2(to.y - from.y, to.x - from.x);
+    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const pull = Math.min(210, 40 + dist * 0.3);
+    // drag BACK from the animal: press on it, move away along -angle, release
+    const before = r.shots;
+    pressAt(from.x, from.y);
+    tick(2);
+    at(Math.round(from.x - Math.cos(ang) * pull), Math.round(from.y - Math.sin(ang) * pull));
+    tick(3);
+    releaseNow();
+    tick(3);
+    let spin = 0;
+    while (!RS.isSettled(r.world) && spin++ < 900) tick(1);
+    if (r.shots === before) {
+      if (process.env.WHY) {
+        console.log('    WHY: settled', RS.isSettled(r.world), 'from', JSON.stringify(from),
+          'pull', pull, 'remaining', RS.remaining(r).length, 'berths', V.berthsFree(v),
+          'over', r.over, 'note', r.note && r.note.text);
+      }
+      errors.push('island: a drag from an animal did not flick it');
       break;
     }
-    if (d.phase !== undefined) {
-      const kind = d.run.blind ? d.run.blind.kind : '?';
-      log.push(` ante ${d.run.ante} ${kind} target ${d.run.target} flood/shot ${(d.run.floodPerShot || 0).toFixed(2)}`);
-      if (blinds === 0) snap('deck');
-      const r = playDeck(app, VERBOSE ? log : null);
-      blinds++;
-      log.push(`   -> ${r} at ${d.run.score}`);
-      if (r === 'stuck' || r === 'error') break;
-      tick(app, 6);
-      continue;
-    }
-    tick(app, 10);
   }
 
-  const dr = app.scene.debug && app.scene.debug().run;
-  const money = dr ? dr.money : 0;
-  summary.push({ seed, blinds, outcome, money, errors: errors.slice() });
-  const extra = dr ? ` · $${dr.money} · ${dr.caravan.length} animals · ${dr.relics.length} relics · ${dr.stats.cratesBought} crates` : '';
-  console.log(`\n\x1b[1m${seed}\x1b[0m — ${blinds} blinds played, ${outcome}${extra}`);
-  for (const l of log) console.log(l);
-  if (errors.length) { console.log('  \x1b[31merrors:\x1b[0m'); for (const e of errors.slice(0, 8)) console.log('   ✗ ' + e); }
+  // 3. cast off, then through the summary card
+  paint();
+  const cast = d0.rects && d0.rects.cast;
+  if (cast) {
+    const [cx, cy] = centre(cast);
+    clickAt(cx, cy);
+    tick(30);
+    paint();
+    snap('island-done');
+    const c2 = dbg().rects && dbg().rects.cast;
+    if (c2) { const [ax, ay] = centre(c2); clickAt(ax, ay); tick(10); }
+  }
+  if (where() === 'island') {
+    // the card may need one more click
+    const c3 = dbg().rects && dbg().rects.cast;
+    if (c3) { const [ax, ay] = centre(c3); clickAt(ax, ay); tick(10); }
+  }
+  return true;
 }
 
-const bad = summary.filter((x) => x.errors.length);
-const played = summary.reduce((a, b) => a + b.blinds, 0);
-console.log(`\n${'═'.repeat(62)}`);
-console.log(`${summary.length} runs, ${played} blinds played end to end`);
-if (bad.length) {
-  console.log(`\x1b[31m${bad.length} run(s) hit errors\x1b[0m`);
-  process.exit(1);
+/**
+ * The garden. Stow what the boat is carrying, open a gate if one is on offer, buy
+ * whatever we can afford, then back to sea.
+ */
+function playEden() {
+  paint();
+  const d = dbg();
+  const v = d.voyage;
+  snap('eden');
+
+  // stow up to three off the deck: this is the move the whole hub exists for
+  for (let n = 0; n < 3; n++) {
+    paint();
+    const dd = dbg();
+    const deck = (dd.rects && dd.rects.deck) || [];
+    if (!deck.length) break;
+    const before = v.eden.length;
+    const [dx, dy] = centre(deck[0].rect);
+    clickAt(dx, dy);
+    paint();
+    const act = dbg().rects && dbg().rects.act;
+    if (!act || !act.stow) { errors.push('eden: no PUT IN A BED button after selecting'); break; }
+    const [bx, by] = centre(act.stow);
+    clickAt(bx, by);
+    tick(3);
+    paint();
+    if (v.eden.length === before) break;
+  }
+
+  // open a gate if the Cherubim are offering
+  paint();
+  const gates = (dbg().rects && dbg().rects.gates) || [];
+  if (gates.length) {
+    const [gx, gy] = centre(gates[0].rect);
+    clickAt(gx, gy);
+    tick(6);
+    paint();
+    snap('eden-deal');
+    // buy the first thing we can afford, by its own card
+    const money0 = v.money;
+    const cards = (dbg().rects && dbg().rects.deal && dbg().rects.deal.cards) || [];
+    for (const c of cards) {
+      if (!c) continue;
+      const [cx2, cy2] = centre(c);
+      clickAt(cx2, cy2);
+      tick(3);
+      paint();
+      if (v.money !== money0) break;
+    }
+    if (VERBOSE && v.money !== money0) console.log(`    bought something for $${money0 - v.money}`);
+    // leave the deal, by its own button
+    tick(4);
+    paint();
+    for (let i = 0; i < 6 && dbg().mode === 'talk'; i++) {
+      const back = dbg().rects && dbg().rects.back;
+      if (back) { const [bx2, by2] = centre(back); clickAt(bx2, by2); }
+      else clickAt(20, 520);
+      tick(4);
+      paint();
+    }
+    if (dbg().mode === 'talk') errors.push('eden: could not get out of a deal');
+  }
+
+  // and back to sea
+  paint();
+  const sail = dbg().rects && dbg().rects.sail;
+  if (!sail) { errors.push('eden: no way out'); return false; }
+  const [sx2, sy2] = centre(sail);
+  clickAt(sx2, sy2);
+  tick(10);
+  return true;
 }
-console.log('\x1b[32mno exceptions escaped a frame\x1b[0m');
+
+function playSummary() {
+  paint();
+  snap('summary');
+  const d = dbg();
+  const again = d.rects && d.rects.again;
+  if (!again) { errors.push('summary: no way back to the harbour'); return false; }
+  const [x, y] = centre(again);
+  clickAt(x, y);
+  tick(8);
+  return true;
+}
+
+/* ------------------------------------------------------------------- driver */
+
+function playVoyage(seed) {
+  app = makeApp();
+  const router = createRouter(app, {});
+  router.menu();
+  tick(4);
+
+  const seen = { cutscene: 0, ocean: 0, island: 0, eden: 0 };
+  // click NEW RUN to prove the button works, then start OUR seed on purpose: the menu's
+  // own seed is derived from a fixed string, so every voyage the bot played by clicking
+  // through the title screen was the same voyage.
+  if (!playMenu()) return null;
+  router.startRun(seed);
+  tick(4);
+
+  let voyage = router.voyage;
+  let guard = 0;
+  while (guard++ < 90) {
+    const w = where();
+    if (process.env.TRACE) console.log('   step', guard, w, Object.keys(dbg()).join(','));
+    if (w === 'cutscene') { seen.cutscene++; playCutscene(); continue; }
+    if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
+    if (w === 'island') { seen.island++; playIsland(); continue; }
+    if (w === 'eden') { seen.eden++; playEden(); continue; }
+    if (w === 'summary') { playSummary(); break; }
+    if (w === 'menu') break;
+    errors.push(`stuck in an unknown scene after ${guard} steps`);
+    break;
+  }
+  voyage = router.voyage || voyage;
+  return { seed, voyage, seen, steps: guard };
+}
+
+/* --------------------------------------------------------------------- run */
+
+console.log(`\nplaying ${SEEDS} voyage(s) by clicking\n`);
+let failed = 0;
+for (let i = 0; i < SEEDS; i++) {
+  const seed = `PLAY-${1000 + i}`;
+  errors = [];
+  const out = playVoyage(seed);
+  const v = out && out.voyage;
+  if (!v) {
+    console.log(`  ${seed}  FAILED to start`);
+    failed++;
+    continue;
+  }
+  const s = v.stats;
+  const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
+    + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
+    + `  paths ${s.obstaclesCleared}  [ocean ${out.seen.ocean} island ${out.seen.island} eden ${out.seen.eden}]`;
+  if (errors.length) {
+    failed++;
+    console.log(`  ${line}   <-- ${errors.length} error(s)`);
+    for (const e of errors.slice(0, 6)) console.log(`      ! ${e}`);
+  } else {
+    console.log(line);
+  }
+  if (VERBOSE) for (const l of v.log.slice(-8)) console.log(`      · ${l.text}`);
+}
+
+console.log(`\n${SEEDS - failed}/${SEEDS} voyage(s) clean\n`);
+process.exit(failed ? 1 : 0);

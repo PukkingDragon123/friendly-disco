@@ -610,7 +610,9 @@ export function drawFolkPortrait(g, id, x, y, w, h, t = 0, o = {}) {
   // alone cropped the hats, halos and brow plates off the top -- which are precisely the
   // details that tell the cast apart.
   const SHOW = 34;                        // rows 0..34: everything above the knees
-  const sc = Math.max(2, Math.floor(h / SHOW));
+  // clamped by WIDTH as well: scaling to the height alone overflowed a narrow frame and
+  // sliced the shoulders off, which is how a portrait box ends up cropping a hat
+  const sc = Math.max(1, Math.min(Math.floor(h / SHOW), Math.floor(w / FOLK_W)));
   const pose = o.pose || 'idle';
   const bob = Math.round(Math.sin(t * (o.talking ? 5 : 1.4)) * 1);
   const blink = ((t * 0.9) % 4) < 0.12;

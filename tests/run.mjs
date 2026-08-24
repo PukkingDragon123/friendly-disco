@@ -48,6 +48,8 @@ const M = {};
     ['boatart', '../src/render/boat.js'], ['islandart', '../src/render/islandart.js'],
     ['folk', '../src/render/folk.js'], ['items', '../src/data/items.js'],
     ['rescue', '../src/game/rescue.js'], ['obart', '../src/render/obstacles.js'],
+    ['gear', '../src/data/gear.js'], ['quests', '../src/data/quests.js'],
+    ['npcs', '../src/data/npcs.js'], ['garden', '../src/game/garden.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -1253,6 +1255,201 @@ if (section('rescue') && M.rescue && M.voyage && M.islands) {
   }
 }
 
+/* ----------------------------------------------------------------- garden */
+
+if (section('garden') && M.garden && M.gear && M.quests && M.npcs) {
+  const G = M.garden;
+  const V = M.voyage;
+  const { GEAR, GEAR_BY_ID, SLOTS, BONUS_KEYS, bonusText } = M.gear;
+  const { QUESTS, progressOf, currentQuest } = M.quests;
+  const { NPCS, NPC_BY_ID } = M.npcs;
+  const palOk = (k) => M.palette.palKeys().indexOf(k) >= 0;
+
+  // --- the relics: three slots, a closed bonus vocabulary, and every key wired
+  const bySlot = { hold: 0, wear: 0, consume: 0 };
+  for (const r of GEAR) {
+    ok(SLOTS.indexOf(r.slot) >= 0, `relic ${r.id} sits in a real slot`, r.slot);
+    bySlot[r.slot]++;
+    ok(!!r.name && !!r.blurb, `relic ${r.id} is written`);
+    ok(r.price > 0, `relic ${r.id} costs something`);
+    ok(M.uikit.hasIcon(r.icon), `relic ${r.id} icon exists`, r.icon);
+    ok(palOk(r.color), `relic ${r.id} colour is a palette key`, r.color);
+    ok(!!NPC_BY_ID[r.seller], `relic ${r.id} has a seller who exists`, r.seller);
+    for (const k of Object.keys(r.bonus || {})) {
+      ok(BONUS_KEYS.indexOf(k) >= 0, `relic ${r.id} bonus key ${k} is in the vocabulary`);
+    }
+    if (r.slot === 'consume') {
+      ok(['berth', 'tide', 'mend', 'revive'].indexOf(r.use) >= 0,
+        `consumable ${r.id} has a known use`, String(r.use));
+    } else {
+      ok(Object.keys(r.bonus || {}).length > 0, `relic ${r.id} actually does something`);
+      ok(bonusText(r).length > 0, `relic ${r.id} can say what it does`);
+    }
+  }
+  for (const slot of SLOTS) ok(bySlot[slot] >= 3, `at least three relics for the ${slot} slot`, String(bySlot[slot]));
+
+  // EVERY bonus key must move a real number. A relic whose key nothing reads is a relic
+  // the player paid for that does nothing, and that is the worst bug in a shop.
+  for (const key of BONUS_KEYS) {
+    const v1 = V.newVoyage('BON-' + key);
+    const base = {
+      berths: V.capacity(v1), hull: V.hullMax(v1), basket: V.holdSize(v1),
+      beds: V.gardenSize(v1), sail: V.floodPerLeg(v1), coin: V.sellPrice(v1, v1.aboard[0]),
+    };
+    const flag = key === 'dry' || key === 'sure';
+    const amount = flag ? true : key === 'sail' || key === 'patience' ? 0.2 : 2;
+    const fake = {
+      id: 'test', name: 'Test', slot: 'wear', color: 'gold', icon: 'star',
+      bonus: { [key]: amount },
+    };
+    V.equip(v1, fake);
+    if (key === 'berths') ok(V.capacity(v1) > base.berths, 'berths moves the pens');
+    else if (key === 'hull') ok(V.hullMax(v1) > base.hull, 'hull moves the hull');
+    else if (key === 'basket') ok(V.holdSize(v1) > base.basket, 'basket moves the basket');
+    else if (key === 'beds') ok(V.gardenSize(v1) > base.beds, 'beds moves the garden');
+    else if (key === 'sail') ok(V.floodPerLeg(v1) < base.sail, 'sail moves the tide');
+    else if (key === 'coin') ok(V.sellPrice(v1, v1.aboard[0]) > base.coin, 'coin moves a price');
+    else if (key === 'reach') {
+      const r1 = M.rescue.newRescue(v1, M.islands.ISLANDS[0], 'x');
+      const plain = M.rescue.newRescue(V.newVoyage('BON-plain'), M.islands.ISLANDS[0], 'x');
+      ok(r1.world.friction < plain.world.friction, 'reach moves the friction');
+    } else if (key === 'patience') {
+      const r1 = M.rescue.newRescue(v1, M.islands.ISLANDS[0], 'x');
+      ok(r1.step < M.rescue.tidePerAction(M.islands.ISLANDS[0]), 'patience slows the tide');
+    } else if (key === 'dry') {
+      const r1 = M.rescue.newRescue(v1, M.islands.ISLANDS[0], 'x');
+      ok(r1.dry === true, 'dry reaches the rescue');
+    } else if (key === 'sure') {
+      const r1 = M.rescue.newRescue(v1, M.islands.ISLANDS[0], 'x');
+      ok(r1.spare === 1, 'sure reaches the rescue');
+    }
+  }
+
+  // --- a consumable is spent once and then the slot is empty
+  {
+    const v1 = V.newVoyage('CONS');
+    V.equip(v1, GEAR_BY_ID.rib_of_adam);
+    const cap0 = V.capacity(v1);
+    ok(V.spendConsumable(v1) === GEAR_BY_ID.rib_of_adam, 'the rib is spent');
+    ok(V.capacity(v1) > cap0, 'and the pens are bigger for good');
+    ok(v1.slots.consume === null, 'and the slot is empty');
+    ok(V.spendConsumable(v1) === null, 'and cannot be spent twice');
+  }
+
+  // --- the cast, and the three gates
+  ok(NPCS.length === 5, 'five in the cast', String(NPCS.length));
+  for (const n of NPCS) {
+    ok(!!n.greet && !!n.buy && !!n.broke, `${n.id} is written`);
+    ok((n.idle || []).length >= 3, `${n.id} has something to say while you browse`);
+    ok(['items', 'gear', 'upgrades'].indexOf(n.sells) >= 0, `${n.id} sells a known kind`);
+    ok(M.folk.FOLK_IDS.indexOf(n.folk) >= 0, `${n.id} has a body to stand in`, n.folk);
+    ok(palOk(n.color), `${n.id} colour is a palette key`, n.color);
+  }
+  {
+    const v1 = V.newVoyage('GATE');
+    G.enterGarden(v1);
+    ok(v1.gateOffer.length === 3, 'three gates on the first visit', String(v1.gateOffer.length));
+    ok(new Set(v1.gateOffer).size === 3, 'and no two of them are the same person');
+    const first = v1.gateOffer[0];
+    ok(G.openGate(v1, first), 'a gate opens');
+    ok(v1.summoned.indexOf(first) >= 0, 'and somebody came through');
+    ok(v1.gateOffer.length === 0, 'and the other two shut: one a visit');
+    ok(G.openGate(v1, v1.gateOffer[0]) === false, 'so a second gate cannot be opened');
+    ok(((v1.deals || {})[first] || []).length >= 1, 'and they brought something to sell');
+    // never offered twice across the whole run
+    let sawTwice = false;
+    for (let i = 0; i < 8; i++) {
+      G.enterGarden(v1);
+      for (const id of v1.gateOffer) if (v1.summoned.indexOf(id) >= 0) sawTwice = true;
+      if (v1.gateOffer.length) G.openGate(v1, v1.gateOffer[0]);
+    }
+    ok(!sawTwice, 'nobody already in the garden is offered again');
+    ok(v1.summoned.length === 4, 'all four can eventually be summoned', String(v1.summoned.length));
+  }
+
+  // --- buying
+  {
+    const v1 = V.newVoyage('BUY');
+    v1.money = 60;
+    v1.summoned.push('snake', 'noah', 'eve');
+    G.enterGarden(v1);
+    let bought = 0;
+    for (const who of ['snake', 'noah', 'eve']) {
+      const deal = (v1.deals[who] || []).slice();
+      ok(deal.length >= 1, `${who} lays something out`, String(deal.length));
+      for (const offer of deal) {
+        const d = G.describeOffer(offer);
+        ok(!!d && !!d.name && !!d.blurb, `${who}'s ${offer.kind} ${offer.id} describes itself`);
+        const money0 = v1.money;
+        const got = G.buyOffer(v1, who, offer);
+        if (got) {
+          bought++;
+          ok(v1.money < money0, `paying for ${offer.id} costs money`,
+            `${money0} -> ${v1.money}`);
+          ok((v1.deals[who] || []).indexOf(offer) < 0, `${offer.id} leaves the blanket`);
+        }
+      }
+    }
+    ok(bought >= 3, 'a purse of sixty buys at least three things', String(bought));
+    const v2 = V.newVoyage('BROKE');
+    v2.money = 0;
+    v2.summoned.push('snake');
+    G.enterGarden(v2);
+    const off = (v2.deals.snake || [])[0];
+    if (off) ok(G.buyOffer(v2, 'snake', off) === null, 'and nothing is free');
+  }
+
+  // --- Noah's list: read off the ledger, one at a time, and each one pays
+  {
+    const v1 = V.newVoyage('QUEST');
+    for (const q of QUESTS) {
+      ok(!!q.ask && !!q.done, `quest ${q.id} is written`);
+      ok(q.goal > 0, `quest ${q.id} has a goal`);
+      ok(progressOf(v1, q) === 0 || q.stat === 'gardened', `quest ${q.id} starts at nothing`);
+      ok(!!q.reward && Object.keys(q.reward).length, `quest ${q.id} pays something`);
+      if (q.reward.gear) ok(!!GEAR_BY_ID[q.reward.gear], `quest ${q.id} pays a real relic`);
+      if (q.reward.item) ok(!!M.items.ITEM_BY_ID[q.reward.item], `quest ${q.id} pays a real item`);
+      if (q.reward.upgrade) ok(V.UPGRADE_IDS.indexOf(q.reward.upgrade) >= 0,
+        `quest ${q.id} pays a real upgrade`);
+    }
+    ok(currentQuest(v1) === QUESTS[0], 'he starts at the top of his list');
+    ok(G.claimQuest(v1) === null, 'and will not pay for work not done');
+    v1.stats.rescued = 99;
+    const now = G.questNow(v1);
+    ok(now && now.done, 'a finished job reads as finished');
+    const money0 = v1.money;
+    const q0 = G.claimQuest(v1);
+    ok(!!q0, 'and hands in');
+    ok(v1.money > money0, 'and pays');
+    ok(currentQuest(v1) !== q0, 'and he moves on to the next one');
+    ok(G.claimQuest(v1) !== q0, 'and the same job cannot be handed in twice');
+    // the whole list can be finished
+    let guard = 0;
+    while (currentQuest(v1) && guard++ < 40) {
+      const q = currentQuest(v1);
+      if (q.stat === 'gardened') { while (v1.eden.length < q.goal) v1.eden.push('cow'); }
+      else v1.stats[q.stat] = q.goal;
+      ok(!!G.claimQuest(v1), `quest ${q.id} can be handed in`);
+    }
+    ok(currentQuest(v1) === null, 'and the list can be finished', String(guard));
+  }
+
+  // --- sitting with an animal: the free, slow road to loyalty
+  {
+    const v1 = V.newVoyage('PET');
+    const id = v1.aboard[0];
+    V.stow(v1, id);
+    for (let i = 1; i < G.PETS_FOR_LOYALTY; i++) {
+      const res = G.pet(v1, id);
+      ok(!res.loyal, `sitting ${i} time(s) is not enough`);
+      ok(G.petsOf(v1, id) === i, 'and it is counted');
+    }
+    const last = G.pet(v1, id);
+    ok(last.loyal && V.isLoyal(v1, id), 'and the third time it will not leave you');
+    ok(G.pet(v1, id).already, 'and after that it is already yours');
+  }
+}
+
 /* ------------------------------------------------------------ render smoke */
 
 if (section('render') && M.pixel) {
@@ -1260,7 +1457,9 @@ if (section('render') && M.pixel) {
     ['menu', '../src/scenes/menu.js', 'makeMenuScene', () => ({ onStart: () => {} })],
     ['table', '../src/scenes/table.js', 'makeTableScene', (run) => ({ run, onExit: () => {} })],
     ['shop', '../src/scenes/shop.js', 'makeShopScene', (run) => ({ run, onDone: () => {} })],
-    ['gameover', '../src/scenes/gameover.js', 'makeGameOverScene', (run) => ({ run, won: true, onDone: () => {} })],
+    ['gameover', '../src/scenes/gameover.js', 'makeGameOverScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-over'), won: true, onDone: () => {},
+    })],
     ['ocean', '../src/scenes/ocean.js', 'makeOceanScene', () => ({
       voyage: M.voyage.newVoyage('RENDER-ocean'), onArrive: () => {}, onOver: () => {},
     })],

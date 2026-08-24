@@ -34,6 +34,7 @@ import { OBSTACLE_BY_ID } from '../data/obstacles.js';
 import { ITEM_BY_ID } from '../data/items.js';
 import {
   takeAboard, berthsFree, isLoyal, makeLoyal, useItem, lose, say, repairHull,
+  relicBonus, relicFlag,
 } from './voyage.js';
 
 /* ------------------------------------------------------------------ geometry
@@ -93,7 +94,9 @@ export function newRescue(v, island, tag) {
   const rng = makeRng(`${v.seed}/rescue/${island.id}/${tag || v.stats.legs}`);
   const world = createWorld({
     w: FIELD_W, h: FIELD_H,
-    friction: WORLD_FRICTION,
+    // the crook's reach is a friction discount, which is the honest place for it: a
+    // longer reach IS a ball that keeps rolling
+    friction: WORLD_FRICTION / (1 + relicBonus(v, 'reach')),
     lookup: (id) => {
       const a = ANIMAL_BY_ID[id];
       return a ? { mass: a.mass, size: 1 } : null;
@@ -103,7 +106,9 @@ export function newRescue(v, island, tag) {
   const r = {
     voyage: v, island, rng, world,
     tide: 0,
-    step: tidePerAction(island),
+    step: Math.max(0.03, tidePerAction(island) - relicBonus(v, 'patience')),
+    dry: relicFlag(v, 'dry'),
+    spare: relicFlag(v, 'sure') ? 1 : 0,      // the first loss this island does not happen
     strand: [],            // the animals to save: {ball, animalId, state}
     helpers: [],           // brought animals put down: {animalId, x, y, ability, obId}
     obstacles: [],
@@ -240,6 +245,37 @@ export function note(r, text, color) {
   return r;
 }
 
+/**
+ * Take one, or find a reason not to.
+ *
+ * Every loss in a rescue goes through here, because there are three separate mercies --
+ * loyalty, the Dove's Favour, and the dowsing rod's shallow way -- and having each of
+ * them checked in three different places is how one of them quietly stops working.
+ */
+function claim(r, entry, why, washBack) {
+  if (isLoyal(r.voyage, entry.animalId)) return 'loyal';
+  if (washBack && r.dry) {
+    // the shallow way: put it back on the shore side of whatever nearly had it
+    const z = entry.ball.zone;
+    entry.ball.vx = 0; entry.ball.vy = 0;
+    entry.ball.x = Math.max(GANGWAY_X + BALL_R + 2, (z ? z.x - z.r : entry.ball.x) - BALL_R - 4);
+    entry.ball.zone = null;
+    note(r, 'The rod found the shallow way. It washes back ashore.', 'water3');
+    return 'dry';
+  }
+  if (r.spare > 0) {
+    r.spare--;
+    note(r, "The dove's favour. Not this one.", 'cream');
+    return 'spared';
+  }
+  entry.state = 'drowned';
+  entry.ball.sunk = true;
+  r.drowned.push(entry.animalId);
+  r.voyage.stats.drowned++;
+  void why;
+  return null;
+}
+
 /* --------------------------------------------------------------------- tide */
 
 /**
@@ -255,11 +291,7 @@ export function advanceTide(r, n = 1) {
     if (s.state !== 'ashore') continue;
     if (s.ball.sunk) continue;
     if (s.ball.x + BALL_R < line) continue;
-    if (isLoyal(r.voyage, s.animalId)) continue;         // the apple's whole promise
-    s.state = 'drowned';
-    s.ball.sunk = true;
-    r.drowned.push(s.animalId);
-    r.voyage.stats.drowned++;
+    claim(r, s, 'the water');                            // loyalty and the dove read here
   }
   for (let i = r.helpers.length - 1; i >= 0; i--) {
     const hp = r.helpers[i];
@@ -419,12 +451,10 @@ export function update(r, dt) {
       if (phys !== 'gap' && phys !== 'strike') continue;
       const s = entryOf(r, e.ball);
       if (!s || s.state !== 'ashore') continue;
-      if (isLoyal(r.voyage, s.animalId)) { out.push({ kind: 'saved', animalId: s.animalId, x: e.x, y: e.y }); continue; }
-      s.state = 'drowned';
-      s.ball.sunk = true;
-      r.drowned.push(s.animalId);
-      r.voyage.stats.drowned++;
-      out.push({ kind: 'lost', animalId: s.animalId, why: z.kind, x: e.x, y: e.y });
+      const spared = claim(r, s, z.kind, false);
+      out.push({
+        kind: spared ? 'saved' : 'lost', animalId: s.animalId, why: z.kind, x: e.x, y: e.y,
+      });
       continue;
     }
     if (e.type === 'stop') {
@@ -433,12 +463,11 @@ export function update(r, dt) {
       if (!z || z.physics !== 'kill') continue;
       const s = entryOf(r, e.ball);
       if (!s || s.state !== 'ashore') continue;
-      if (isLoyal(r.voyage, s.animalId)) { out.push({ kind: 'saved', animalId: s.animalId, x: e.ball.x, y: e.ball.y }); continue; }
-      s.state = 'drowned';
-      s.ball.sunk = true;
-      r.drowned.push(s.animalId);
-      r.voyage.stats.drowned++;
-      out.push({ kind: 'lost', animalId: s.animalId, why: z.kind, x: e.ball.x, y: e.ball.y });
+      const spared = claim(r, s, z.kind, true);   // resting in deep water: the rod applies
+      out.push({
+        kind: spared ? 'saved' : 'lost', animalId: s.animalId, why: z.kind,
+        x: e.ball.x, y: e.ball.y,
+      });
       continue;
     }
     out.push(e);
@@ -472,10 +501,7 @@ export function endRescue(r, why) {
   r.why = why || 'cast off';
   for (const s of r.strand) {
     if (s.state !== 'ashore') continue;
-    if (isLoyal(r.voyage, s.animalId)) continue;
-    s.state = 'drowned';
-    r.drowned.push(s.animalId);
-    r.voyage.stats.drowned++;
+    claim(r, s, 'left behind');
   }
   for (const hp of r.helpers.slice()) {
     if (takeAboard(r.voyage, hp.animalId)) continue;

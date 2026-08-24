@@ -43,12 +43,16 @@ export const PROLOGUE = {
     L('golem', '(it has no face to speak with. There is a word driven into its brow.)', 'rays'),
     L('god', 'It is made of the riverbank and it will last exactly as long as the word does.', null),
     L('noah', 'What is it FOR.', null),
-    L('god', 'Pushing. Every creature on that deck goes to a berth it can live in — and it',
+    L('god', 'Fetching. Everything alive is on high ground now, and the high ground is',
       null),
-    L('god', 'will push them there one at a time until the water is over the rail.', 'wave'),
-    L('noah', 'And if it misses?', null),
+    L('god', 'getting smaller. It will go out and bring them back, one at a time.', 'wave'),
+    L('noah', 'All of them?', null),
+    L('god', 'As many as the boat will hold. That is the whole of the arithmetic.', null),
+    L('noah', 'And the ones it cannot carry?', null),
     L('golem', '(the light behind its eyes does not change. It waits.)', null),
-    L('god', 'Then it is clay again, and I will make another one. Begin.', 'lightning'),
+    L('god', 'It will have to choose. Give it something to choose WITH.', 'flash'),
+    L('noah', '(he puts an olive-wood crook in its hand. The crook lights at the crook.)', 'rays'),
+    L('god', 'Begin. The water started an hour ago.', 'lightning'),
   ],
 };
 
@@ -56,28 +60,22 @@ export const TUTORIAL = {
   id: 'tutorial',
   bg: { timeOfDay: 0.28, storm: 0.12 },
   music: 'deck',
-  title: 'HOW TO MOVE AN ANIMAL',
+  title: 'TWO THINGS THE CROOK DOES',
   lines: [
-    L('noah', 'Right. You shove them. Any of them, whichever one you like — they all shove.', null),
-    L('noah', 'The six mouths round the rail are BERTHS. Each one offers a condition.',
-      'rays'),
-    L('noah', 'Warm. Bushy. Soaked. That sort of thing. Read the plate on the rail.', null),
-    L('noah', 'Every animal wants two or three conditions, in order. Its FAVOURITE pays triple.',
-      'flash'),
-    L('noah', 'Second or third choice still pays — it is content, not delighted. Give it',
-      null),
-    L('noah', 'something it hates and it will cost you more than leaving it on the deck.',
-      null),
-    L('noah', 'They notice each other too. A fox berthed next to a rabbit will not stay hungry.',
-      null),
-    L('golem', '(it looks at the fox. The fox stops looking back.)', null),
-    L('noah', 'One more thing, and I am sorry about it. There is no aiming line.', 'shake'),
-    L('noah', 'You get the power gauge and your own eye. I did not build a protractor.', null),
-    L('noah', 'The water climbs one mark per shove. Count before you swing.', 'wave'),
+    L('noah', 'Right. Two things, and then I am going to go and sit down.', null),
+    L('noah', 'One. An animal on the ground is a BALL. Pull the crook back off it and let go.', null),
+    L('golem', '(a sheep rolls the length of the island and comes to rest against the hull)', 'wave'),
+    L('noah', 'It bounces off rock. It bogs in mud. It slides on ice. Learn the ground.', null),
+    L('noah', 'Two. An animal you are ALREADY CARRYING can be put down on what is in the way.', null),
+    L('noah', 'The ox shifts a boulder. The pig digs. The duck holds the channel open.', 'rays'),
+    L('golem', '(it looks at the four on the deck, and then at the briar)', null),
+    L('noah', 'And it STAYS there, mind. You put one down, you had better want the path.', null),
+    L('noah', 'Every flick and every one you put down lets the water in another step.', 'wave'),
+    L('noah', 'So it is never how many you can save. It is what order, and what it costs.', null),
+    L('golem', '(the word on its brow is the only thing it ever says. It goes.)', 'flash'),
   ],
 };
 
-// One beat per ante: the flood eats the world while you work.
 export const ANTE_LINES = {
   1: [L('god', 'The first rain. For now, it is only rain.', 'rain')],
   2: [L('god', 'The rivers have turned around and begun climbing their own banks.', 'wave')],
@@ -152,6 +150,43 @@ export const BOSS_LINES = {
     L('god', 'So have you. Go on.', 'rays')],
 };
 
+/* ---------------------------------------------------------- the chapters
+
+Four beats, one per chapter, and every one of them is about the same thing getting
+worse. Kept to three lines each: a chapter opener that outstays its welcome is a chapter
+opener the player skips, and then the one that matters gets skipped too.
+*/
+export const CHAPTER_LINES = {
+  2: [
+    L('noah', 'The low islands are gone. Not flooded. GONE.', 'wave'),
+    L('golem', '(it looks at the deck, and then at the beds it has not filled)', null),
+    L('noah', 'Whatever you were saving room for, this is it.', null),
+  ],
+  3: [
+    L('noah', 'Forty days, they said. Nobody said forty days of THIS.', 'shake'),
+    L('god', 'The mountains are next.', 'rays'),
+    L('noah', 'Then we go where the mountains are, and we go quickly.', null),
+  ],
+  4: [
+    L('disaster', 'THERE IS NOWHERE LEFT ABOVE THE WATER.', 'lightning'),
+    L('god', 'There is one place. Get to it.', 'rays'),
+    L('golem', '(it has been carrying them for a hundred and fifty days. It does not stop.)', null),
+  ],
+};
+
+/** The short beat that opens a chapter. Null for chapter one -- the prologue is that. */
+export function chapterScript(n) {
+  const lines = CHAPTER_LINES[n];
+  if (!lines || !lines.length) return null;
+  return {
+    id: 'chapter' + n,
+    bg: { timeOfDay: n >= 4 ? 0.74 : n >= 3 ? 0.52 : 0.3, storm: Math.min(0.9, 0.12 + n * 0.2) },
+    music: n >= 3 ? 'deck_tense' : 'deck',
+    title: 'CHAPTER ' + n,
+    lines,
+  };
+}
+
 /* -------------------------------------------------------------- accessors */
 
 export const SCRIPTS = {
@@ -161,7 +196,14 @@ export const SCRIPTS = {
   epilogue_lose: EPILOGUE_LOSE,
 };
 
-export function getScript(id) { return SCRIPTS[id] || null; }
+export function getScript(id) {
+  if (SCRIPTS[id]) return SCRIPTS[id];
+  // chapter2 .. chapter4 are built rather than listed, so the router can ask for a beat
+  // by name without knowing whether one exists
+  const m = /^chapter(\d+)$/.exec(String(id || ''));
+  if (m) return chapterScript(Number(m[1]));
+  return null;
+}
 
 /** The short beat that opens an ante. */
 export function anteScript(ante) {

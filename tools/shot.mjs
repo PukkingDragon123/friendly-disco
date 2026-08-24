@@ -22,7 +22,7 @@ const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 
 // run.js pulls in every data module, so only load it for the scenes that need it
-const NEEDS_RUN = ['table', 'shop', 'over', 'draft', 'eden'];
+const NEEDS_RUN = ['table', 'shop', 'over', 'draft'];
 void NEEDS_RUN;
 let newRun = () => ({}), startBlind = () => {}, advance = () => {};
 if (NEEDS_RUN.includes(which)) {
@@ -78,151 +78,22 @@ switch (which) {
     break;
   }
   case 'eden': {
+    const V = await import('../src/game/voyage.js');
     const { makeEdenScene } = await import('../src/scenes/eden.js');
-    const R2 = await import('../src/game/run.js');
-    R2.beginDraft(run); R2.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
-    startBlind(run); run.money = Number(process.env.CASH || 26); advance(run);
+    const voyage = V.newVoyage(seed);
+    voyage.money = Number(process.env.MONEY || 30);
+    if (process.env.TIER) {
+      const n = Number(process.env.TIER);
+      for (const k of V.UPGRADE_IDS) voyage.tiers[k] = n;
+    }
+    if (process.env.EDEN) {
+      for (const id of voyage.stock.slice(0, Number(process.env.EDEN))) voyage.eden.push(id);
+    }
+    if (process.env.SUMMON) for (const id of process.env.SUMMON.split(',')) voyage.summoned.push(id);
     scene = makeEdenScene();
-    scene.enter({ run, onDone: () => {} }, app);
-    if (process.env.BUSH) {
-      const d = scene.debug();
-      const ap = process.env.APPLE || 'golden';
-      d.basket.push(ap);
-      d.plant(Number(process.env.BUSH));
-      const rv = scene.debug().reveal;
-      if (rv && process.env.PHASE) { rv.phase = process.env.PHASE; rv.k = Number(process.env.PK || 0.6); }
-    }
-    mouse(480, 300);
-    break;
-  }
-  case 'shop': {
-    const { makeShopScene } = await import('../src/scenes/shop.js');
-    startBlind(run); run.money = 24; advance(run);
-    scene = makeShopScene();
-    scene.enter({ run, onDone: () => {} }, app);
-    mouse(320, 200);
-    break;
-  }
-  case 'over': {
-    const { makeGameOverScene } = await import('../src/scenes/gameover.js');
-    startBlind(run);
-    run.stats.blindsCleared = 11; run.stats.exact = 44; run.stats.bestShot = 8210;
-    scene = makeGameOverScene();
-    scene.enter({ run, won: process.env.WON === '1', onDone: () => {} }, app);
-    break;
-  }
-  case 'deck': {
-    // The 2.5D deck on its own — needs only physics + table + animals, so it can be
-    // reviewed before the data layer is finished.
-    const PH = await import('../src/game/physics.js');
-    const T = await import('../src/render/table.js');
-    const { ANIMAL_BY_ID, STARTER_DECK } = await import('../src/data/animals.js');
-    const { createSeascape } = await import('../src/render/seascape.js');
-    const { makeRng } = await import('../src/core/rng.js');
-    const { createParticles } = await import('../src/core/particles.js');
-    const rng = makeRng(process.env.SEED || 'deck');
-    const world = PH.createWorld({});
-    const assignment = { tl: 'savanna', tm: 'arctic', tr: 'jungle', bl: 'ocean', bm: 'desert', br: 'farm' };
-    const deck = T.createDeck({ seed: 1337, assignment });
-    PH.setGates(world, T.buildGates(assignment, {}));
-    PH.rack(world, STARTER_DECK.slice(0, 10), rng, process.env.RACK || 'triangle');
-    const sea2 = createSeascape('deckdemo', {});
-    const ps = createParticles({ limit: 300, seed: 'd' });
-    if (process.env.BREAK === '1') {
-      // put a striker behind the rack and drive it into the pack, like a real break
-      const cueBall = PH.addBall(world, { animalId: STARTER_DECK[0], x: PH.TABLE_W * 0.2, y: PH.TABLE_H * 0.5 });
-      const pack = world.balls[0];
-      PH.strike(world, cueBall, Math.atan2(pack.y - cueBall.y, pack.x - cueBall.x), 1, 0.15);
-      for (let i = 0; i < Number(process.env.BREAKFRAMES || 90); i++) PH.step(world, 1 / 60);
-    }
-    const sel = world.balls.find((b) => !b.sunk);
-
-    scene = {
-      update(dt) { sea2.update(dt); deck.update(dt); ps.update(dt); },
-      draw() {
-        sea2.draw(g, { x: 0, y: 0, w: SW, h: SH, horizonY: 150, timeOfDay: 0.3, storm: 0.1, parallax: 0.4, reflect: true });
-        deck.drawBase(g);
-        deck.drawGates(g, { highlight: 'tame' });
-        deck.drawAnimals(g, world, { lookup: (id) => ANIMAL_BY_ID[id], selected: sel });
-        deck.drawLight(g);
-        ps.draw(g);
-      },
-    };
-    break;
-  }
-  case 'trans': {
-    // a transition frame over a still of the deck, so the wipe can be reviewed
-    const { drawTransition, KINDS } = await import('../src/core/transition.js');
-    const { makeTableScene } = await import('../src/scenes/table.js');
-    const R2 = await import('../src/game/run.js');
-    const under = makeTableScene();
-    const r2 = R2.newRun('TRANS');
-    under.enter({ run: r2, onExit: () => {} }, app);
-    for (let i = 0; i < 80; i++) { under.update(1 / 60, app); Input.consume(); }
-    const kind = process.env.KIND || 'wave';
-    const p = Number(process.env.P || 0.42);
-    scene = {
-      update() {},
-      draw() { under.draw(g, app); drawTransition(g, kind, p, Number(process.env.TT || 1.3)); },
-    };
-    void KINDS;
-    break;
-  }
-  case 'cut': {
-    const { makeCutscene } = await import('../src/scenes/cutscene.js');
-    const S = await import('../src/data/story.js');
-    const B = await import('../src/data/blinds.js');
-    const which = process.env.SCRIPT || 'prologue';
-    const script = which.startsWith('boss:')
-      ? S.bossScript(B.BOSS_BY_ID[which.slice(5)] || B.BOSSES[0])
-      : which.startsWith('ante')
-        ? S.anteScript(Number(which.slice(4)) || 1)
-        : S.getScript(which);
-    scene = makeCutscene();
-    scene.enter({ script, onDone: () => {} }, app);
-    const skip = Number(process.env.LINE || 0);
-    for (let i = 0; i < skip; i++) {
-      // ONE press per line, then settle. Pressing on every tick advanced five lines a
-      // step and ran off the end of the script into the exit fade, which is why every
-      // captured frame came back nearly black.
-      Input.mouse.pressed = true;
-      scene.update(1 / 60, app);
-      Input.consume();
-      for (let k = 0; k < 3; k++) { scene.update(1 / 60, app); Input.consume(); }
-      // finish the typewriter so the next press lands on the next LINE, not on this
-      // line's reveal
-      Input.mouse.pressed = true;
-      scene.update(1 / 60, app);
-      Input.consume();
-      for (let k = 0; k < 3; k++) { scene.update(1 / 60, app); Input.consume(); }
-    }
-    break;
-  }
-  case 'isles': {
-    const I = await import('../src/data/islands.js');
-    const A = await import('../src/render/islandart.js');
-    const { rect, text } = await import('../src/core/pixel.js');
-    const all = I.ISLANDS.concat([I.CHERUBIM]);
-    if (process.env.BACK) {
-      const isl = I.ISLAND_BY_ID[process.env.BACK] || all[0];
-      scene = { update() {}, draw() {
-        A.drawIslandBack(g, isl, 0, 0, SW, SH, 1.6, {});
-        text(g, isl.name.toUpperCase() + '  —  ' + isl.biome, SW / 2, 12, 'white',
-          { center: true, font: 7, shadow: 'ink' });
-      } };
-    } else {
-      scene = { update() {}, draw() {
-        rect(g, 0, 0, SW, SH, 'water1');
-        for (let y = 0; y < SH; y++) rect(g, 0, y, SW, 1, y < 150 ? 'sky' : y < 170 ? 'water3' : 'water1');
-        text(g, 'ISLANDS ON THE MAP', SW / 2, 8, 'gold', { center: true, font: 7 });
-        all.forEach((isl, i) => {
-          const x = 80 + (i % 6) * 160, y = 250 + Math.floor(i / 6) * 230;
-          A.drawIslandFar(g, isl, x, y, 130, 96, 1.3 + i * 0.4, {});
-          text(g, isl.name, x, y + 8, 'cream', { center: true, font: 5, shadow: 'ink' });
-          text(g, isl.biome + '  d' + isl.danger, x, y + 22, 'brass3', { center: true, font: 3 });
-        });
-      } };
-    }
+    scene.enter({ voyage, onDone: () => {} }, app);
+    if (process.env.TALK) scene.debug().talk(process.env.TALK);
+    mouse(Number(process.env.MX || 480), Number(process.env.MY || 300));
     break;
   }
   case 'island': {

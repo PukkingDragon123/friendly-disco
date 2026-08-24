@@ -6,7 +6,7 @@ import { Input } from './core/input.js';
 import { Juice } from './core/juice.js';
 import { Audio } from './core/audio.js';
 import { createRouter, guardScene } from './game/router.js';
-import * as Table from './render/table.js';
+import { ISLANDS, ISLAND_BY_ID } from './data/islands.js';
 import { text, rect, wrap } from './core/pixel.js';
 
 const canvas = document.getElementById('game');
@@ -48,20 +48,17 @@ const router = createRouter(app, { onRun: (r) => { window.__ARK.run = r; } });
 
 window.__ARK = {
   app, Audio, Juice, router,
-  // The real projection, exposed so a test harness can aim at a gate through the SAME
-  // maths the renderer uses. tests/browser.mjs used to reimplement it from the VIEW
-  // constants and silently aimed at the wrong pixel the moment the deck was retuned.
-  Table,
   get run() { return router.run; },
   set run(v) { router.run = v; },
+  get voyage() { return router.voyage; },
   menu: () => router.menu(),
+  ocean: () => router.ocean(),
   eden: () => router.eden(),
-  freighter: () => router.freighter(),
-  draft: () => router.draft(),
-  // kept as the old name: harnesses and the console both reach for `dock`
-  dock: () => router.eden(),
-  deck: () => router.deck(),
+  island: (id) => router.island(ISLAND_BY_ID[id] || ISLANDS[0]),
   startRun: (seed) => router.startRun(seed),
+  // kept as the old names: the console and the harnesses reach for these
+  dock: () => router.eden(),
+  deck: () => router.ocean(),
 };
 
 // WebAudio needs a user gesture; the click-gate in index.html provides it.
@@ -91,4 +88,4 @@ router.menu();
 app.start();
 
 console.log('%cPOCKET ARK', 'color:#ffcb52;font-weight:bold',
-  '— window.__ARK exposes app / run / router / Audio / Juice');
+  '— window.__ARK exposes app / voyage / router / ocean() / island(id) / eden()');

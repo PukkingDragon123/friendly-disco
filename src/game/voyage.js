@@ -83,10 +83,18 @@ export function tierCost(v, id) {
   return u.cost[lvl];
 }
 
-export function capacity(v) { return tierValue(v, 'capacity'); }
-export function holdSize(v) { return tierValue(v, 'hold'); }
-export function gardenSize(v) { return tierValue(v, 'garden'); }
-export function hullMax(v) { return tierValue(v, 'hull'); }
+/* ------------------------------------------------------------- the real numbers
+
+Every one of these is TIER + RELICS, never the tier alone. Reading the tier directly
+anywhere else is the bug that makes a relic the player paid for do nothing, so these four
+functions are the only place the question "how many pens do I have" is answered.
+*/
+export function capacity(v) {
+  return Math.max(1, tierValue(v, 'capacity') + relicBonus(v, 'berths') + (v.bonusBerths || 0));
+}
+export function holdSize(v) { return Math.max(1, tierValue(v, 'hold') + relicBonus(v, 'basket')); }
+export function gardenSize(v) { return Math.max(1, tierValue(v, 'garden') + relicBonus(v, 'beds')); }
+export function hullMax(v) { return Math.max(1, tierValue(v, 'hull') + relicBonus(v, 'hull')); }
 /**
  * How much ground the flood gains per crossing.
  *
@@ -95,7 +103,9 @@ export function hullMax(v) { return tierValue(v, 'hull'); }
  * started with and you arrive on the last leg with the water at your heels, and every
  * point of Sail you buy is the difference between that and a margin.
  */
-export function floodPerLeg(v) { return 0.062 * tierValue(v, 'speed'); }
+export function floodPerLeg(v) {
+  return 0.062 * tierValue(v, 'speed') * Math.max(0.3, 1 - relicBonus(v, 'sail'));
+}
 
 /**
  * Deal `n` animals off a grouped list, one kind at a time, so a small boat gets VARIETY
@@ -155,6 +165,7 @@ export function newVoyage(seed) {
 
     // --- the golem
     slots: { hold: null, wear: null, consume: null },
+    bonusBerths: 0,     // from a spent Rib of Adam; permanent
 
     // --- the ledger
     money: 12,
@@ -290,7 +301,7 @@ export function sellPrice(v, id) {
   const a = ANIMAL_BY_ID[id];
   if (!a) return 0;
   const base = { common: 3, uncommon: 5, rare: 9, legendary: 16 }[a.rarity] || 3;
-  return base + (isLoyal(v, id) ? 3 : 0);
+  return base + (isLoyal(v, id) ? 3 : 0) + relicBonus(v, 'coin');
 }
 
 export function sell(v, id, from = 'eden') {
@@ -401,6 +412,51 @@ export function relicBonus(v, key) {
 export function relicFlag(v, key) {
   for (const r of equipped(v)) if (r.bonus && r.bonus[key]) return true;
   return false;
+}
+
+/**
+ * Spend the thing in the chest.
+ *
+ * `at` is an optional hook the caller supplies for the effects that need a level to
+ * happen in (the tide is a property of a rescue, not of the voyage). Everything that can
+ * be done from the voyage alone is done here, and the slot empties either way.
+ */
+export function spendConsumable(v, at) {
+  const rel = v.slots.consume;
+  if (!rel || !rel.use) return null;
+  const n = rel.power || 1;
+  let done = false;
+  switch (rel.use) {
+    case 'berth':
+      v.bonusBerths = (v.bonusBerths || 0) + n;
+      say(v, `${rel.name}: ${n} more pens, for good.`, 'bone');
+      done = true;
+      break;
+    case 'mend':
+      repairHull(v, n);
+      say(v, `${rel.name}: the hull is whole.`, 'lava1');
+      done = true;
+      break;
+    case 'revive': {
+      const back = v.lost.pop();
+      if (back && berthsFree(v) > 0) {
+        v.aboard.push(back);
+        const a = ANIMAL_BY_ID[back];
+        say(v, `${a ? a.name : back} draws breath again.`, 'magic2');
+        done = true;
+      }
+      break;
+    }
+    case 'tide':
+      // only a rescue owns a tide; the caller does the work and we spend the slot
+      done = !!(at && at.tide !== undefined && (at.tide = Math.max(0, at.tide - at.step * n)) >= 0);
+      if (done) say(v, `${rel.name}: the water hangs back.`, 'water3');
+      break;
+    default: break;
+  }
+  if (!done) return null;
+  v.slots.consume = null;
+  return rel;
 }
 
 /* ------------------------------------------------------------------ helpers */

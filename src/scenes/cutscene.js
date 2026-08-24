@@ -17,8 +17,10 @@ import { Audio } from '../core/audio.js';
 import { createParticles } from '../core/particles.js';
 import { createSeascape } from '../render/seascape.js';
 import { drawPortrait, drawCherub } from '../render/portraits.js';
+import { drawSummoning } from '../render/cinematic.js';
 import * as UI from '../render/uikit.js';
 import { SPEAKERS } from '../data/story.js';
+import { summonBeat } from '../render/cinematic.js';
 
 const CPS = 46;              // characters per second
 // 960x540: the portrait gets a real 176x252 frame on the left and the board takes the
@@ -31,6 +33,9 @@ export function makeCutscene() {
   let sea = null, parts = null;
   let t = 0;
   let ix = 0;
+  // A running cinematic: once raised, the golem STAYS on screen for the rest of the
+  // script, so this is not reset per line. See fx 'raise'.
+  let cine = null;
   let typed = 0;
   let lineT = 0;
   let done = false;
@@ -77,6 +82,12 @@ export function makeCutscene() {
         sea.splash(120 + (t * 90) % 400, 250, 1.4);
         Audio.sfx('splash');
         break;
+      case 'raise':
+        // the summoning takes over the backdrop and runs on its own clock
+        cine = { t: 0, dur: 5.6, beat: null };
+        Audio.sfx('crate_land');
+        Juice.shake(3, 0.5);
+        break;
       case 'rays':
         for (let i = 0; i < 14; i++) {
           parts.emit('star', 40 + i * 42, 40 + (i % 3) * 26, { count: 1, color: 'gold', life: 1.4 });
@@ -100,11 +111,36 @@ export function makeCutscene() {
     Audio.sfx('whoosh');
   }
 
+  /** Advance the cinematic and punctuate each beat as it lands. */
+  function updateCinematic(dt) {
+    if (!cine) return;
+    cine.t += dt;
+    const k = Math.min(1, cine.t / cine.dur);
+    const b = summonBeat(k).id;
+    if (b !== cine.beat) {
+      cine.beat = b;
+      if (b === 'assemble') { Audio.sfx('shuffle'); Juice.shake(2, 0.3); }
+      if (b === 'word') { Audio.sfx('sparkle'); Juice.flash('gold', 0.3, 0.3); }
+      if (b === 'strike') {
+        Audio.sfx('crate_land');
+        Juice.shake(9, 0.6);
+        Juice.flash('white', 0.18, 0.8);
+        parts.emit('dust', W / 2, Math.round(H * 0.72), { count: 26, speed: 130, color: 'wood2', life: 1.1 });
+      }
+      if (b === 'wake') {
+        Audio.sfx('levelup');
+        Juice.flash('orange', 0.4, 0.4);
+        parts.emit('spark', W / 2, Math.round(H * 0.52), { count: 18, speed: 70, color: 'amber', life: 1 });
+      }
+    }
+  }
+
   function update(dt) {
     t += dt;
     lineT += dt;
     sea.update(dt);
     parts.update(dt);
+    updateCinematic(dt);
     fade = approach(fade, 1, 5, dt);
     if (lightning > 0) lightning -= dt;
 
@@ -136,13 +172,19 @@ export function makeCutscene() {
   /* ----------------------------------------------------------------- draw */
 
   function draw(g) {
-    sea.draw(g, {
-      x: 0, y: 0, w: W, h: H, horizonY: 196,
-      timeOfDay: tod, storm, parallax: 0.5, reflect: true,
-    });
-
-    // the ark, small and far off, so the dialogue has somewhere to be about
-    drawFarArk(g, 700, 290 + Math.round(Math.sin(t * 0.8) * 2));
+    // A cinematic replaces the backdrop entirely -- it brings its own sky, its own
+    // ground and its own ark on the skyline, so it composes as one picture rather than
+    // sitting on top of a seascape that disagrees with it.
+    if (cine) {
+      drawSummoning(g, Math.min(1, cine.t / cine.dur), t, {});
+    } else {
+      sea.draw(g, {
+        x: 0, y: 0, w: W, h: H, horizonY: 196,
+        timeOfDay: tod, storm, parallax: 0.5, reflect: true,
+      });
+      // the ark, small and far off, so the dialogue has somewhere to be about
+      drawFarArk(g, 700, 290 + Math.round(Math.sin(t * 0.8) * 2));
+    }
 
     if (lightning > 0) {
       const k = lightning / 0.5;

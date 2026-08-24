@@ -41,7 +41,7 @@ const M = {};
     ['blinds', '../src/data/blinds.js'], ['cargo', '../src/data/cargo.js'],
     ['table', '../src/render/table.js'], ['scoring', '../src/game/scoring.js'],
     ['run', '../src/game/run.js'], ['flood', '../src/game/flood.js'],
-    ['eden', '../src/data/eden.js'],
+    ['eden', '../src/data/eden.js'], ['cinematic', '../src/render/cinematic.js'],
     ['story', '../src/data/story.js'],
   ];
   const broken = [];
@@ -471,6 +471,40 @@ if (section('physics') && M.physics) {
 }
 
 /* ------------------------------------------------------------------ scoring */
+
+if (section('cinematic') && M.cinematic) {
+  const C = M.cinematic;
+  ok(Array.isArray(C.SUMMON_BEATS) && C.SUMMON_BEATS.length === 5, 'the summoning has five beats');
+  // beats must be ordered and start at 0, or summonBeat() returns the wrong one
+  let ordered = C.SUMMON_BEATS[0].at === 0;
+  for (let i = 1; i < C.SUMMON_BEATS.length; i++) {
+    if (C.SUMMON_BEATS[i].at <= C.SUMMON_BEATS[i - 1].at) ordered = false;
+  }
+  ok(ordered, 'beats are ordered and the first is at 0');
+  ok(C.summonBeat(0).id === 'clay' && C.summonBeat(1).id === 'wake',
+    'summonBeat picks the right end points', `${C.summonBeat(0).id}/${C.summonBeat(1).id}`);
+  // every beat must be reachable — a beat you can never land on is a bug, not content
+  const seen = new Set();
+  for (let k = 0; k <= 1.0001; k += 0.005) seen.add(C.summonBeat(k).id);
+  ok(seen.size === 5, 'every beat is reachable by scrubbing', [...seen].join(','));
+  // it must be pure: same k, same picture, and it must not throw at any k
+  if (M.pixel) {
+    const { SoftCanvas } = await import('../tools/softcanvas.mjs');
+    let threw = 0;
+    for (let k = 0; k <= 1.0001; k += 0.02) {
+      const cv = new SoftCanvas(960, 540);
+      try { C.drawSummoning(cv.getContext('2d'), k, 1.4, {}); } catch (e) { threw++; }
+    }
+    ok(threw === 0, 'drawSummoning survives every progress value', threw);
+    // and out-of-range k must clamp rather than explode
+    let clamped = 0;
+    for (const k of [-5, -0.1, 1.1, 99, NaN]) {
+      const cv = new SoftCanvas(960, 540);
+      try { C.drawSummoning(cv.getContext('2d'), k, 1, {}); } catch (e) { clamped++; }
+    }
+    ok(clamped === 0, 'out-of-range progress is clamped, not fatal', clamped);
+  }
+}
 
 if (section('eden') && M.eden && M.run) {
   const E = M.eden, A = M.animals;

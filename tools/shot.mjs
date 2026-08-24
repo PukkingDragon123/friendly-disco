@@ -181,9 +181,19 @@ switch (which) {
     scene.enter({ script, onDone: () => {} }, app);
     const skip = Number(process.env.LINE || 0);
     for (let i = 0; i < skip; i++) {
-      // advance past earlier lines so a later beat can be captured
-      Input.mouse.pressed = true; scene.update(1 / 60, app); Input.consume();
-      for (let k = 0; k < 4; k++) { Input.mouse.pressed = true; scene.update(1 / 60, app); Input.consume(); }
+      // ONE press per line, then settle. Pressing on every tick advanced five lines a
+      // step and ran off the end of the script into the exit fade, which is why every
+      // captured frame came back nearly black.
+      Input.mouse.pressed = true;
+      scene.update(1 / 60, app);
+      Input.consume();
+      for (let k = 0; k < 3; k++) { scene.update(1 / 60, app); Input.consume(); }
+      // finish the typewriter so the next press lands on the next LINE, not on this
+      // line's reveal
+      Input.mouse.pressed = true;
+      scene.update(1 / 60, app);
+      Input.consume();
+      for (let k = 0; k < 3; k++) { scene.update(1 / 60, app); Input.consume(); }
     }
     break;
   }
@@ -294,6 +304,33 @@ switch (which) {
         });
       },
     };
+    break;
+  }
+  case 'summon': {
+    const { drawSummoning } = await import('../src/render/cinematic.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const K = process.env.K !== undefined ? Number(process.env.K) : 0.5;
+    if (process.env.STRIP) {
+      // the whole sequence as a contact sheet, so the beats can be judged together
+      const cols = 3, rows = 2, cw = Math.floor(SW / cols), ch = Math.floor(SH / rows);
+      scene = {
+        update() {},
+        draw() {
+          rect(g, 0, 0, SW, SH, 'ink');
+          for (let i = 0; i < cols * rows; i++) {
+            const kk = i / (cols * rows - 1);
+            const ox = (i % cols) * cw, oy = Math.floor(i / cols) * ch;
+            g.save(); g.beginPath(); g.rect(ox, oy, cw - 2, ch - 2); g.clip();
+            g.translate(ox - (SW - cw) / 2, oy - (SH - ch) / 2);
+            drawSummoning(g, kk, 1.2 + i * 0.4, {});
+            g.restore();
+            text(g, 'k=' + kk.toFixed(2), ox + 6, oy + 6, 'gold', { font: 5 });
+          }
+        },
+      };
+    } else {
+      scene = { update() {}, draw() { rect(g, 0, 0, SW, SH, 'ink'); drawSummoning(g, K, 1.4, {}); } };
+    }
     break;
   }
   case 'font': {

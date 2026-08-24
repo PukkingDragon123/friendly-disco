@@ -39,7 +39,7 @@ export const PROLOGUE = {
       null),
     L('noah', 'Two of everything, and every one of them has an opinion about where it sleeps.', null),
     L('god', 'Then you need hands that do not get tired and do not get argued with.', 'flash'),
-    L('noah', '(a hundredweight of river clay stands up)', 'shake'),
+    L('noah', '(a hundredweight of river clay stands up out of the bank)', 'raise'),
     L('golem', '(it has no face to speak with. There is a word driven into its brow.)', 'rays'),
     L('god', 'It is made of the riverbank and it will last exactly as long as the word does.', null),
     L('noah', 'What is it FOR.', null),

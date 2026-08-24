@@ -253,6 +253,7 @@ export function createSeascape(seed, o = {}) {
   let bakeKey = '';
   let bakeCv = null;
   let bakeH = 0;
+  let half = null;          // the half-resolution offscreen the whole layer renders into
 
   function ensureBake(o) {
     const w = Math.max(1, Math.round(o.w || 640));
@@ -539,15 +540,55 @@ export function createSeascape(seed, o = {}) {
     },
 
     /** Everything, in order. */
+    /**
+     * The whole seascape, composed.
+     *
+     * HALF RESOLUTION, THEN BLIT UP. The sky, the islands and the water are one big
+     * soft dithered background, and at 960x540 drawing them a pixel at a time cost
+     * 8500 canvas calls a frame -- on its own, more than a 60fps budget, and this
+     * layer is in the menu, the deck, the cutscenes and the summary.
+     *
+     * So it renders into an offscreen canvas at half size and is blitted back at 2x.
+     * The call count drops by four, the animation is untouched, and the LOOK is
+     * arguably better: the sea's dither becomes 2px chunky, which reads as background
+     * against the crisp 1px foreground instead of competing with it. Foreground
+     * layers -- the deck, the animals, all UI -- are unaffected and stay 1:1.
+     *
+     * Pass `crisp: true` to opt out and draw at full resolution (nothing does today,
+     * but a close-up would want it).
+     */
     draw(g, opt = {}) {
       const o2 = Object.assign({ x: 0, y: 0, w: 640, h: 360 }, opt);
       if (o2.horizonY === undefined) o2.horizonY = o2.y + Math.round(o2.h * 0.42);
-      sea.drawSky(g, o2);
-      sea.drawFar(g, o2);
-      sea.drawWater(g, o2);
-      for (const b of boats) drawBoat(g, b, t);
+      if (o2.crisp) { drawAt(g, o2); return; }
+
+      const hw = Math.ceil(o2.w / 2), hh = Math.ceil(o2.h / 2);
+      if (!half || half.canvas.width !== hw || half.canvas.height !== hh) {
+        half = makeCanvas(hw, hh);
+      }
+      if (!half) { drawAt(g, o2); return; }        // no offscreen support: draw direct
+      // the offscreen is its own coordinate space, so the layers are drawn at 0,0
+      drawAt(half.g, {
+        x: 0,
+        y: 0,
+        w: hw,
+        h: hh,
+        horizonY: Math.round((o2.horizonY - o2.y) / 2),
+        timeOfDay: o2.timeOfDay,
+        storm: o2.storm,
+        parallax: o2.parallax,
+        reflect: o2.reflect,
+      });
+      g.drawImage(half.canvas, 0, 0, hw, hh, o2.x, o2.y, hw * 2, hh * 2);
     },
   };
+
+  function drawAt(gg, o2) {
+    sea.drawSky(gg, o2);
+    sea.drawFar(gg, o2);
+    sea.drawWater(gg, o2);
+    for (const b of boats) drawBoat(gg, b, t);
+  }
 
   return sea;
 }

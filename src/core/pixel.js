@@ -398,16 +398,108 @@ export function text(g, str, x, y, c, o = {}) {
 
   const prevA = g.globalAlpha;
   if (o.alpha !== undefined) g.globalAlpha = o.alpha;
-  if (o.outline) {
-    const oc = o.outline === true ? 'ink' : o.outline;
-    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) drawPass(dx, dy, oc);
-  } else if (o.shadow) {
-    drawPass(o.shadowX || 1, o.shadowY || 1, o.shadow === true ? 'ink' : o.shadow);
+
+  // A cached run is one blit instead of one fillRect per horizontal run of lit pixels
+  // in every glyph -- and an OUTLINED string pays that nine times over. The UI is
+  // mostly text, so this is the single biggest saving in the renderer.
+  const run = o.wave ? null : cachedRun(s, total, font, sc, c, o);
+  if (run) {
+    g.drawImage(run.canvas, ox - run.padX, oy - run.padY);
+  } else {
+    // wave, or no offscreen support: straight to the target, one rect per pixel run
+    if (o.outline) {
+      const oc = o.outline === true ? 'ink' : o.outline;
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        drawPass(dx, dy, oc);
+      }
+    } else if (o.shadow) {
+      drawPass(o.shadowX || 1, o.shadowY || 1, o.shadow === true ? 'ink' : o.shadow);
+    }
+    drawPass(0, 0, c);
   }
-  drawPass(0, 0, c);
   g.globalAlpha = prevA;
   return total;
 }
+
+/* ------------------------------------------------------------- text caching
+
+Every distinct (string, font, scale, colour, shadow/outline) combination is baked once
+into its own little canvas and blitted from then on. Alpha is deliberately NOT part of
+the key -- it is applied at blit time -- so a fading label does not bake a new run per
+frame. `wave` bypasses the cache entirely, since it moves each glyph independently.
+
+The cap is generous because UI strings repeat heavily (labels, numbers 0-9999, animal
+names) but it must exist: a caller that puts a float with six decimals on screen would
+otherwise bake a new run every frame forever.
+*/
+const runCache = new Map();
+const RUN_CAP = 1400;
+
+function cachedRun(str, total, font, sc, c, o) {
+  if (total <= 0 || total > 4000) return null;
+  const key = [
+    str, font.h, font.w, sc, c,
+    o.outline === true ? 'ink' : (o.outline || ''),
+    o.shadow === true ? 'ink' : (o.shadow || ''),
+    o.shadowX || 0, o.shadowY || 0,
+    o.spacing !== undefined ? o.spacing : '',
+  ].join('\u0001');
+  let hit = runCache.get(key);
+  if (hit !== undefined) return hit;
+  // outline reaches one pixel (times scale) in every direction; shadow reaches down-right
+  const padX = sc, padY = sc;
+  const mk = makeCanvas(total + sc * 3, font.h * sc + sc * 3);
+  if (!mk) { runCache.set(key, null); return null; }
+  // repaint into the offscreen at the pad offset
+  textInto(mk.g, str, padX, padY, c, o, font, sc);
+  hit = { canvas: mk.canvas, padX, padY };
+  if (runCache.size > RUN_CAP) runCache.clear();
+  runCache.set(key, hit);
+  return hit;
+}
+
+/** Uncached draw straight into a context at an exact origin. Used by the baker. */
+function textInto(gg, str, x, y, c, o, font, sc) {
+  const sp = o.spacing !== undefined ? o.spacing : (font.gap !== undefined ? font.gap : 1);
+  const pass = (dx, dy, color) => {
+    gg.fillStyle = col(color);
+    let cx = x + dx * sc;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      const cw = charW(ch, font);
+      const gl = glyphFor(font, ch);
+      if (gl && ch !== ' ') {
+        for (let r = 0; r < font.h; r++) {
+          const row = gl[r] || 0;
+          if (!row) continue;
+          let runStart = -1;
+          for (let cc = 0; cc <= font.w; cc++) {
+            const on = cc < font.w && (row & (1 << (font.w - 1 - cc)));
+            if (on && runStart < 0) runStart = cc;
+            else if (!on && runStart >= 0) {
+              gg.fillRect(cx + runStart * sc, y + (dy + r) * sc, (cc - runStart) * sc, sc);
+              runStart = -1;
+            }
+          }
+        }
+      } else if (!gl && ch !== ' ') {
+        gg.fillRect(cx, y + (dy + 1) * sc, (cw - 1) * sc, (font.h - 2) * sc);
+      }
+      cx += (cw + sp) * sc;
+    }
+  };
+  if (o.outline) {
+    const oc = o.outline === true ? 'ink' : o.outline;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) pass(dx, dy, oc);
+  } else if (o.shadow) {
+    pass(o.shadowX || 1, o.shadowY || 1, o.shadow === true ? 'ink' : o.shadow);
+  }
+  pass(0, 0, c);
+}
+
+/** Drop every baked text run. For a palette swap, or a test wanting a clean slate. */
+export function clearTextCache() { runCache.clear(); }
+export function textCacheSize() { return runCache.size; }
 
 /** Greedy word wrap to a pixel width. */
 export function wrap(str, maxW, o = {}) {

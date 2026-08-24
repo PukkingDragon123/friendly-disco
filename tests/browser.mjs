@@ -27,14 +27,58 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + (e && e.message)));
 page.on('requestfailed', (r) => errors.push('requestfailed: ' + r.url() + ' ' + (r.failure() && r.failure().errorText)));
 
 
+/**
+ * Median milliseconds spent inside scene.draw() over 60 frames.
+ *
+ * This, not fps, is the number the renderer controls. Headless Chromium has no GPU and
+ * presents through a software compositor, so its frame time sits around 23-25ms
+ * REGARDLESS of how much the scene draws -- the menu at 800 canvas calls and the garden
+ * at 13000 both report about 40fps here. Reading that as a game problem sends you
+ * optimising things that are already fast. Draw time separates the two.
+ */
+async function drawTime(page) {
+  return page.evaluate(() => new Promise((res) => {
+    const app = window.__ARK.app;
+    if (!app.scene || !app.scene.draw) { res(null); return; }
+    const times = [];
+    const orig = app.scene.draw.bind(app.scene);
+    app.scene.draw = (g, a) => {
+      const t0 = performance.now();
+      orig(g, a);
+      times.push(performance.now() - t0);
+    };
+    let frames = 0;
+    function tick() {
+      if (++frames < 62) { requestAnimationFrame(tick); return; }
+      app.scene.draw = orig;
+      const sorted = times.slice().sort((a, b) => a - b);
+      res({
+        drawMs: +(sorted[Math.floor(sorted.length / 2)] || 0).toFixed(2),
+        worstMs: +(sorted[sorted.length - 1] || 0).toFixed(2),
+        frames: times.length,
+      });
+    }
+    requestAnimationFrame(tick);
+  }));
+}
+
 /** Click/skip through any dialogue until the deck scene is up. */
 async function skipDialogue(page, tries = 60) {
   for (let i = 0; i < tries; i++) {
     const kind = await page.evaluate(() => {
       const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
-      return d.phase !== undefined ? 'deck' : d.scriptId !== undefined ? 'cutscene' : 'other';
+      if (d.phase !== undefined) return 'deck';
+      if (d.scriptId !== undefined) return 'cutscene';
+      if (d.stock !== undefined) return 'ramp';
+      return 'other';
     });
     if (kind === 'deck') return true;
+    if (kind === 'ramp') {
+      // the ramp fills itself if you just board, which is what Enter does
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(400);
+      continue;
+    }
     await page.keyboard.press('Escape');
     await page.waitForTimeout(160);
     await page.keyboard.press('Space');
@@ -82,20 +126,18 @@ const deck = await page.evaluate(() => {
   return { phase: d.phase, balls: d.world.balls.length, gates: d.world.gates.length, target: d.run.target, ante: d.run.ante };
 });
 console.log('deck:', JSON.stringify(deck));
+console.log('  (headless Chromium has no GPU: its ~24ms frame time is the compositor,',
+  'not the renderer — see drawTime)');
 
 // take a real shot: hover a gate, press, hold to charge, release
 const shot = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
   const c = document.getElementById('game').getBoundingClientRect();
   const s = window.__ARK.app.scale;
-  const T = d.deck;
-  void T;
   const gate = d.world.gates[0];
-  // project through the same view the renderer uses
-  const persp = 1 - 0.17 * (1 - Math.max(-0.35, Math.min(1.35, gate.y / 116)));
-  const gx = 396 + (gate.x - 116) * 2 * persp;
-  const gy = 104 + gate.y * 1.24;
-  return { x: c.left + gx * s, y: c.top + gy * s };
+  // project through the renderer's OWN toScreen, not a copy of it
+  const p = window.__ARK.Table.toScreen(gate.x, gate.y, 0);
+  return { x: c.left + p.x * s, y: c.top + p.y * s };
 });
 await page.mouse.move(shot.x, shot.y);
 await page.waitForTimeout(120);
@@ -114,10 +156,21 @@ const after = await page.evaluate(() => {
 });
 console.log('after one shot:', JSON.stringify(after));
 
-// jump to the dock so the delivery renders in a real browser too
-await page.evaluate(() => window.__ARK.dock());
+// the number that is actually mine: how long the scene takes to draw itself
+const deckT = await drawTime(page);
+console.log('deck draw:', JSON.stringify(deckT));
+if (deckT && deckT.drawMs > 16.6) errors.push(`deck draw ${deckT.drawMs}ms exceeds a 60fps frame`);
+
+// jump to the garden, then the freighter, so both shops render in a real browser
+await page.evaluate(() => window.__ARK.eden());
 await page.waitForTimeout(1500);
-await page.screenshot({ path: `${OUT}-8-dock.png` });
+await page.screenshot({ path: `${OUT}-8-eden.png` });
+const edenT = await drawTime(page);
+console.log('eden draw:', JSON.stringify(edenT));
+if (edenT && edenT.drawMs > 16.6) errors.push(`eden draw ${edenT.drawMs}ms exceeds a 60fps frame`);
+await page.evaluate(() => window.__ARK.freighter());
+await page.waitForTimeout(1800);
+await page.screenshot({ path: `${OUT}-9-freighter.png` });
 
 console.log('\nconsole output:');
 for (const l of logs.slice(0, 12)) console.log('  ' + l);

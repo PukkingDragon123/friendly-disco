@@ -7,7 +7,7 @@
 import { P, col, mix, alpha } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, dashLine, disc, ring, ellipse, tri,
-  dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp,
+  dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp, makeCanvas,
 } from '../core/pixel.js';
 import { Juice } from '../core/juice.js';
 import { W as SCREEN_W, H as SCREEN_H } from '../core/pixel.js';
@@ -65,13 +65,66 @@ function brushed(g, x, y, w, h, s) {
   for (let j = 0; j < h; j++) if (j % 4 === 1) rect(g, x, y + j, w, 1, s.mid);
 }
 
+/* ---------------------------------------------------------------- panel cache
+
+A panel is completely determined by its style, size and flags: the wood grain, the
+brass brushing, the bevels, the corner brackets and the rivets never move. Drawing
+them per frame is what a panel costs, and at 960x540 the five big panels on the deck
+came to roughly twelve thousand canvas calls a frame on their own -- more than
+everything else in the scene put together.
+
+So every distinct panel is BAKED once into its own little canvas and blitted after
+that. The cache key is exactly the set of inputs that change a pixel. A scene has a
+handful of distinct panels, so the cache stays small; the cap is a backstop against a
+caller that animates a panel's width, which would otherwise bake a new one per frame.
+
+PAD leaves room for the two things that draw OUTSIDE the panel rect: the drop shadow
+(2px right and below) and the title plate (3px above).
+*/
+const PANEL_PAD = 6;
+const panelCache = new Map();
+const PANEL_CAP = 96;
+
+function bakedPanel(w, h, o) {
+  const key = [
+    o.style || 'wood', w, h,
+    o.inset ? 1 : 0, o.shadow ? 1 : 0, o.corners === false ? 0 : 1,
+    o.rivets ? 1 : 0, o.title || '', o.titleColor || '', o.font || '',
+  ].join('/');
+  let hit = panelCache.get(key);
+  if (hit !== undefined) return hit;
+  const mk = makeCanvas(w + PANEL_PAD * 2, h + PANEL_PAD * 2);
+  if (!mk) { panelCache.set(key, null); return null; }
+  paintPanel(mk.g, PANEL_PAD, PANEL_PAD, w, h, o);
+  hit = { canvas: mk.canvas, pad: PANEL_PAD };
+  if (panelCache.size > PANEL_CAP) panelCache.clear();
+  panelCache.set(key, hit);
+  return hit;
+}
+
+/** Drop every baked panel. For a palette swap, or a test that wants a clean slate. */
+export function clearPanelCache() { panelCache.clear(); }
+export function panelCacheSize() { return panelCache.size; }
+
 /**
  * panel(g,x,y,w,h,o)
  * o: {style, title, titleColor, shadow, rivets, inset, corners}
+ *
+ * Blits a baked panel. Everything that actually draws lives in paintPanel below.
  */
 export function panel(g, x, y, w, h, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   if (w < 4 || h < 4) return rectOf(x, y, w, h);
+  const b = bakedPanel(w, h, o);
+  if (b) {
+    g.drawImage(b.canvas, x - b.pad, y - b.pad);
+    return rectOf(x, y, w, h);
+  }
+  paintPanel(g, x, y, w, h, o);          // no offscreen support: draw it live
+  return rectOf(x, y, w, h);
+}
+
+function paintPanel(g, x, y, w, h, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
 
   if (o.shadow) {
@@ -121,8 +174,7 @@ export function panel(g, x, y, w, h, o = {}) {
       px(g, rx, y + h - 6, s.bright); px(g, rx, y + h - 5, s.bot);
     }
   }
-  if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor || s.ink, style: o.style });
-  return rectOf(x, y, w, h);
+  if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor || s.ink, style: o.style, font: o.font });
 }
 
 const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'grey2', paper: 'sand', glass: 'foam' };

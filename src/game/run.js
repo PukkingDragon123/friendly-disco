@@ -262,6 +262,14 @@ export function peekBoss(run) {
 }
 
 export function startBlind(run) {
+  // A run that reaches a blind without going up the ramp would rack nothing and be
+  // unplayable. The router always routes through the draft, but a harness, a console
+  // poke or a future save/load might not, so board the best of the stock rather than
+  // present an empty deck.
+  if (!run.caravan.length && run.stock && run.stock.length) {
+    commitDraft(run, run.stock.map((_, i) => i).slice(0, DRAFT_SIZE));
+    run.log.push({ text: 'Boarded without choosing — the ramp filled itself.', color: 'grey2' });
+  }
   const kind = currentKind(run);
   const rng = run.rng.fork(`blind/${run.ante}/${kind}`);
   const info = BLIND_KINDS.find((b) => b.key === kind) || BLIND_KINDS[0];

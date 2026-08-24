@@ -50,6 +50,9 @@ switch (which) {
   }
   case 'table': {
     const { makeTableScene } = await import('../src/scenes/table.js');
+    const RD = await import('../src/game/run.js');
+    RD.beginDraft(run);
+    RD.commitDraft(run, [0, 1, 2, 5, 6, 8, 9, 11]);
     scene = makeTableScene();
     scene.enter({ run, onExit: () => {} }, app);
     // FLOOD=0..1 forces the waterline for a screenshot without playing the shots

@@ -19,7 +19,7 @@
 import { P, col, mix } from '../core/palette.js';
 import {
   rect, frame, px, line, dashLine, disc, ring, ellipse, ellipseFrame, tri, box,
-  dither, vgrad, noiseFill, text, textW, makeCanvas, blit, wash, clamp, lerp,
+  dither, vgrad, noiseFill, text, textW, makeCanvas, blit, wash, clamp, lerp, W, H,
 } from '../core/pixel.js';
 import { HABITAT_BY_ID } from '../data/habitats.js';
 import { icon as drawIcon, hasIcon } from './uikit.js';
@@ -566,19 +566,29 @@ export function createDeck(o = {}) {
       // a swell rising against the OUTSIDE of the hull: the sea getting up, but never
       // climbing over the camera
       if (k > 0.05) {
+        // Three spans a side, not twenty pixels: a soft band is what a run of pixels
+        // sharing a colour looks like, and the per-pixel version cost five thousand
+        // calls a frame on its own.
         const reach = Math.round(4 + k * 16);
-        for (let r = 0; r < DECK.feltH + DECK.rail; r += 1) {
+        for (let r = 0; r < DECK.feltH + DECK.rail; r += 2) {
           const ty = r / VIEW.tilt;
           const hw = (DECK.feltW / 2) * scaleAt(ty) + DECK.rail;
           const y = DECK.feltY + r;
           const depth = clamp(r / (DECK.feltH + DECK.rail), 0, 1);
-          const n = Math.round(reach * (0.35 + depth * 0.65));
-          for (let i = 0; i < n; i++) {
-            const ph = Math.sin(t * 2.1 + r * 0.09 + i * 0.5);
-            if (ph < 0.1) continue;
-            const c = i < 2 ? 'foam' : i < n * 0.5 ? 'water3' : 'water2';
-            px(g, VIEW.cx - hw - i, y, c);
-            px(g, VIEW.cx + hw + i, y, c);
+          const swell = 0.5 + 0.5 * Math.sin(t * 2.1 + r * 0.09);
+          const n = Math.max(1, Math.round(reach * (0.35 + depth * 0.65) * (0.5 + swell * 0.5)));
+          const inner = Math.max(1, Math.min(2, n));
+          const mid = Math.max(0, Math.round(n * 0.5) - inner);
+          const outer = Math.max(0, n - inner - mid);
+          rect(g, VIEW.cx - hw - inner, y, inner, 2, 'foam');
+          rect(g, VIEW.cx + hw, y, inner, 2, 'foam');
+          if (mid > 0) {
+            rect(g, VIEW.cx - hw - inner - mid, y, mid, 2, 'water3');
+            rect(g, VIEW.cx + hw + inner, y, mid, 2, 'water3');
+          }
+          if (outer > 0) {
+            rect(g, VIEW.cx - hw - n, y, outer, 2, 'water2');
+            rect(g, VIEW.cx + hw + inner + mid, y, outer, 2, 'water2');
           }
         }
       }
@@ -688,21 +698,46 @@ export function createDeck(o = {}) {
  * that knows the shape of it, and the timber itself is boxed in by the HUD above and
  * below, so the hull has to be sold from the outside.
  */
+/**
+ * The sea breaking on the outside of the hull.
+ *
+ * This used to set the foam a PIXEL AT A TIME: three hundred rows times up to fifteen
+ * pixels times two sides, five and a half thousand alpha fills a frame, for a soft band
+ * eight pixels wide. It was the single most expensive thing on the deck.
+ *
+ * It is now three alpha BANDS per side per row -- a run of pixels sharing one wash,
+ * which is exactly what a soft edge looks like anyway -- plus a bright tip. Six calls a
+ * row instead of thirty, and the difference is not visible at this scale. The bound is
+ * also H rather than the 359 it was hard-coded to at the old frame size, which was
+ * clipping the near corners off the bottom of the swell.
+ */
 function drawHullWake(g, t) {
-  // a broad displaced swell either side of the hull, widest at the near rail
-  for (let r = -DECK.rail; r < DECK.feltH + DECK.rail + DECK.apron; r += 1) {
+  // Rows step by 2 and the spans are 2px tall: on a three-hundred-pixel hull edge a
+  // two-pixel foam band is indistinguishable from a one-pixel one, and it halves the
+  // row count.
+  const BANDS = 3;
+  for (let r = -DECK.rail; r < DECK.feltH + DECK.rail + DECK.apron; r += 2) {
     const ty = r / VIEW.tilt;
     const hw = (DECK.feltW / 2) * scaleAt(ty) + DECK.rail;
     const y = DECK.feltY + r;
-    if (y < 90 || y > 359) continue;
+    if (y < DECK.y - 30 || y > H - 1) continue;
     const depth = clamp((r + DECK.rail) / (DECK.feltH + DECK.rail * 2), 0, 1);
-    const reach = Math.round(3 + depth * 12);
-    for (let i = 0; i < reach; i++) {
-      const a = 0.22 * (1 - i / reach);
-      const ph = Math.sin(t * 1.6 + r * 0.08 + i * 0.4);
-      if (ph < -0.2) continue;
-      wash(g, VIEW.cx - hw - i - 1, y, 1, 1, 'foam', a);
-      wash(g, VIEW.cx + hw + i, y, 1, 1, 'foam', a);
+    // how far the swell reaches out this row, this frame
+    const swell = 0.5 + 0.5 * Math.sin(t * 1.6 + r * 0.08);
+    const reach = Math.max(1, Math.round((3 + depth * 12) * (0.55 + swell * 0.45)));
+    const step = Math.max(1, Math.round(reach / BANDS));
+    for (let b = 0; b < BANDS; b++) {
+      const off = b * step;
+      const wid = Math.min(step, reach - off);
+      if (wid <= 0) break;
+      const a = 0.22 * (1 - off / reach);
+      wash(g, VIEW.cx - hw - off - wid, y, wid, 2, 'foam', a);
+      wash(g, VIEW.cx + hw + off, y, wid, 2, 'foam', a);
+    }
+    // the bright lip right against the timber
+    if (swell > 0.55) {
+      rect(g, VIEW.cx - hw - 1, y, 1, 2, 'white');
+      rect(g, VIEW.cx + hw, y, 1, 2, 'white');
     }
   }
   // wake streaming away from the near corners
@@ -711,7 +746,7 @@ function drawHullWake(g, t) {
     for (let i = 0; i < 44; i++) {
       const x = VIEW.cx + side * (hwN + i * 1.6);
       const y = DECK.apronY + DECK.apron + Math.round(i * 0.9) + Math.round(Math.sin(t * 3 + i * 0.5) * 1.5);
-      if (y > 358 || x < 150 || x > 639) continue;
+      if (y > H - 2 || x < 2 || x > W - 2) continue;
       const c = i < 10 ? 'white' : i < 24 ? 'foam' : 'water3';
       px(g, x, y, c);
       if (i < 16) px(g, x, y + 1, 'foam');

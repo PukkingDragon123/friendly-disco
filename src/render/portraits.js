@@ -8,7 +8,7 @@
 import { P, col, mix } from '../core/palette.js';
 import {
   rect, px, line, disc, ring, ellipse, ellipseFrame, tri, dither, vgrad, text, wash,
-  clamp, lerp, box, boxFrame,
+  clamp, lerp, box, boxFrame, makeCanvas,
 } from '../core/pixel.js';
 import { icon as drawIcon, hasIcon } from './uikit.js';
 
@@ -111,8 +111,8 @@ export function drawCherub(g, cx, cy, t, o = {}) {
 
 const PORTRAITS = {
   // THE VOICE: no face. Cloud, light, an open eye, turning rays.
-  god(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['night', 'deep', 'water1', 'sky'], 4);
+  god(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['night', 'deep', 'water1', 'sky'], 4);
     const cx = x + w / 2, cy = y + Math.round(h * 0.46);
     starburst(g, cx, cy, Math.round(w * 0.52), 12, t * 0.35, 'gold', true);
     starburst(g, cx, cy, Math.round(w * 0.36), 8, -t * 0.5, 'brass3', false);
@@ -139,8 +139,8 @@ const PORTRAITS = {
   },
 
   // THE SHEPHERD: robed, haloed, crook in hand. The player's avatar.
-  shepherd(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['deep', 'water1', 'water2', 'sky'], 4);
+  shepherd(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['deep', 'water1', 'water2', 'sky'], 4);
     const cx = x + w / 2;
     const baseY = y + h;
     starburst(g, cx, y + Math.round(h * 0.3), Math.round(w * 0.44), 10, t * 0.2, mix('gold', 'water2', 0.55), true);
@@ -159,8 +159,8 @@ const PORTRAITS = {
   },
 
   // A messenger angel: taller, wings spread, holding a scroll.
-  angel(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['purple0', 'water1', 'sky', 'white'], 4);
+  angel(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['purple0', 'water1', 'sky', 'white'], 4);
     const cx = x + w / 2, baseY = y + h;
     const flap = Math.sin(t * 3.2);
     for (const side of [-1, 1]) {
@@ -177,8 +177,8 @@ const PORTRAITS = {
   },
 
   // A cupid pair — the ones that carry the score plates.
-  cupid(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['purple0', 'pink', 'sand', 'white'], 4);
+  cupid(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['purple0', 'pink', 'sand', 'white'], 4);
     drawCherub(g, x + Math.round(w * 0.32), y + Math.round(h * 0.52), t, { scale: Math.max(1, Math.round(w / 26)), arms: true });
     drawCherub(g, x + Math.round(w * 0.68), y + Math.round(h * 0.6), t + 1.7, { scale: Math.max(1, Math.round(w / 30)), arms: true });
     // a heart passing between them
@@ -191,7 +191,7 @@ const PORTRAITS = {
   // colour come from the boss itself, so a new boss needs no new art.
   disaster(g, x, y, w, h, t, o) {
     const c = (o && o.color) || 'red2';
-    vgrad(g, x, y, w, h, ['ink', 'shadow', mix(c, P.ink, 0.6), mix(c, P.ink, 0.3)], 3);
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['ink', 'shadow', mix(c, P.ink, 0.6), mix(c, P.ink, 0.3)], 3);
     // driving rain
     for (let i = 0; i < 40; i++) {
       const rx = x + ((i * 37 + Math.floor(t * 260)) % w);
@@ -223,8 +223,8 @@ const PORTRAITS = {
   // be, and a black outline pass around everything. Every golem story turns on the
   // word written on the thing, so the brass brow plate is the brightest object in the
   // frame and it breathes with the idle.
-  golem(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['ink', 'shadow', 'wood0', 'wood1'], 3);
+  golem(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['ink', 'shadow', 'wood0', 'wood1'], 3);
     const cx = x + w / 2;
     const baseY = y + h;
     const pulse = 0.5 + 0.5 * Math.sin(t * 1.4);
@@ -344,8 +344,8 @@ const PORTRAITS = {
   },
 
   // NOAH: six hundred years old, holding a hammer, entirely out of patience.
-  noah(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['wood0', 'wood1', 'sand', 'sky'], 4);
+  noah(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['wood0', 'wood1', 'sand', 'sky'], 4);
     const cx = x + w / 2, baseY = y + h;
     // the half-built hull behind him: ribs and a ladder
     for (let i = 0; i < 6; i++) {
@@ -381,8 +381,8 @@ const PORTRAITS = {
   },
 
   // THE SERPENT: the shopkeeper. Coiled in the branches, smiling, holding the stock.
-  snake(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['cloth0', 'green0', 'green1', 'moss'], 4);
+  snake(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['cloth0', 'green0', 'green1', 'moss'], 4);
     const cx = x + w / 2;
     // the tree it lives in
     rect(g, cx + Math.round(w * 0.22), y, Math.round(w * 0.14), h, 'wood1');
@@ -450,8 +450,8 @@ const PORTRAITS = {
   },
 
   // ADAM: the first one. Broad, plain, and holding out a gift he does not explain.
-  adam(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['moss', 'green0', 'sand', 'gold'], 4);
+  adam(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['moss', 'green0', 'sand', 'gold'], 4);
     const cx = x + w / 2, baseY = y + h;
     // garden behind: tall grass
     for (let i = 0; i < w; i += 3) {
@@ -477,8 +477,8 @@ const PORTRAITS = {
   },
 
   // EVE: the one who asked the question. Holds the apple like a piece of evidence.
-  eve(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['moss', 'green1', 'pink', 'gold'], 4);
+  eve(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['moss', 'green1', 'pink', 'gold'], 4);
     const cx = x + w / 2, baseY = y + h;
     for (let i = 0; i < w; i += 3) {
       const gh = 4 + ((i * 11) % 8);
@@ -511,8 +511,8 @@ const PORTRAITS = {
   },
 
   // The dove, for the ending.
-  dove(g, x, y, w, h, t) {
-    vgrad(g, x, y, w, h, ['water2', 'sky', 'ice', 'white'], 4);
+  dove(g, x, y, w, h, t, o) {
+    if (!o || !o.bgDone) vgrad(g, x, y, w, h, ['water2', 'sky', 'ice', 'white'], 4);
     const cx = x + w / 2, cy = y + Math.round(h * 0.48);
     starburst(g, cx, cy, Math.round(w * 0.5), 14, t * 0.25, mix('gold', 'white', 0.5), true);
     const flap = Math.sin(t * 4);
@@ -543,12 +543,56 @@ export const PORTRAIT_IDS = Object.keys(PORTRAITS);
  * Unknown ids fall back to the disaster frame, so a boss that forgets to name a
  * portrait still gets something menacing rather than an empty box.
  */
+/* -------------------------------------------------------------- backgrounds
+
+Every portrait opens with a full-frame vertical gradient, and a vgrad is one dithered
+row per pixel of height: a 176x252 frame is 252 dithers before anything recognisable
+has been drawn, times however many portraits are on screen. The gradients never move,
+so they are baked per (id, size, tint) and blitted.
+
+Each portrait function checks `bgDone` and skips its own vgrad when the bake has
+already supplied one. Everything else in a portrait -- the rays, the halo, the wings,
+the rain -- stays live, because that is the part that is alive.
+*/
+const bgCache = new Map();
+const BG_RAMPS = {
+  god: ['night', 'deep', 'water1', 'sky'],
+  shepherd: ['deep', 'water1', 'water2', 'sky'],
+  angel: ['purple0', 'water1', 'sky', 'white'],
+  cupid: ['purple0', 'pink', 'sand', 'white'],
+  golem: ['ink', 'shadow', 'wood0', 'wood1'],
+  noah: ['wood0', 'wood1', 'sand', 'sky'],
+  snake: ['cloth0', 'green0', 'green1', 'moss'],
+  adam: ['moss', 'green0', 'sand', 'gold'],
+  eve: ['moss', 'green1', 'pink', 'gold'],
+  dove: ['water2', 'sky', 'ice', 'white'],
+};
+
+function bakedBg(id, w, h) {
+  const ramp = BG_RAMPS[id];
+  if (!ramp) return null;                 // disaster's ground depends on the boss colour
+  const key = `${id}/${w}/${h}`;
+  let hit = bgCache.get(key);
+  if (hit !== undefined) return hit;
+  const mk = makeCanvas(w, h);
+  if (!mk) { bgCache.set(key, null); return null; }
+  vgrad(mk.g, 0, 0, w, h, ramp, 4);
+  hit = mk.canvas;
+  if (bgCache.size > 48) bgCache.clear();
+  bgCache.set(key, hit);
+  return hit;
+}
+
+export function clearPortraitCache() { bgCache.clear(); }
+
 export function drawPortrait(g, id, x, y, w, h, t, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   const fn = PORTRAITS[id] || PORTRAITS.disaster;
   // frame first: the portraits all bleed to their edges
   rect(g, x - 2, y - 2, w + 4, h + 4, 'ink');
-  fn(g, x, y, w, h, t, o);
+  const bg = bakedBg(PORTRAITS[id] ? id : 'disaster', w, h);
+  if (bg) g.drawImage(bg, x, y);
+  fn(g, x, y, w, h, t, Object.assign({ bgDone: !!bg }, o));
   // vignette + brass frame
   for (let i = 0; i < 4; i++) {
     const a = 0.22 - i * 0.05;

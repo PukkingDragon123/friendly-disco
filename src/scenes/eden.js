@@ -22,7 +22,7 @@
 import { P, col, mix } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, disc, ring, ellipse, ellipseFrame, tri,
-  dither, vgrad, text, textW, wrap, wash, clamp, lerp, W, H,
+  dither, vgrad, text, textW, wrap, wash, clamp, lerp, makeCanvas, W, H,
 } from '../core/pixel.js';
 import { Input } from '../core/input.js';
 import { Juice, Ease, approach } from '../core/juice.js';
@@ -47,6 +47,8 @@ export function makeEdenScene() {
   let run = null, onDone = null;
   let parts = null;
   let t = 0, intro = 0;
+  let gardenBake = null;      // the static garden, painted once (see bakeGarden)
+  const bushBake = new Map(); // clump art per (index, apple) -- see drawBush
 
   // stock
   let apples = [];             // the serpent's four
@@ -184,9 +186,21 @@ export function makeEdenScene() {
 
   /* ------------------------------------------------------------------ draw */
 
-  function drawGarden(g) {
-    // A dawn that is a GRADIENT rather than four stripes: the first version banded
-    // purple/pink/sand/gold across 200px and read as a flag.
+  /**
+   * The garden, baked.
+   *
+   * The sky ramp, the floor ramp, four hundred blades of grass and the tree of
+   * knowledge are all completely static, and drawing them per frame cost twenty-eight
+   * thousand canvas calls -- more than every other scene in the game put together.
+   * They are painted once into an offscreen and blitted after that.
+   *
+   * The rivers stay live because they move, and they are the only thing here that
+   * does.
+   */
+  function bakeGarden() {
+    const mk = makeCanvas(W, H);
+    if (!mk) return null;
+    const bg = mk.g;
     const HZ = 214;
     for (let y = 0; y < HZ; y++) {
       const f = y / HZ;
@@ -194,28 +208,26 @@ export function makeEdenScene() {
         : f < 0.58 ? mix(P.pink, P.rust, (f - 0.30) / 0.28)
           : f < 0.82 ? mix(P.rust, P.brass3, (f - 0.58) / 0.24)
             : mix(P.brass3, P.sand, (f - 0.82) / 0.18);
-      rect(g, 0, y, W, 1, c);
-      // one dither row every few lines keeps the ramp from looking like a photograph
-      if (y % 5 === 2) dither(g, 0, y, W, 1, c, mix(c, P.white, 0.25), 3);
+      rect(bg, 0, y, W, 1, c);
+      // one dither row every few lines keeps the ramp from looking photographic
+      if (y % 5 === 2) dither(bg, 0, y, W, 1, c, mix(c, P.white, 0.25), 3);
     }
-    // The sun rises BEHIND the market: the stalls occupy y 46..282 and there is no
-    // clear sky to put a whole sun in, so only its top arc shows above them.
+    // the sun rises BEHIND the market: the stalls own y 46..282, so only its top shows
     const sunX = 700, sunY = 38;
     for (let i = 0; i < 34; i++) {
-      const a2 = (i / 34) * Math.PI * 2 + t * 0.1;
-      const r1 = 44 + 26 * Math.abs(Math.sin(t * 0.6 + i * 0.7));
-      for (let r = 38; r < r1; r += 2) {
-        px(g, sunX + Math.cos(a2) * r, sunY + Math.sin(a2) * r * 0.9, r < 46 ? 'gold' : 'brass2');
+      const a2 = (i / 34) * Math.PI * 2;
+      for (let r = 38; r < 70; r += 2) {
+        px(bg, sunX + Math.cos(a2) * r, sunY + Math.sin(a2) * r * 0.9, r < 46 ? 'gold' : 'brass2');
       }
     }
-    disc(g, sunX, sunY, 36, 'brass3');
-    disc(g, sunX, sunY, 30, 'gold');
-    disc(g, sunX - 8, sunY - 8, 12, 'white');
+    disc(bg, sunX, sunY, 36, 'brass3');
+    disc(bg, sunX, sunY, 30, 'gold');
+    disc(bg, sunX - 8, sunY - 8, 12, 'white');
 
     // --- the garden floor, receding
     for (let y = HZ; y < H; y++) {
       const f = (y - HZ) / (H - HZ);
-      rect(g, 0, y, W, 1, f < 0.2 ? mix(P.moss, P.green0, f / 0.2)
+      rect(bg, 0, y, W, 1, f < 0.2 ? mix(P.moss, P.green0, f / 0.2)
         : f < 0.6 ? mix(P.green0, P.green1, (f - 0.2) / 0.4)
           : mix(P.green1, P.moss, (f - 0.6) / 0.4));
     }
@@ -225,33 +237,19 @@ export function makeEdenScene() {
       const gy = HZ + ((i * 37) % (H - HZ));
       const depth = (gy - HZ) / (H - HZ);
       const gh = 2 + Math.round(depth * 6) + ((i * 13) % 3);
-      rect(g, gx, gy, 1, gh, i % 3 ? 'green1' : 'moss');
-      if (depth > 0.5 && i % 7 === 0) px(g, gx, gy - 1, 'foam');
+      rect(bg, gx, gy, 1, gh, i % 3 ? 'green1' : 'moss');
+      if (depth > 0.5 && i % 7 === 0) px(bg, gx, gy - 1, 'foam');
     }
-    // --- two of the four rivers, kept BELOW the stalls so they do not cut through them
-    for (let i = 0; i < 2; i++) {
-      const rx = 250 + i * 470;
-      for (let y = HZ + 4; y < H; y++) {
-        const depth = (y - HZ) / (H - HZ);
-        const wob = Math.round(Math.sin(y * 0.05 + t * 1.1 + i * 2) * (2 + depth * 5));
-        const rw = 4 + Math.round(depth * 14);
-        rect(g, rx + wob - rw / 2, y, rw, 1, 'water2');
-        rect(g, rx + wob - rw / 2, y, 1, 1, 'water3');
-        rect(g, rx + wob + rw / 2 - 1, y, 1, 1, 'water1');
-        if ((y + Math.floor(t * 12)) % 11 === 0) rect(g, rx + wob - 2, y, 4, 1, 'foam');
-      }
-    }
-    // --- the tree of knowledge, rooted in the garden where there is room for it
+    // --- the tree of knowledge, rooted where there is room for it
     const tx = 130, tby = 500, tcy = 400;
-    rect(g, tx - 9, tcy, 18, tby - tcy, 'wood1');
-    rect(g, tx - 9, tcy, 6, tby - tcy, 'wood2');
-    rect(g, tx + 6, tcy, 3, tby - tcy, 'wood0');
+    rect(bg, tx - 9, tcy, 18, tby - tcy, 'wood1');
+    rect(bg, tx - 9, tcy, 6, tby - tcy, 'wood2');
+    rect(bg, tx + 6, tcy, 3, tby - tcy, 'wood0');
     for (const dx of [-1, 1]) {
-      line(g, tx, tcy + 20, tx + dx * 26, tcy - 14, 'wood1');
-      line(g, tx, tcy + 21, tx + dx * 26, tcy - 13, 'wood0');
+      line(bg, tx, tcy + 20, tx + dx * 26, tcy - 14, 'wood1');
+      line(bg, tx, tcy + 21, tx + dx * 26, tcy - 13, 'wood0');
+      line(bg, tx + dx * 8, tby, tx + dx * 26, tby + 8, 'wood1');
     }
-    // roots reaching for the river
-    for (const dx of [-1, 1]) line(g, tx + dx * 8, tby, tx + dx * 26, tby + 8, 'wood1');
     const th = (n) => { const v = Math.sin(n * 91.7) * 4371.3; return v - Math.floor(v); };
     for (let i = 0; i < 90; i++) {
       const a2 = th(i) * Math.PI * 2;
@@ -259,16 +257,39 @@ export function makeEdenScene() {
       const lx = tx + Math.cos(a2) * 62 * rad;
       const ly = tcy - 24 + Math.sin(a2) * 46 * rad;
       const up = 1 - (ly - (tcy - 70)) / 92;
-      ellipse(g, lx, ly, 8, 5, up > 0.7 ? 'green1' : up > 0.42 ? 'green0' : 'moss');
-      if (up > 0.8 && i % 6 === 0) px(g, lx - 1, ly - 2, 'foam');
+      ellipse(bg, lx, ly, 8, 5, up > 0.7 ? 'green1' : up > 0.42 ? 'green0' : 'moss');
+      if (up > 0.8 && i % 6 === 0) px(bg, lx - 1, ly - 2, 'foam');
     }
     for (let i = 0; i < 7; i++) {
       const a2 = i * 0.92 + 0.4;
       const ax = tx + Math.cos(a2) * 44, ay = tcy - 24 + Math.sin(a2) * 32;
-      disc(g, ax, ay, 5, 'ink');
-      disc(g, ax, ay, 4, 'red2');
-      px(g, ax - 1, ay - 1, 'red1');
-      px(g, ax, ay - 5, 'wood2');
+      disc(bg, ax, ay, 5, 'ink');
+      disc(bg, ax, ay, 4, 'red2');
+      px(bg, ax - 1, ay - 1, 'red1');
+      px(bg, ax, ay - 5, 'wood2');
+    }
+    return mk.canvas;
+  }
+
+  function drawGarden(g) {
+    if (!gardenBake) gardenBake = bakeGarden();
+    if (gardenBake) g.drawImage(gardenBake, 0, 0);
+
+    // the two rivers, which are the only thing in the garden that moves. Drawn as one
+    // span per row rather than three, since the highlight either side is a single pixel.
+    const HZ = 214;
+    for (let i = 0; i < 2; i++) {
+      const rx = 250 + i * 470;
+      for (let y = HZ + 4; y < H; y++) {
+        const depth = (y - HZ) / (H - HZ);
+        const wob = Math.round(Math.sin(y * 0.05 + t * 1.1 + i * 2) * (2 + depth * 5));
+        const rw = 4 + Math.round(depth * 14);
+        const x0 = rx + wob - (rw >> 1);
+        rect(g, x0, y, rw, 1, 'water2');
+        px(g, x0, y, 'water3');
+        px(g, x0 + rw - 1, y, 'water1');
+        if ((y + Math.floor(t * 12)) % 11 === 0) rect(g, x0 + 1, y, Math.min(4, rw - 2), 1, 'foam');
+      }
     }
   }
 
@@ -304,27 +325,38 @@ export function makeEdenScene() {
     rect(g, cx - 2, gy - 22, 1, 22, 'wood2');
     for (const dx of [-14, -7, 7, 14]) line(g, cx, gy - 12, cx + dx, gy - 30, 'wood1');
 
-    // the clump. `hash` keeps it identical frame to frame -- a bush that reshuffles
-    // every frame boils, and no amount of good colour saves it.
-    const hash = (n) => {
-      const x = Math.sin(n * 12.9898 + i * 78.233) * 43758.5453;
-      return x - Math.floor(x);
-    };
-    for (let k2 = 0; k2 < 74; k2++) {
-      const a2 = hash(k2) * Math.PI * 2;
-      const rad = Math.sqrt(hash(k2 + 100)) * 0.94;      // sqrt = even area fill
-      const lx = cx + Math.cos(a2) * RX * rad;
-      const ly = cy + Math.sin(a2) * RY * rad;
-      // height in the clump decides the tone: lit on top, deep underneath
-      const up = 1 - (ly - (cy - RY)) / (RY * 2);
-      const c = up > 0.72 ? 'green1' : up > 0.46 ? 'green0' : up > 0.24 ? 'moss' : 'cloth0';
-      const lw2 = 5 + Math.round(hash(k2 + 200) * 3);
-      ellipse(g, lx, ly, lw2, Math.round(lw2 * 0.66), c);
-      // a few leaves catch the dawn
-      if (up > 0.78 && k2 % 5 === 0) px(g, lx - 1, ly - 2, 'foam');
-      // and a few dark gaps you can see into
-      if (up < 0.3 && k2 % 7 === 0) px(g, lx, ly, 'ink');
+    // The clump is BAKED per (bush, apple): it never changes shape, and seventy-four
+    // leaf ellipses is nine hundred canvas calls a bush. `hash` keeps it identical
+    // frame to frame anyway -- a bush that reshuffles every frame boils.
+    const bkey = i + '/' + (planted || '-');
+    let bk = bushBake.get(bkey);
+    if (bk === undefined) {
+      const mk = makeCanvas(RX * 2 + 8, RY * 2 + 8);
+      bk = mk ? mk.canvas : null;
+      if (mk) {
+        const bg = mk.g;
+        const ox = RX + 4, oy = RY + 4;
+        const hash = (n) => {
+          const x2 = Math.sin(n * 12.9898 + i * 78.233) * 43758.5453;
+          return x2 - Math.floor(x2);
+        };
+        for (let k2 = 0; k2 < 74; k2++) {
+          const a2 = hash(k2) * Math.PI * 2;
+          const rad = Math.sqrt(hash(k2 + 100)) * 0.94;      // sqrt = even area fill
+          const lx = ox + Math.cos(a2) * RX * rad;
+          const ly = oy + Math.sin(a2) * RY * rad;
+          // height in the clump decides the tone: lit on top, deep underneath
+          const up = 1 - (ly - (oy - RY)) / (RY * 2);
+          const c = up > 0.72 ? 'green1' : up > 0.46 ? 'green0' : up > 0.24 ? 'moss' : 'cloth0';
+          const lw2 = 5 + Math.round(hash(k2 + 200) * 3);
+          ellipse(bg, lx, ly, lw2, Math.round(lw2 * 0.66), c);
+          if (up > 0.78 && k2 % 5 === 0) px(bg, lx - 1, ly - 2, 'foam');
+          if (up < 0.3 && k2 % 7 === 0) px(bg, lx, ly, 'ink');
+        }
+      }
+      bushBake.set(bkey, bk);
     }
+    if (bk) g.drawImage(bk, Math.round(cx - RX - 4), Math.round(cy - RY - 4));
 
     // the apple, nested in the leaves rather than sitting on them
     if (ap) {

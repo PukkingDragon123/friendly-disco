@@ -11,6 +11,7 @@ import {
   clamp, lerp, box, boxFrame, makeCanvas,
 } from '../core/pixel.js';
 import { icon as drawIcon, hasIcon } from './uikit.js';
+import { drawFolkPortrait, FOLK_IDS } from './folk.js';
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -585,8 +586,21 @@ function bakedBg(id, w, h) {
 
 export function clearPortraitCache() { bgCache.clear(); }
 
+/**
+ * Speaker ids that the cast (render/folk.js) now owns. Those characters are drawn from
+ * the SAME sprite as their walk-around selves, so a portrait and the figure standing in
+ * Eden can never drift apart. `cupid` is an alias kept because the old scoring UI asks
+ * for it by that name.
+ */
+const FOLK_ALIAS = { cupid: 'cherub', shepherd: 'noah' };
+
 export function drawPortrait(g, id, x, y, w, h, t, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  const folkId = FOLK_ALIAS[id] || id;
+  if (FOLK_IDS.indexOf(folkId) >= 0) {
+    drawFolkPortrait(g, folkId, x, y, w, h, t, o);
+    return;
+  }
   const fn = PORTRAITS[id] || PORTRAITS.disaster;
   // frame first: the portraits all bleed to their edges
   rect(g, x - 2, y - 2, w + 4, h + 4, 'ink');

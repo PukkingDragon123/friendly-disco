@@ -197,6 +197,40 @@ switch (which) {
     }
     break;
   }
+  case 'folk': {
+    const F = await import('../src/render/folk.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, SW, SH, 'deep');
+        text(g, 'THE CAST — sprites at 1x/2x/3x, then poses, then portraits',
+          SW / 2, 8, 'gold', { center: true, font: 7 });
+        F.FOLK_IDS.forEach((id, i) => {
+          const x = 70 + i * 150;
+          // three scales, so the silhouette can be judged small and large
+          rect(g, x - 62, 30, 138, 128, 'shadow');
+          F.drawFolk(g, id, x - 40, 150, 1.2, { scale: 1 });
+          F.drawFolk(g, id, x, 150, 1.2, { scale: 2, mud: id === 'golem' ? 1 : 0,
+            sparkle: id === 'cherub' ? 1 : 0 });
+          text(g, id.toUpperCase(), x, 162, 'brass3', { font: 5, center: true });
+          // the four poses at 2x
+          F.POSES.forEach((pose, j) => {
+            const py = 200 + j * 80;
+            rect(g, x - 62, py - 68, 138, 76, j % 2 ? 'shadow' : 'ink');
+            F.drawFolk(g, id, x, py, 1.2 + j, { scale: 2, pose, talking: pose === 'talk' });
+            text(g, pose, x + 46, py - 12, 'grey2', { font: 3, right: true });
+          });
+        });
+        // portraits along the bottom
+        F.FOLK_IDS.forEach((id, i) => {
+          F.drawFolkPortrait(g, id, 24 + i * 150, 344, 120, 176, 1.4 + i,
+            { talking: i === 1, mud: id === 'golem' ? 1 : 0, sparkle: id === 'cherub' ? 1 : 0 });
+        });
+      },
+    };
+    break;
+  }
   case 'portraits': {
     const { drawPortrait, PORTRAIT_IDS } = await import('../src/render/portraits.js');
     const { rect, text } = await import('../src/core/pixel.js');

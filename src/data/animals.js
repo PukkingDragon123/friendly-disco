@@ -1,4 +1,4 @@
-// The caravan: 72 animals, frozen roster (DESIGN Appendix A).
+// The caravan: 90 animals, frozen roster (DESIGN Appendix A) plus the apocrypha.
 //
 // Every row is pure data. `sprite` is a recipe for render/sprites.js, which bakes a
 // 20x20 shaded sphere with features poking out of the silhouette — so a recipe is
@@ -1134,6 +1134,79 @@ const APOCRYPHA = [
     skill: { id: 'storm_born', desc: 'Boss chip and mult penalties do not apply to it' } },
 ];
 
+/* ------------------------------------------------------ likes (berth traits)
+
+The roster is authored with a single `home` biome per animal, which is how it reads
+best as data. Berths, though, advertise TRAITS (habitats.js), and the whole point of
+traits is that an animal accepts several. Rather than hand-maintain a likes array on
+ninety rows -- where it would rot the first time a tag changed -- likes are DERIVED,
+once, at import:
+
+  1. the animal's biome seeds a ranked trait triple (a jungle animal wants bushy
+     first, warm second, soaked third),
+  2. its tags promote traits it obviously wants: anything `flying` wants a perch,
+     anything `nocturnal` wants the dark, anything `domestic` wants the barn,
+  3. the list is deduped and clipped to three, because three pips is what the gate
+     plate and the animal card can show without becoming a spreadsheet.
+
+`home` is then rewritten to likes[0], so every existing consumer of `.home` keeps
+working and now means "favourite condition" instead of "the one correct pocket".
+*/
+
+const BIOME_LIKES = {
+  savanna:  ['warm', 'dusty', 'bushy'],
+  arctic:   ['frozen', 'briny', 'lofty'],
+  jungle:   ['bushy', 'warm', 'soaked'],
+  ocean:    ['briny', 'soaked', 'frozen'],
+  desert:   ['dusty', 'warm', 'lofty'],
+  farm:     ['tame', 'warm', 'bushy'],
+  wetland:  ['soaked', 'bushy', 'tame'],
+  mountain: ['lofty', 'frozen', 'dusty'],
+  forest:   ['bushy', 'gloomy', 'soaked'],
+};
+
+// tag -> the trait it argues for. Order matters: an earlier match outranks a later
+// one, so a nocturnal flying thing is gloomy-then-lofty.
+const TAG_LIKES = [
+  ['polar', 'frozen'],
+  ['nocturnal', 'gloomy'],
+  ['digging', 'gloomy'],
+  ['fish', 'briny'],
+  ['aquatic', 'soaked'],
+  ['amphibian', 'soaked'],
+  ['swimming', 'soaked'],
+  ['flying', 'lofty'],
+  ['bird', 'lofty'],
+  ['domestic', 'tame'],
+  ['tropical', 'warm'],
+  ['insect', 'bushy'],
+  ['reptile', 'warm'],
+  ['armored', 'dusty'],
+];
+
+function deriveLikes(a) {
+  const seed = BIOME_LIKES[a.home] || ['tame', 'warm', 'bushy'];
+  const promoted = [];
+  const tags = a.tags || [];
+  for (const [tag, trait] of TAG_LIKES) {
+    if (tags.indexOf(tag) >= 0 && promoted.indexOf(trait) < 0) promoted.push(trait);
+  }
+  // The biome keeps first claim -- it is the animal's identity -- but a strongly
+  // tagged trait jumps ahead of the biome's weaker third choice.
+  const out = [seed[0]];
+  for (const t of promoted) if (out.indexOf(t) < 0) out.push(t);
+  for (const t of seed.slice(1)) if (out.indexOf(t) < 0) out.push(t);
+  return out.slice(0, 3);
+}
+
+// Rewritten in place before the roster is frozen. Every record gains `likes` and has
+// its `home` re-pointed at its favourite trait.
+for (const a of BASE_ANIMALS.concat(APOCRYPHA)) {
+  a.likes = Object.freeze(deriveLikes(a));
+  a.biome = a.home;                  // kept for flavour text and shop grouping
+  a.home = a.likes[0];
+}
+
 /** The full roster: the original manifest plus the apocrypha. */
 export const ANIMALS = Object.freeze(BASE_ANIMALS.concat(APOCRYPHA));
 
@@ -1149,7 +1222,7 @@ export const ANIMAL_BY_ID = Object.freeze(
   ANIMALS.reduce((acc, a) => { acc[a.id] = a; return acc; }, {}),
 );
 
-/** home id -> animals, in roster order. Handy for cargo crates and the vitrine. */
+/** favourite trait -> animals, in roster order. For cargo crates and the vitrine. */
 export const ANIMALS_BY_HOME = Object.freeze(
   ANIMALS.reduce((acc, a) => { (acc[a.home] = acc[a.home] || []).push(a); return acc; }, {}),
 );

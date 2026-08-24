@@ -12,11 +12,17 @@
 //   9 commit: score += floor(chips * mult * xmult)
 
 import { ANIMAL_BY_ID, SKILL_BY_ANIMAL } from '../data/animals.js';
-import { affinity, HABITAT_BY_ID } from '../data/habitats.js';
+import { likeness, likeRank, HABITAT_BY_ID } from '../data/habitats.js';
 import { INTERACTIONS } from '../data/interactions.js';
 import { habitatLevel } from '../data/cargo.js';
 
 export const MATCH = { EXACT: 'exact', PARTIAL: 'partial', WRONG: 'wrong' };
+
+/** Display name of a berth trait, safe against a missing id. */
+function trName(id) {
+  const h = HABITAT_BY_ID[id];
+  return h ? h.name.toUpperCase() : '???';
+}
 
 const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
 
@@ -68,7 +74,10 @@ function selMatches(sel, animal) {
   if (sel.any) return true;
   if (sel.id) return animal.id === sel.id;
   if (sel.tag) return !!(animal.tags && animal.tags.includes(sel.tag));
-  if (sel.home) return animal.home === sel.home;
+  // `home` in a selector means "wants this condition" -- any of its ranked likes,
+  // not just its favourite. Traits are plural by design, so a rule about warm
+  // animals should catch everything that asked for warmth.
+  if (sel.home) return !!(animal.likes ? animal.likes.includes(sel.home) : animal.home === sel.home);
   if (sel.rarity) return animal.rarity === sel.rarity;
   return false;
 }
@@ -357,9 +366,10 @@ export function resolveShot(s) {
     const habitatId = gate ? gate.habitatId : null;
     state.habitatId = habitatId;
 
-    // --- 1: habitat match. The chameleon is always at home.
+    // --- 1: how well the berth suits the animal. The chameleon likes everywhere.
     const isChameleon = animal.id === 'chameleon';
-    const aff = isChameleon ? 1 : (habitatId ? affinity(animal.home, habitatId) : 0);
+    const aff = isChameleon ? 1 : (habitatId ? likeness(animal, habitatId) : 0);
+    const rank = isChameleon ? 0 : likeRank(animal, habitatId);
     const match = aff >= 0.999 ? MATCH.EXACT : aff > 0 ? MATCH.PARTIAL : MATCH.WRONG;
     if (match !== MATCH.EXACT) allExact = false;
 
@@ -404,24 +414,30 @@ export function resolveShot(s) {
       res.mult += 2 + lvl * 0.5;
       entry.steps.push({
         kind: 'match',
-        label: isChameleon ? 'Perfect Camouflage' : `${HABITAT_BY_ID[habitatId] ? HABITAT_BY_ID[habitatId].name : '???'} — HOME!`,
+        label: isChameleon ? 'Perfect Camouflage' : `${trName(habitatId)} — FAVOURITE!`,
         color: 'gold', chips: add, mult: 2 + lvl * 0.5, xmult: 1,
       });
       res.money += 1;
     } else if (match === MATCH.PARTIAL) {
+      // rank 1 and 2 are traits the animal actually asked for, just not first --
+      // those read as CONTENT. Anything else is a berth that merely resembles
+      // something it wanted, which reads as SETTLES FOR.
+      const asked = rank >= 0;
       const add = res.chips * aff;
       res.chips += add;
-      res.mult += 1;
+      res.mult += asked ? 1 + (2 - rank) * 0.5 : 0.5;
       entry.steps.push({
-        kind: 'match', label: 'Close enough…', color: 'sky',
-        chips: add, mult: 1, xmult: 1,
+        kind: 'match',
+        label: asked ? `${trName(habitatId)} — CONTENT` : `${trName(habitatId)}… settles for it`,
+        color: asked ? 'green1' : 'sky',
+        chips: add, mult: asked ? 1 + (2 - rank) * 0.5 : 0.5, xmult: 1,
       });
     } else {
       const lost = -res.chips * 0.75;
       res.chips += lost;
       res.mult -= 1;
       entry.steps.push({
-        kind: 'match', label: 'Wrong habitat!', color: 'red2',
+        kind: 'match', label: `HATES ${trName(habitatId)}!`, color: 'red2',
         chips: lost, mult: -1, xmult: 1,
       });
     }

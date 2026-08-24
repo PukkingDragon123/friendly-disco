@@ -773,12 +773,12 @@ function sim(world, maxT, dt = 1 / 60) {
 // against the cushions and two mid-rail mouths hanging outside the felt entirely.
 function testGates(world) {
   return setGates(world, [
-    { id: 'tl', habitatId: 'farm', x: 7, y: 5, r: 10, slot: 'tl' },
-    { id: 'tm', habitatId: 'ocean', x: TABLE_W / 2, y: -1.5, r: 10, slot: 'tm' },
-    { id: 'tr', habitatId: 'forest', x: TABLE_W - 7, y: 5, r: 10, slot: 'tr' },
-    { id: 'bl', habitatId: 'arctic', x: 7, y: TABLE_H - 5, r: 10, slot: 'bl' },
-    { id: 'bm', habitatId: 'desert', x: TABLE_W / 2, y: TABLE_H + 1.5, r: 10, slot: 'bm' },
-    { id: 'br', habitatId: 'jungle', x: TABLE_W - 7, y: TABLE_H - 5, r: 10, slot: 'br' },
+    { id: 'tl', habitatId: 'tame', x: 7, y: 5, r: 10, slot: 'tl' },
+    { id: 'tm', habitatId: 'briny', x: TABLE_W / 2, y: -1.5, r: 10, slot: 'tm' },
+    { id: 'tr', habitatId: 'bushy', x: TABLE_W - 7, y: 5, r: 10, slot: 'tr' },
+    { id: 'bl', habitatId: 'frozen', x: 7, y: TABLE_H - 5, r: 10, slot: 'bl' },
+    { id: 'bm', habitatId: 'dusty', x: TABLE_W / 2, y: TABLE_H + 1.5, r: 10, slot: 'bm' },
+    { id: 'br', habitatId: 'gloomy', x: TABLE_W - 7, y: TABLE_H - 5, r: 10, slot: 'br' },
   ]);
 }
 
@@ -893,7 +893,7 @@ export function __selftest() {
     }
     t(b.sunk, 'a ball aimed at a gate is captured');
     t(gateEvents === 1, 'the gate event fires exactly once per ball', gateEvents);
-    t(seenGate && seenGate.id === 'tl' && seenGate.habitatId === 'farm', 'the event carries the gate');
+    t(seenGate && seenGate.id === 'tl' && seenGate.habitatId === 'tame', 'the event carries the gate');
     t(midSink && b.sinkT >= 1, 'sinkT animates 0..1 for the renderer', b.sinkT);
     t(w.sunk.length === 1 && w.sunk[0] === b, 'world.sunk records the drop');
     t(isSettled(w), 'a table of nothing but sunk balls is settled');
@@ -902,7 +902,7 @@ export function __selftest() {
   // --- capture radius honours gate.r * 0.72
   {
     const w = createWorld({});
-    setGates(w, [{ id: 'g', habitatId: 'farm', x: 100, y: 58, r: 10 }]);
+    setGates(w, [{ id: 'g', habitatId: 'tame', x: 100, y: 58, r: 10 }]);
     // placed by hand: addBall deliberately refuses to spawn a ball on a mouth
     const inn = addBall(w, { animalId: 'i', x: 60, y: 58 });
     inn.x = 100 + 10 * 0.6; inn.y = 58;

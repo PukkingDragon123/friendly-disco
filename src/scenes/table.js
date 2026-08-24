@@ -9,7 +9,7 @@
 import { P, col, mix } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, dashLine, disc, ring, ellipse, ellipseFrame, tri,
-  dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp,
+  dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp, W, H,
 } from '../core/pixel.js';
 import { Input } from '../core/input.js';
 import { Juice, Ease, tween, approach } from '../core/juice.js';
@@ -24,7 +24,7 @@ import {
 } from '../render/table.js';
 import * as PH from '../game/physics.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
-import { HABITAT_BY_ID } from '../data/habitats.js';
+import { HABITAT_BY_ID, likeness, likeRank } from '../data/habitats.js';
 import { resolveShot, previewPot } from '../game/scoring.js';
 import {
   startBlind, applyShot, endBlind, rerack, drawHand, blindCleared, blindFailed, currentKind,
@@ -32,9 +32,31 @@ import {
 } from '../game/run.js';
 import { BLIND_KINDS } from '../data/blinds.js';
 
-const HUD_W = 150;
-const CTRL_Y = 274;
-const READOUT_Y = 18;
+/* ---------------------------------------------------------------- layout
+
+960x540, laid out as a ship's console rather than as a scaled-up 640x360:
+
+    y   0.. 18   relic ribbon, full width
+    y  20..102   the CHIPS x MULT readout, aligned to the deck's own width
+    y 106..390   the deck (DECK.x..DECK.x+w, from render/table.js)
+    y 394..536   the controls band: power, english, re-rack, feeds, animal card
+
+    x   0..152   the left console: score, flood, shots, berths, log
+    x 155..885   the deck and the readout above it, sharing an edge
+    x 888..960   the far rail: blessings, stacked vertically
+
+The console never overlaps the felt. At 640x360 it had to, and the left corner
+pockets sat under a drop shadow.
+*/
+const HUD_X = 4;
+const HUD_W = 144;
+const RAIL_X = 890;
+const RAIL_W = 66;
+const RIBBON_H = 18;
+const READOUT_Y = 20;
+const READOUT_H = 82;
+const CTRL_Y = 394;
+const CTRL_H = H - CTRL_Y - 4;
 
 export function makeTableScene() {
   let run = null, app = null, onExit = null;
@@ -49,10 +71,11 @@ export function makeTableScene() {
   let touchSelect = null;
   let angle = 0;
   let spin = 0;
-  let aimPath = null;
-  let aimPreview = null;
-  let projected = null;        // cached score preview for the current (animal, gate)
-  let projectedKey = '';
+  // No trajectory, no target preview. `handValue` is what the SELECTED ANIMAL is
+  // worth before the berth is known -- information about your hand, not about the
+  // shot you have not taken yet.
+  let handValue = null;
+  let handValueKey = '';
 
   // shot bookkeeping
   const pottedThisShot = [];
@@ -358,7 +381,7 @@ export function makeTableScene() {
     liveChips = 0; liveMult = 0; liveXm = 1;
     entryIx++; stepIx = 0;
     if (entryIx >= script.entries.length) {
-      if (script.perfect) { Juice.pop('PERFECT ARK  +$2', 320, 96, { color: 'teal', outline: 'ink' }); Audio.sfx('cash'); }
+      if (script.perfect) { Juice.pop('PERFECT ARK  +$2', W / 2, 150, { color: 'teal', outline: 'ink' }); Audio.sfx('cash'); }
       phaseT = 0;
       stepT = -0.35;                 // small beat before handing control back
       script.__done = true;
@@ -398,16 +421,20 @@ export function makeTableScene() {
 
     if (phase === 'aim') {
       // hover / select
+      // Pick radius follows the ball's ON-SCREEN size rather than a constant: at
+      // xs=3 an animal is 32 pixels tall, and a 15px grab radius made the near rail
+      // feel sticky and the far rail feel unclickable.
       hoverBall = null;
-      let bestD = 15;
+      let bestD = Infinity;
       for (const b of world.balls) {
         if (b.sunk) continue;
         const s = toScreen(b.x, b.y);
-        const d = Math.hypot(m.x - s.x, m.y - (s.y - ballPixelRadius(b.r) * 0.55));
-        if (d < bestD) { bestD = d; hoverBall = b; }
+        const pr = ballPixelRadius(b.r, b.y);
+        const d = Math.hypot(m.x - s.x, m.y - (s.y - pr * 0.55));
+        if (d < pr * 1.35 && d < bestD) { bestD = d; hoverBall = b; }
       }
 
-      const onFelt = m.y < CTRL_Y - 4 && m.x > HUD_W;
+      const onFelt = m.y < CTRL_Y - 4 && m.x > HUD_X + HUD_W;
 
       if (Input.touch) {
         // --- touchscreen: one gesture does everything. Pull away from the animal to
@@ -417,8 +444,8 @@ export function makeTableScene() {
         if (m.down && selected && !selected.sunk && onFelt) {
           const s = toScreen(selected.x, selected.y);
           const d = Math.hypot(m.x - s.x, m.y - s.y);
-          charge = clamp((d - 12) / 140, 0.12, 1);
-          charging = m.holdT > 0.1 && d > 16;
+          charge = clamp((d - 18) / 210, 0.12, 1);
+          charging = m.holdT > 0.1 && d > 24;
         }
         if (m.released) {
           if (m.tapped && touchSelect) {
@@ -451,14 +478,11 @@ export function makeTableScene() {
 
       if (selected && !selected.sunk) {
         angle = aimAngle(selected, m.x, m.y);
-        refreshProjection();
+        refreshHandValue();
         if (Input.key('KeyA')) spin = clamp(spin - dt * 2, -1, 1);
         if (Input.key('KeyD')) spin = clamp(spin + dt * 2, -1, 1);
         if (m.wheel) spin = clamp(spin + m.wheel * 0.12, -1, 1);
         if (Input.pressed('KeyS')) spin = 0;
-
-        aimPath = PH.predict(world, selected, angle, Math.max(0.35, charge || 0.6), Math.round(run.guideLen));
-        aimPreview = previewFor(aimPath);
       }
 
       // rerack
@@ -552,34 +576,24 @@ export function makeTableScene() {
   }
 
   /**
-   * What would this animal score if it went in? Recomputed only when the pairing
-   * changes — resolveShot walks every interaction rule, and the preview deliberately
-   * runs with relics OFF so a hover cannot advance a relic's counter.
+   * What the selected animal is worth on its own: its printed chips and mult with
+   * feeds and relic-independent buffs already folded in, scored against its FAVOURITE
+   * trait. It is a floor, not a promise -- the berth you actually hit decides the
+   * rest. Recomputed only when the pairing changes, and with relics OFF so that
+   * merely selecting an animal cannot advance a relic's counter.
    */
-  function refreshProjection() {
+  function refreshHandValue() {
     const a = selected ? ANIMAL_BY_ID[selected.animalId] : null;
-    if (!a) { projected = null; projectedKey = ''; return; }
-    const gateId = aimPreview ? aimPreview.gate.habitatId : a.home;
-    const key = a.id + '/' + gateId + '/' + run.stats.shotsTaken;
-    if (key === projectedKey) return;
-    projectedKey = key;
-    projected = previewPot(run, run.blind, a.id, gateId, {
+    if (!a) { handValue = null; handValueKey = ''; return; }
+    const key = a.id + '/' + run.stats.shotsTaken;
+    if (key === handValueKey) return;
+    handValueKey = key;
+    handValue = previewPot(run, run.blind, a.id, a.home, {
       rng: run.blind.rng,
       residents: habitatResidents(),
       tableAnimals: liveAnimals(selected),
       deckAnimals: run.stash.map((id) => ANIMAL_BY_ID[id]).filter(Boolean),
     });
-  }
-
-  function previewFor(path) {
-    if (!path || !path.hit || path.hit.kind !== 'gate') return null;
-    const gate = (world.gates || []).find((g) => g.id === path.hit.id);
-    if (!gate || !selected) return null;
-    const animal = ANIMAL_BY_ID[selected.animalId];
-    const hab = HABITAT_BY_ID[gate.habitatId];
-    if (!animal || !hab) return null;
-    const exact = animal.home === gate.habitatId || animal.id === 'chameleon';
-    return { gate, hab, exact };
   }
 
   /* ----------------------------------------------------------------- draw */
@@ -592,11 +606,11 @@ export function makeTableScene() {
     const eff = (run.blind && run.blind.effect) || {};
 
     // ---------- backdrop
-    rect(g, 0, 0, 640, 360, 'deep');
+    rect(g, 0, 0, W, H, 'deep');
     // The sea gets angrier as the water climbs — the backdrop is the timer.
     const fl = clamp(run.flood || 0, 0, 1);
     sea.draw(g, {
-      x: 0, y: 0, w: 640, h: 360, horizonY: 96,
+      x: 0, y: 0, w: W, h: H, horizonY: 104,
       timeOfDay: run.blind && run.blind.kind === 'boss' ? 0.62 : 0.3,
       storm: clamp((run.blind && run.blind.kind === 'boss' ? 0.45 : 0.08) + fl * 0.55, 0, 1),
       parallax: 0.4, reflect: true,
@@ -616,6 +630,7 @@ export function makeTableScene() {
     // ---------- HUD
     drawReadout(g);
     drawHud(g);
+    drawRail(g);
     drawCarriers(g);
     drawRelicRibbon(g);
     drawControls(g);
@@ -627,51 +642,60 @@ export function makeTableScene() {
     if (msgT > 0) {
       const a = Math.min(1, msgT);
       const w = textW(msg) + 12;
-      rect(g, 320 - w / 2, 254, w, 11, 'ink');
-      frame(g, 320 - w / 2, 254, w, 11, 'brass1');
-      text(g, msg, 320, 257, 'bone', { center: true });
+      rect(g, W / 2 - w / 2 - 4, 356, w + 8, 15, 'ink');
+      frame(g, W / 2 - w / 2 - 4, 356, w + 8, 15, 'brass1');
+      text(g, msg, W / 2, 360, 'bone', { center: true, font: 5 });
       void a;
     }
   }
 
+  /** Which berth to highlight in the vitrine: the selected animal's favourite. */
   function hoverHabitat() {
-    if (aimPreview) return aimPreview.gate.habitatId;
     if (!selected) return null;
     const a = ANIMAL_BY_ID[selected.animalId];
     return a ? a.home : null;
   }
 
+  /**
+   * The cue, the selection ring, and NOTHING ELSE.
+   *
+   * There used to be a projected trajectory here and a "~748 IF IT GOES HOME" plate
+   * over the target gate. Both are gone on purpose: with the line drawn, every shot
+   * was arithmetic, and the only difficulty left was whether you could drag a mouse
+   * along a dotted path. You now judge the angle by eye and the strength by the
+   * gauge, so a bank shot off two rails is a read rather than a readout.
+   */
   function drawAimLayer(g) {
     if (phase !== 'aim' || !selected || selected.sunk) return;
     const s = toScreen(selected.x, selected.y);
     const pr = ballPixelRadius(selected.r);
 
     // selection ring on the cloth
-    ellipseFrame(g, s.x, s.y, pr + 2, Math.round(pr * 0.62) + 1, 'white');
-    ellipseFrame(g, s.x, s.y, pr + 4, Math.round(pr * 0.62) + 2, 'cloth3');
+    ellipseFrame(g, s.x, s.y, pr + 3, Math.round(pr * 0.62) + 2, 'white');
+    ellipseFrame(g, s.x, s.y, pr + 6, Math.round(pr * 0.62) + 4, 'cloth3');
 
-    if (aimPath) deck.drawAim(g, aimPath, { r: selected.r, color: charging ? 'gold' : 'white' });
+    // A short lick of direction right at the ball -- three pixels' worth, enough to
+    // confirm which way the cue is pointing, far too short to aim a bank with.
+    const nose = pr + 4;
+    for (let i = 0; i < 3; i++) {
+      const d = nose + i * 4;
+      px(g, s.x + Math.cos(angle) * d, s.y + Math.sin(angle) * d * (VIEW.tilt / VIEW.xs),
+        i === 0 ? 'white' : i === 1 ? 'bone' : 'grey2');
+    }
 
     // the cue itself, pulled back proportional to charge
-    const back = 16 + charge * 26;
+    const back = 22 + charge * 40;
     const cx = s.x - Math.cos(angle) * back;
     const cy = s.y - Math.sin(angle) * back * (VIEW.tilt / VIEW.xs) - pr * 0.55;
-    const tx = s.x - Math.cos(angle) * (pr + 3);
-    const ty = s.y - Math.sin(angle) * (pr + 3) * (VIEW.tilt / VIEW.xs) - pr * 0.55;
-    line(g, cx - Math.cos(angle) * 40, cy - Math.sin(angle) * 40 * (VIEW.tilt / VIEW.xs), tx, ty, 'wood3');
-    line(g, cx - Math.cos(angle) * 40 + 1, cy - Math.sin(angle) * 40 * (VIEW.tilt / VIEW.xs) + 1, tx, ty + 1, 'wood1');
+    const tx = s.x - Math.cos(angle) * (pr + 4);
+    const ty = s.y - Math.sin(angle) * (pr + 4) * (VIEW.tilt / VIEW.xs) - pr * 0.55;
+    const bx = cx - Math.cos(angle) * 58, by = cy - Math.sin(angle) * 58 * (VIEW.tilt / VIEW.xs);
+    line(g, bx, by, tx, ty, 'wood3');
+    line(g, bx, by + 1, tx, ty + 1, 'wood1');
+    line(g, bx + 1, by - 1, tx, ty - 1, 'wood4');
+    // brass ferrule and chalked tip, so the business end is legible against the felt
+    line(g, tx + Math.cos(angle) * 4, ty + Math.sin(angle) * 4 * (VIEW.tilt / VIEW.xs), tx, ty, 'brass2');
     px(g, tx, ty, 'ice');
-
-    // habitat preview tooltip
-    if (aimPreview) {
-      const gs = gateScreen(aimPreview.gate);
-      const a = ANIMAL_BY_ID[selected.animalId];
-      const lines = [aimPreview.exact ? 'HOME  x3 chips  +2 mult' : `${aimPreview.hab.name}: mismatch`];
-      UI.tooltip(g, gs.x + 12, gs.y - 26, {
-        title: a ? a.name + ' -> ' + aimPreview.hab.short : aimPreview.hab.name,
-        lines, color: aimPreview.exact ? 'gold' : 'red2', w: 108,
-      });
-    }
   }
 
   function drawGateFronts(g, eff) {
@@ -679,84 +703,117 @@ export function makeTableScene() {
     void eff;
   }
 
-  /** The big centred CHIPS x MULT slab — the focal point of the whole screen. */
+  /**
+   * A row of trait pips: the ranked conditions an animal is asking for, favourite
+   * first and largest. This is the whole trait system's user interface -- you read
+   * these three icons off the animal and look for a berth wearing one of them.
+   */
+  function drawLikes(g, animal, x, y, o = {}) {
+    if (!animal || !animal.likes) return 0;
+    const big = o.big !== false;
+    const step = big ? 20 : 13;
+    animal.likes.forEach((tid, i) => {
+      const hab = HABITAT_BY_ID[tid];
+      if (!hab) return;
+      const px0 = x + i * step;
+      const sz = big ? (i === 0 ? 16 : 13) : 11;
+      const dy = big ? (i === 0 ? 0 : 2) : 0;
+      // favourite gets a lit plate, second and third get plain ones
+      rect(g, px0, y + dy, sz, sz, i === 0 ? mix(col(hab.color), P.ink, 0.55) : 'ink');
+      frame(g, px0, y + dy, sz, sz, i === 0 ? hab.color : mix(col(hab.color), P.ink, 0.45));
+      UI.icon(g, hab.icon, px0 + (sz - 8) / 2, y + dy + (sz - 8) / 2, {
+        color: i === 0 ? hab.color : mix(col(hab.color), P.grey1, 0.4),
+      });
+      if (i === 0) px(g, px0 + 1, y + dy + 1, 'white');
+    });
+    return animal.likes.length * step;
+  }
+
+  /** The big CHIPS x MULT slab, aligned to the deck's own width. Focal point. */
   function drawReadout(g) {
-    const x = 168, y = READOUT_Y, w = 464, h = 66;
+    const x = DECK.x, y = READOUT_Y, w = DECK.w, h = READOUT_H;
     UI.panel(g, x, y, w, h, { style: 'slate', shadow: true, rivets: false });
 
     const blind = run.blind;
     const kindInfo = BLIND_KINDS.find((b) => b.key === currentKind(run)) || BLIND_KINDS[0];
     const bc = blind ? blind.color : kindInfo.color;
 
-    // --- left: which blind this is, and what it does to you
-    UI.ribbon(g, x + 5, y + 5, 138, blind ? blind.name : kindInfo.name, { color: bc, font: 3 });
-    if (blind && blind.icon) UI.icon(g, blind.icon, x + 147, y + 6, { color: bc });
+    // --- left column: which blind this is, what it does to you, and the target
+    const LC = 214;
+    UI.ribbon(g, x + 6, y + 6, LC - 24, blind ? blind.name : kindInfo.name, { color: bc, font: 5 });
+    if (blind && blind.icon) UI.icon(g, blind.icon, x + LC - 14, y + 8, { color: bc });
     if (blind && blind.desc) {
-      wrap(blind.desc, 152, { font: 3 }).slice(0, 2)
-        .forEach((l, i) => text(g, l, x + 6, y + 20 + i * 7, 'grey2', { font: 3 }));
+      wrap(blind.desc, LC - 12, { font: 3 }).slice(0, 2)
+        .forEach((l, i) => text(g, l, x + 7, y + 24 + i * 8, 'grey2', { font: 3 }));
     }
-    text(g, 'TARGET', x + 6, y + 40, 'grey1', { font: 3 });
-    text(g, fmtBig(run.target), x + 40, y + 37, 'gold', { shadow: 'ink', font: 7 });
+    text(g, 'TARGET', x + 7, y + 46, 'grey1', { font: 3 });
+    text(g, fmtBig(run.target), x + 52, y + 42, 'gold', { shadow: 'ink', font: 7, scale: 1 });
     const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
-    UI.bar(g, x + 6, y + 50, 152, 8, prog, {
+    UI.bar(g, x + 7, y + 62, LC - 14, 11, prog, {
       fill: prog >= 1 ? 'green1' : prog > 0.66 ? 'amber' : 'gold',
       bg: 'ink', frame: 'grey0', ticks: 4, glow: prog >= 1, stripe: prog > 0 && prog < 1,
     });
+    UI.divider(g, x + LC, y + 6, 0, {});
+    rect(g, x + LC, y + 6, 1, h - 12, 'grey0');
 
     // --- centre: chips x mult, at a size you can read from across the room
-    const cx = x + Math.round(w * 0.5) + 12;
-    const bw = 104, bh = 30;
-    // While aiming, the readout previews the shot instead of sitting on zero — a dead
-    // 0 x 0 tells the player nothing, and this is the number they are aiming at.
-    const previewing = phase === 'aim' && liveChips === 0 && projected;
-    const showChips = previewing ? projected.chips : Math.round(dispChips);
-    const liveMultTotal = previewing
-      ? projected.mult * projected.xmult
-      : Math.max(0, dispMult) * (liveXm || 1);
+    const cx = x + LC + Math.round((w - LC) * 0.42);
+    const bw = 150, bh = 42;
+    const liveMultTotal = Math.max(0, dispMult) * (liveXm || 1);
 
-    // A cherub to each side of the readout, holding the plates on ribbons. They beat
-    // faster while a shot is being counted.
+    // A cherub to each side, holding the plates on ribbons. They beat faster while a
+    // shot is being counted.
     const beat = phase === 'score' ? 2.4 : 1;
-    const lift = Math.round(Math.sin(t * beat * 2.2) * 1.5);
-    drawCherub(g, cx - bw - 26, y + 28 + lift, t * beat, { scale: 2, arms: true });
-    drawCherub(g, cx + bw + 26, y + 28 - lift, t * beat + 1.9, { scale: 2, arms: true });
-    // ribbons from their hands to the plate corners
-    line(g, cx - bw - 18, y + 28 + lift, cx - bw - 11, y + 14, 'brass2');
-    line(g, cx - bw - 18, y + 29 + lift, cx - bw - 11, y + 15, 'brass0');
-    line(g, cx + bw + 18, y + 28 - lift, cx + bw + 11, y + 14, 'brass2');
-    line(g, cx + bw + 18, y + 29 - lift, cx + bw + 11, y + 15, 'brass0');
+    const lift = Math.round(Math.sin(t * beat * 2.2) * 2);
+    drawCherub(g, cx - bw - 34, y + 40 + lift, t * beat, { scale: 2, arms: true });
+    drawCherub(g, cx + bw + 34, y + 40 - lift, t * beat + 1.9, { scale: 2, arms: true });
+    line(g, cx - bw - 24, y + 38 + lift, cx - bw - 14, y + 18, 'brass2');
+    line(g, cx - bw - 23, y + 39 + lift, cx - bw - 13, y + 19, 'brass0');
+    line(g, cx + bw + 24, y + 38 - lift, cx + bw + 14, y + 18, 'brass2');
+    line(g, cx + bw + 23, y + 39 - lift, cx + bw + 13, y + 19, 'brass0');
 
-    UI.panel(g, cx - bw - 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
-    text(g, String(showChips), cx - 12 - bw / 2, y + 16, previewing ? 'sky' : 'ice',
-      { center: true, scale: 2, font: 7, shadow: 'ink' });
-    text(g, 'CHIPS', cx - 12 - bw / 2, y + 44, 'sky', { font: 3, center: true });
+    UI.panel(g, cx - bw - 14, y + 14, bw, bh, { style: 'brass', inset: true, corners: false });
+    text(g, String(Math.round(dispChips)), cx - 14 - bw / 2, y + 20, 'ice',
+      { center: true, scale: 3, font: 7, shadow: 'ink' });
+    text(g, 'CHIPS', cx - 14 - bw / 2, y + 60, 'sky', { font: 3, center: true });
 
-    text(g, '×', cx - 4, y + 18, 'white', { center: true, scale: 2, font: 7, shadow: 'ink' });
+    text(g, '×', cx - 5, y + 24, 'white', { center: true, scale: 3, font: 7, shadow: 'ink' });
 
-    UI.panel(g, cx + 12, y + 12, bw, bh, { style: 'brass', inset: true, corners: false });
-    text(g, fmt(liveMultTotal), cx + 12 + bw / 2, y + 16, previewing ? 'red1' : 'red2',
-      { center: true, scale: 2, font: 7, shadow: 'ink' });
-    text(g, 'MULT', cx + 12 + bw / 2, y + 44, 'red1', { font: 3, center: true });
+    UI.panel(g, cx + 14, y + 14, bw, bh, { style: 'brass', inset: true, corners: false });
+    text(g, fmt(liveMultTotal), cx + 14 + bw / 2, y + 20, 'red2',
+      { center: true, scale: 3, font: 7, shadow: 'ink' });
+    text(g, 'MULT', cx + 14 + bw / 2, y + 60, 'red1', { font: 3, center: true });
 
-    // --- right: what this shot has banked so far, or what the aimed shot is worth
-    if (previewing) {
-      text(g, '~' + projected.score, x + w - 8, y + 14, 'grey2', { right: true, scale: 2, font: 7, shadow: 'ink' });
-      text(g, projected.match === 'exact' ? 'IF IT GOES HOME' : projected.match === 'partial' ? 'IF IT GOES CLOSE' : 'IF IT GOES WRONG',
-        x + w - 8, y + 36, projected.match === 'exact' ? 'gold' : projected.match === 'partial' ? 'sky' : 'red2',
-        { font: 3, right: true });
-    } else if (shotScore > 0) {
-      text(g, '+' + shotScore, x + w - 8, y + 14, 'gold', { right: true, scale: 2, font: 7, shadow: 'ink' });
-      text(g, 'THIS SHOT', x + w - 8, y + 36, 'brass2', { font: 3, right: true });
+    // --- right: this shot's bank, or WHO IS LOADED and what it is asking for. Never
+    // what the shot would score -- that number was the game playing itself.
+    const rx = x + w - 8;
+    if (shotScore > 0) {
+      text(g, '+' + shotScore, rx, y + 14, 'gold', { right: true, scale: 3, font: 7, shadow: 'ink' });
+      text(g, 'THIS SHOT', rx, y + 50, 'brass2', { font: 3, right: true });
+    } else {
+      const a = selected ? ANIMAL_BY_ID[selected.animalId] : null;
+      if (a) {
+        text(g, 'LOADED', rx, y + 8, 'grey1', { font: 3, right: true });
+        text(g, a.name, rx, y + 15, 'white', { right: true, font: 7, shadow: 'ink' });
+        const base = handValue ? handValue.chips : a.chips;
+        const bm = handValue ? handValue.mult * handValue.xmult : a.mult;
+        text(g, `${Math.round(base)} × ${fmt(bm)}`, rx, y + 32, 'sky', { right: true, font: 5 });
+        text(g, 'WANTS', rx - 62, y + 48, 'grey1', { font: 3, right: true });
+        drawLikes(g, a, rx - 58, y + 44);
+      } else {
+        text(g, 'NOTHING LOADED', rx, y + 20, 'grey1', { font: 5, right: true });
+        text(g, 'pick an animal on the deck', rx, y + 34, 'grey0', { font: 3, right: true });
+      }
     }
 
     // --- the step banner: what just fired, in the colour of what kind of thing it was
     if (bannerT > 0 && bannerText) {
-      const bw2 = textW(bannerText, { font: 7 }) + 16;
+      const bw2 = textW(bannerText, { font: 7 }) + 20;
       const bcx = clamp(cx, x + bw2 / 2 + 4, x + w - bw2 / 2 - 4);
-      const by = y + h - 4;
-      box(g, bcx - bw2 / 2, by, bw2, 13, 'ink', 1);
-      boxFrame(g, bcx - bw2 / 2, by, bw2, 13, bannerColor, 1);
-      text(g, bannerText, bcx, by + 2, bannerColor, { center: true, font: 7 });
+      const by = y + h - 6;
+      box(g, bcx - bw2 / 2, by, bw2, 17, 'ink', 1);
+      boxFrame(g, bcx - bw2 / 2, by, bw2, 17, bannerColor, 1);
+      text(g, bannerText, bcx, by + 4, bannerColor, { center: true, font: 7 });
     }
   }
 
@@ -781,240 +838,344 @@ export function makeTableScene() {
     }
   }
 
+  /** The left console: score, the flood clock, stock, the berth vitrine, the log. */
   function drawHud(g) {
-    const x = 4, y = 18, w = HUD_W - 8;
-    UI.panel(g, x, y, w, 336, { style: 'wood', shadow: true });
+    const x = HUD_X, y = READOUT_Y, w = HUD_W;
+    UI.panel(g, x, y, w, H - y - 4, { style: 'wood', shadow: true });
 
-    let cy = y + 6;
-    // ante + blind
-    text(g, `ANTE ${run.ante}/8`, x + 6, cy, 'brass3', { font: 7, shadow: 'ink' });
-    text(g, currentKind(run).toUpperCase(), x + w - 6, cy, run.blind ? run.blind.color : 'white', { font: 3, right: true });
-    cy += 12;
+    let cy = y + 7;
+    text(g, `ANTE ${run.ante}/8`, x + 7, cy, 'brass3', { font: 7, shadow: 'ink' });
+    cy += 14;
+    text(g, currentKind(run).toUpperCase(), x + 7, cy, run.blind ? run.blind.color : 'white', { font: 3 });
+    cy += 10;
 
     // score / target
-    UI.panel(g, x + 4, cy, w - 8, 30, { style: 'slate', inset: true });
-    text(g, 'SCORE', x + 8, cy + 3, 'grey2', { font: 3 });
-    text(g, String(Math.round(dispScore)), x + w - 8, cy + 1, 'gold', { right: true, shadow: 'ink', font: 7 });
+    UI.panel(g, x + 4, cy, w - 8, 40, { style: 'slate', inset: true });
+    text(g, 'SCORE', x + 9, cy + 4, 'grey2', { font: 3 });
+    text(g, String(Math.round(dispScore)), x + w - 9, cy + 11, 'gold', { right: true, shadow: 'ink', font: 7, scale: 2 });
     const prog = run.target ? clamp(run.score / run.target, 0, 1) : 0;
-    UI.bar(g, x + 8, cy + 16, w - 16, 6, prog, { fill: prog >= 1 ? 'green1' : 'gold', bg: 'shadow', frame: 'brass1', glow: prog >= 1 });
-    text(g, 'NEED ' + fmtBig(run.target), x + 8, cy + 24, 'grey2', { font: 3 });
-    cy += 36;
+    UI.bar(g, x + 9, cy + 29, w - 18, 7, prog, {
+      fill: prog >= 1 ? 'green1' : 'gold', bg: 'shadow', frame: 'brass1', glow: prog >= 1,
+    });
+    cy += 44;
+    text(g, 'NEED ' + fmtBig(run.target), x + 7, cy, 'grey2', { font: 3 });
+    cy += 12;
 
     // --- the flood gauge: the real clock, so it gets the space
     const moves = movesLeft(run);
     const floodK = clamp(run.flood || 0, 0, 1);
-    UI.panel(g, x + 4, cy, w - 8, 26, { style: 'slate', inset: true });
-    text(g, 'FLOOD', x + 8, cy + 3, moves <= 1 ? 'red2' : 'foam', { font: 3 });
-    text(g, moves + (moves === 1 ? ' MOVE' : ' MOVES'), x + w - 8, cy + 1, moves <= 1 ? 'red2' : 'ice',
+    UI.panel(g, x + 4, cy, w - 8, 36, { style: 'slate', inset: true });
+    text(g, 'FLOOD', x + 9, cy + 4, moves <= 1 ? 'red2' : 'foam', { font: 3 });
+    text(g, moves + (moves === 1 ? ' MOVE' : ' MOVES'), x + w - 9, cy + 10, moves <= 1 ? 'red2' : 'ice',
       { right: true, font: 7, shadow: 'ink' });
-    // the gauge fills with water and the hull marks show how much rail is left
-    UI.bar(g, x + 8, cy + 13, w - 16, 9, floodK, {
+    UI.bar(g, x + 9, cy + 24, w - 18, 9, floodK, {
       fill: floodK > 0.75 ? 'red2' : floodK > 0.5 ? 'water3' : 'water2',
       bg: 'ink', frame: 'brass1', ticks: Math.max(run.shots, run.shotsLeft),
       stripe: true, glow: floodK > 0.75,
     });
-    cy += 30;
-    text(g, 'SHOTS', x + 6, cy, 'bone', { font: 3 });
-    UI.segBar(g, x + 44, cy - 1, w - 52, 7, Math.max(run.shots, run.shotsLeft), run.shotsLeft, { fill: run.shotsLeft <= 1 ? 'red2' : 'sky' });
-    cy += 10;
-    text(g, 'RACKS', x + 6, cy, 'bone', { font: 3 });
-    UI.segBar(g, x + 44, cy - 1, w - 52, 7, Math.max(run.reracks, run.reracksLeft), run.reracksLeft, { fill: 'green1' });
-    cy += 14;
+    cy += 41;
 
-    // money
-    UI.moneyPill(g, x + 6, cy, run.money, {});
-    text(g, `${run.caravan.length} in caravan`, x + w - 6, cy + 2, 'grey2', { font: 3, right: true });
+    text(g, 'SHOTS', x + 7, cy, 'bone', { font: 3 });
+    UI.segBar(g, x + 52, cy - 1, w - 60, 8, Math.max(run.shots, run.shotsLeft), run.shotsLeft,
+      { fill: run.shotsLeft <= 1 ? 'red2' : 'sky' });
+    cy += 12;
+    text(g, 'RACKS', x + 7, cy, 'bone', { font: 3 });
+    UI.segBar(g, x + 52, cy - 1, w - 60, 8, Math.max(run.reracks, run.reracksLeft), run.reracksLeft, { fill: 'green1' });
     cy += 16;
 
-    UI.divider(g, x + 4, cy, w - 8, {});
-    cy += 4;
+    UI.moneyPill(g, x + 7, cy, run.money, {});
+    text(g, `${run.caravan.length} aboard`, x + w - 7, cy + 3, 'grey2', { font: 3, right: true });
+    cy += 20;
 
-    // habitat vitrine — who lives where, this blind
-    text(g, 'HABITATS', x + 6, cy, 'brass2', { font: 3 });
-    cy += 8;
-    const gates = deck.gates;
-    for (const gate of gates) {
+    UI.divider(g, x + 4, cy, w - 8, {});
+    cy += 5;
+
+    // --- the berth vitrine: which condition each pocket offers, and who is in it
+    text(g, 'BERTHS', x + 7, cy, 'brass2', { font: 3 });
+    cy += 9;
+    const hov = hoverHabitat();
+    for (const gate of deck.gates) {
       const hab = HABITAT_BY_ID[gate.habitatId];
       if (!hab) continue;
       const residents = run.vitrine[gate.habitatId] || [];
-      rect(g, x + 4, cy, w - 8, 13, gate.closed ? 'shadow' : 'ink');
-      rect(g, x + 4, cy, 2, 13, hab.color);
-      UI.icon(g, hab.icon, x + 8, cy + 2, { color: gate.closed ? 'grey0' : hab.accent || hab.color });
-      text(g, hab.short, x + 19, cy + 4, gate.closed ? 'grey0' : 'bone', { font: 3 });
-      for (let i = 0; i < Math.min(6, residents.length); i++) {
+      const lit = hab.id === hov && !gate.closed;
+      rect(g, x + 4, cy, w - 8, 20, gate.closed ? 'shadow' : lit ? mix(col(hab.color), P.ink, 0.72) : 'ink');
+      rect(g, x + 4, cy, 3, 20, gate.closed ? 'grey0' : hab.color);
+      if (lit) boxFrame(g, x + 4, cy, w - 8, 20, hab.color, 1);
+      UI.icon(g, hab.icon, x + 10, cy + 2, { color: gate.closed ? 'grey0' : hab.accent || hab.color });
+      text(g, hab.short, x + 21, cy + 3, gate.closed ? 'grey0' : lit ? 'white' : 'bone', { font: 5 });
+      for (let i = 0; i < Math.min(5, residents.length); i++) {
         const a = ANIMAL_BY_ID[residents[i]];
-        if (a) drawAnimalIcon(g, a, x + 40 + i * 11, cy + 6, { scale: 1 });
+        if (a) drawAnimalIcon(g, a, x + 20 + i * 13, cy + 14, { scale: 1 });
       }
-      if (residents.length > 6) text(g, '+' + (residents.length - 6), x + w - 8, cy + 4, 'grey2', { font: 3, right: true });
-      if (gate.closed) UI.icon(g, 'lock', x + w - 16, cy + 2, { color: 'grey1' });
-      cy += 14;
+      if (residents.length > 5) text(g, '+' + (residents.length - 5), x + w - 9, cy + 12, 'grey2', { font: 3, right: true });
+      if (gate.closed) UI.icon(g, 'lock', x + w - 18, cy + 2, { color: 'grey1' });
+      cy += 21;
     }
 
-    cy += 2;
+    cy += 3;
     UI.divider(g, x + 4, cy, w - 8, {});
-    cy += 4;
-    // recent log
-    text(g, 'LOG', x + 6, cy, 'brass2', { font: 3 });
-    cy += 7;
-    const logs = run.log.slice(-6);
-    for (const l of logs) {
-      text(g, l.text.slice(0, 26), x + 6, cy, l.color || 'grey2', { font: 3 });
-      cy += 6;
+    cy += 5;
+    text(g, 'LOG', x + 7, cy, 'brass2', { font: 3 });
+    cy += 9;
+    const room = Math.max(0, Math.floor((H - 10 - cy) / 8));
+    for (const l of run.log.slice(-room)) {
+      text(g, l.text.slice(0, 30), x + 7, cy, l.color || 'grey2', { font: 3 });
+      cy += 8;
     }
   }
 
-  function drawRelicRibbon(g) {
-    rect(g, 0, 0, 640, 15, 'wood1');
-    rect(g, 0, 14, 640, 1, 'wood0');
-    rect(g, 0, 0, 640, 1, 'wood3');
-    text(g, 'RELICS', 4, 4, 'brass2', { font: 3 });
-    let x = 34;
-    for (const relic of run.relics) {
-      const rc = UI.RARITY_COLOR[relic.rarity] || 'grey2';
-      rect(g, x, 2, 12, 11, 'ink');
-      frame(g, x, 2, 12, 11, rc);
-      UI.icon(g, (relic.art && relic.art.icon) || 'gem', x + 2, 3, { color: (relic.art && relic.art.fg) || rc });
-      if (UI.hover(UI.rectOf(x, 2, 12, 11), Input.mouse)) {
-        UI.tooltip(g, x, 16, { title: relic.name, lines: wrap(relic.desc, 130, { font: 3 }), color: rc, w: 140 });
+  /** The far-right rail: relics stacked vertically, one plate each. */
+  function drawRail(g) {
+    const x = RAIL_X, y = READOUT_Y, w = RAIL_W;
+    UI.panel(g, x, y, w, H - y - 4, { style: 'wood', shadow: true });
+    text(g, 'RELICS', x + w / 2, y + 6, 'brass2', { font: 3, center: true });
+    let cy = y + 16;
+    const slots = Math.max(run.relicSlots, run.relics.length);
+    for (let i = 0; i < slots; i++) {
+      const relic = run.relics[i];
+      const r = UI.rectOf(x + 5, cy, w - 10, 30);
+      if (!relic) {
+        rect(g, r.x, r.y, r.w, r.h, 'shadow');
+        boxFrame(g, r.x, r.y, r.w, r.h, 'wood0', 1);
+      } else {
+        const rc = UI.RARITY_COLOR[relic.rarity] || 'grey2';
+        rect(g, r.x, r.y, r.w, r.h, mix(col(rc), P.ink, 0.75));
+        boxFrame(g, r.x, r.y, r.w, r.h, rc, 1);
+        UI.icon(g, (relic.art && relic.art.icon) || 'gem', r.x + (r.w - 16) / 2, r.y + 6,
+          { color: (relic.art && relic.art.fg) || rc, scale: 2 });
+        if (UI.hover(r, Input.mouse)) {
+          // opens to the LEFT so it never leaves the frame
+          UI.tooltip(g, r.x - 194, r.y, {
+            title: relic.name, lines: wrap(relic.desc, 176, { font: 3 }), color: rc, w: 186,
+          });
+        }
       }
-      x += 14;
+      cy += 33;
+      if (cy > H - 40) break;
     }
-    for (let i = run.relics.length; i < run.relicSlots; i++) {
-      rect(g, x, 2, 12, 11, 'shadow');
-      boxFrame(g, x, 2, 12, 11, 'wood0');
-      x += 14;
-    }
-    // seed + fps, right side
-    text(g, run.seed, 636, 4, 'wood3', { font: 3, right: true });
   }
 
+  /** A thin title bar: the ark's name, the blessing in force, and the seed. */
+  function drawRelicRibbon(g) {
+    rect(g, 0, 0, W, RIBBON_H - 1, 'wood1');
+    rect(g, 0, RIBBON_H - 1, W, 1, 'wood0');
+    rect(g, 0, 0, W, 1, 'wood3');
+    text(g, 'THE ARK', 6, 4, 'brass3', { font: 7 });
+    const bless = run.blessing;
+    if (bless) {
+      const bw = textW(bless.name, { font: 5 }) + 26;
+      const bx = Math.round((W - bw) / 2);
+      rect(g, bx, 2, bw, RIBBON_H - 5, mix(col(bless.color || 'gold'), P.ink, 0.6));
+      boxFrame(g, bx, 2, bw, RIBBON_H - 5, bless.color || 'gold', 1);
+      UI.icon(g, bless.icon || 'star', bx + 4, 4, { color: bless.color || 'gold' });
+      text(g, bless.name, bx + 16, 5, bless.color || 'gold', { font: 5 });
+      if (UI.hover(UI.rectOf(bx, 2, bw, RIBBON_H - 5), Input.mouse)) {
+        UI.tooltip(g, bx, RIBBON_H + 2, {
+          title: bless.name, lines: wrap(bless.desc || '', 200, { font: 3 }),
+          color: bless.color || 'gold', w: 210,
+        });
+      }
+    }
+    text(g, run.seed, W - 6, 6, 'wood3', { font: 3, right: true });
+  }
+
+  /**
+   * The controls band. With the guide line gone, the POWER gauge is the only
+   * instrument you have, so it gets the left third of the band and a real scale:
+   * tick marks, a needle, and a hard red zone at the top where the cue ball starts
+   * jumping the rack apart instead of driving through it.
+   */
   function drawControls(g) {
-    const y = CTRL_Y, x = HUD_W + 4, w = 640 - x - 4, h = 360 - y - 4;
+    const x = DECK.x, y = CTRL_Y, w = DECK.w, h = CTRL_H;
     UI.panel(g, x, y, w, h, { style: 'wood', shadow: true });
 
     // --- power gauge
-    text(g, 'POWER', x + 8, y + 6, 'brass2', { font: 3 });
-    const pw = 150;
-    UI.bar(g, x + 8, y + 14, pw, 10, charging ? charge : 0, {
+    const pw = 236;
+    text(g, 'POWER', x + 10, y + 7, 'brass2', { font: 5 });
+    text(g, charging ? Math.round(charge * 100) + '%' : '—', x + pw + 2, y + 7,
+      charging ? (charge > 0.85 ? 'red2' : 'white') : 'grey1', { font: 7, right: true });
+    UI.bar(g, x + 10, y + 22, pw - 8, 18, charging ? charge : 0, {
       fill: charge > 0.85 ? 'red2' : charge > 0.5 ? 'amber' : 'green1',
-      bg: 'shadow', frame: 'brass1', ticks: 5, stripe: charging,
+      bg: 'shadow', frame: 'brass1', ticks: 10, stripe: charging, glow: charge > 0.85,
     });
-    text(g, charging ? Math.round(charge * 100) + '%' : 'HOLD CLICK', x + 8, y + 27, charging ? 'white' : 'grey1', { font: 3 });
+    // the red zone: past here the break scatters wildly and control is gone
+    rect(g, x + 10 + Math.round((pw - 8) * 0.85), y + 22, Math.round((pw - 8) * 0.15), 2, 'red2');
+    text(g, 'WILD', x + 10 + pw - 8, y + 44, 'red2', { font: 5, right: true });
+    text(g, charging ? 'RELEASE TO STRIKE' : 'HOLD TO CHARGE', x + 10, y + 44,
+      charging ? 'white' : 'brass3', { font: 5 });
+    // no line, no ghost ball, and it says so once where it matters
+    text(g, 'NO GUIDE — SHOOT BY EYE', x + 10, y + 58, 'brass2', { font: 5 });
 
     // --- spin widget (a little cue ball you can click)
-    const sx = x + 176, sy = y + 20;
-    disc(g, sx, sy, 11, 'bone');
-    disc(g, sx - 3, sy - 4, 4, 'white');
-    ring(g, sx, sy, 11, 'grey1');
-    const dotX = sx + Math.round(spin * 7);
-    disc(g, dotX, sy, 2, 'red2');
-    px(g, dotX, sy - 1, 'white');
-    text(g, 'ENGLISH', sx - 12, y + 34, 'brass2', { font: 3 });
-    if (UI.hover(UI.rectOf(sx - 12, sy - 12, 24, 24), Input.mouse) && Input.mouse.down && phase === 'aim' && !charging) {
-      spin = clamp((Input.mouse.x - sx) / 8, -1, 1);
+    const sx = x + pw + 46, sy = y + 28;
+    disc(g, sx, sy, 17, 'bone');
+    disc(g, sx - 5, sy - 6, 6, 'white');
+    ring(g, sx, sy, 17, 'grey1');
+    const dotX = sx + Math.round(spin * 11);
+    disc(g, dotX, sy, 3, 'red2');
+    px(g, dotX, sy - 2, 'white');
+    text(g, 'ENGLISH', sx, y + 50, 'brass2', { font: 3, center: true });
+    if (UI.hover(UI.rectOf(sx - 18, sy - 18, 36, 36), Input.mouse) && Input.mouse.down && phase === 'aim' && !charging) {
+      spin = clamp((Input.mouse.x - sx) / 12, -1, 1);
     }
 
     // --- buttons
-    rerackRect = UI.rectOf(x + 214, y + 10, 74, 18);
+    rerackRect = UI.rectOf(x + pw + 76, y + 12, 104, 26);
     UI.button(g, rerackRect, 'RE-RACK', {
       state: run.reracksLeft > 0 && phase === 'aim' ? (UI.hover(rerackRect, Input.mouse) ? 'hover' : 'idle') : 'disabled',
-      color: 'green0', icon: 'dice', sub: run.reracksLeft + ' left', small: true,
+      color: 'green0', icon: 'dice', sub: run.reracksLeft + ' left',
     });
 
     // --- feed slots
     for (let i = 0; i < 2; i++) {
-      const fr = UI.rectOf(x + 296 + i * 34, y + 10, 30, 30);
+      const fr = UI.rectOf(x + pw + 190 + i * 44, y + 10, 40, 40);
       feedRects[i] = fr;
       const feed = run.feeds[i];
       UI.panel(g, fr.x, fr.y, fr.w, fr.h, { style: 'slate', inset: true });
       if (feed) {
-        UI.icon(g, feed.icon || 'hay', fr.x + 10, fr.y + 6, { color: 'green1' });
-        text(g, String(i + 1), fr.x + 2, fr.y + 2, 'brass3', { font: 3 });
+        UI.icon(g, feed.icon || 'hay', fr.x + 12, fr.y + 10, { color: 'green1', scale: 2 });
+        text(g, String(i + 1), fr.x + 3, fr.y + 2, 'brass3', { font: 3 });
         if (UI.hover(fr, Input.mouse)) {
-          UI.tooltip(g, fr.x, fr.y - 30, { title: feed.name, lines: wrap(feed.desc, 120, { font: 3 }), color: 'green1', w: 130 });
+          UI.tooltip(g, fr.x, fr.y - 46, { title: feed.name, lines: wrap(feed.desc, 150, { font: 3 }), color: 'green1', w: 160 });
         }
       } else {
-        text(g, '-', fr.x + fr.w / 2, fr.y + 11, 'grey0', { center: true });
+        text(g, '—', fr.x + fr.w / 2, fr.y + 15, 'grey0', { center: true, font: 5 });
       }
     }
 
-    // --- selected animal card
-    const a = selected ? ANIMAL_BY_ID[selected.animalId] : null;
-    if (a) {
-      const cw = 150, cxx = x + w - cw - 4;
-      UI.panel(g, cxx, y + 6, cw, h - 12, { style: 'slate', inset: true });
-      drawAnimal(g, a, cxx + 16, y + 24, { scale: 1 });
-      text(g, a.name, cxx + 32, y + 9, 'white', { font: 7, shadow: 'ink' });
-      const hab = HABITAT_BY_ID[a.home];
-      if (hab) {
-        UI.icon(g, hab.icon, cxx + 32, y + 19, { color: hab.color });
-        text(g, hab.name, cxx + 43, y + 21, hab.accent || hab.color, { font: 3 });
+    // --- the queue: what is still waiting below deck. With the guide line gone you
+    // plan two shots ahead instead of one, so knowing who is next actually matters.
+    const qy = y + 76;
+    text(g, 'STILL BELOW DECK', x + 10, qy, 'brass2', { font: 3 });
+    const queue = run.stash.slice(0, 14);
+    if (queue.length === 0) {
+      text(g, 'the hold is empty', x + 10, qy + 12, 'wood3', { font: 3 });
+    }
+    queue.forEach((id, i) => {
+      const qa = ANIMAL_BY_ID[id];
+      if (!qa) return;
+      const qx = x + 12 + (i % 14) * 27;
+      const qyy = qy + 12;
+      rect(g, qx - 2, qyy - 2, 24, 28, 'shadow');
+      const fav = HABITAT_BY_ID[qa.home];
+      if (fav) rect(g, qx - 2, qyy - 2, 24, 2, fav.color);
+      drawAnimalIcon(g, qa, qx + 10, qyy + 10, { scale: 1 });
+      if (UI.hover(UI.rectOf(qx - 2, qyy - 2, 24, 28), Input.mouse)) {
+        UI.tooltip(g, qx, qyy - 60, {
+          title: qa.name, w: 170, color: fav ? fav.color : 'white',
+          lines: [`${qa.chips} chips  ×${qa.mult}`, 'wants: ' + qa.likes.map((t) => (HABITAT_BY_ID[t] || {}).name || t).join(', ')],
+        });
       }
-      text(g, `${a.chips} chips  ×${a.mult}`, cxx + 32, y + 30, 'sky', { font: 3 });
-      const rl = wrap(a.rules || a.blurb || '', cw - 12, { font: 3 });
-      rl.slice(0, 2).forEach((l, i) => text(g, l, cxx + 6, y + 42 + i * 6, 'grey2', { font: 3 }));
+    });
+    if (run.stash.length > 14) {
+      text(g, '+' + (run.stash.length - 14), x + 12 + 14 * 27, qy + 20, 'wood3', { font: 3 });
+    }
+
+    // --- selected animal card: who is loaded, and exactly what it is asking for
+    const a = selected ? ANIMAL_BY_ID[selected.animalId] : null;
+    const cw = 300, cxx = x + w - cw - 6;
+    UI.panel(g, cxx, y + 6, cw, h - 12, { style: 'slate', inset: true });
+    if (a) {
+      drawAnimal(g, a, cxx + 26, y + 30, { scale: 1 });
+      text(g, a.name, cxx + 50, y + 9, 'white', { font: 7, shadow: 'ink' });
+      text(g, `${a.chips} chips  ×${a.mult}`, cxx + 50, y + 24, 'sky', { font: 5 });
+      const rc = UI.RARITY_COLOR[a.rarity] || 'grey2';
+      text(g, (a.rarity || '').toUpperCase(), cxx + cw - 8, y + 9, rc, { font: 3, right: true });
+      // the ranked traits, plus what each is worth right now given the open berths
+      text(g, 'WANTS', cxx + 50, y + 38, 'grey1', { font: 3 });
+      drawLikes(g, a, cxx + 84, y + 34);
+      const rl = wrap(a.rules || a.blurb || '', cw - 14, { font: 3 });
+      rl.slice(0, 3).forEach((l, i) => text(g, l, cxx + 7, y + 56 + i * 8, 'grey2', { font: 3 }));
+      // and which OPEN berth is the best home for it, by name -- routing help that
+      // still leaves the shot itself entirely up to you
+      let best = null, bestV = 0;
+      for (const gate of deck.gates) {
+        if (gate.closed) continue;
+        const v = likeness(a, gate.habitatId);
+        if (v > bestV) { bestV = v; best = gate; }
+      }
+      if (best) {
+        const hb = HABITAT_BY_ID[best.habitatId];
+        const rank = likeRank(a, best.habitatId);
+        const lbl = rank === 0 ? 'FAVOURITE' : rank > 0 ? 'CONTENT' : 'WILL SETTLE';
+        text(g, 'BEST OPEN BERTH', cxx + cw - 8, y + 24, 'grey1', { font: 3, right: true });
+        text(g, hb ? hb.name.toUpperCase() : '?', cxx + cw - 8, y + 32, hb ? hb.color : 'white',
+          { font: 7, right: true, shadow: 'ink' });
+        text(g, lbl, cxx + cw - 8, y + 48, rank === 0 ? 'gold' : rank > 0 ? 'green1' : 'sky', { font: 3, right: true });
+      }
+    } else {
+      text(g, 'NO ANIMAL LOADED', cxx + cw / 2, y + 16, 'grey1', { font: 7, center: true });
+      text(g, Input.touch ? 'tap one on the deck' : 'click one on the deck',
+        cxx + cw / 2, y + 32, 'grey0', { font: 3, center: true });
     }
 
     // hint line
     const hint = phase !== 'aim'
       ? (phase === 'roll' ? 'rolling…' : phase === 'score' ? 'scoring…' : '')
       : Input.touch
-        ? 'TAP an animal to pick it · DRAG away to aim and load · LIFT to break'
-        : 'CLICK an animal to select · HOLD to charge · A/D or wheel = english · R = re-rack';
-    text(g, hint, x + 8, y + h - 11, 'wood3', { font: 3 });
+        ? 'TAP an animal · DRAG away to aim and load · LIFT to break'
+        : 'CLICK an animal · HOLD to charge · A/D or wheel = english · R = re-rack';
+    text(g, hint, x + 10, y + h - 12, 'wood3', { font: 3 });
   }
 
+  /** The blind card, slammed down on entry. Bigger frame, bigger slam. */
   function drawIntro(g) {
     const k = clamp(phaseT / 0.35, 0, 1);
-    wash(g, 0, 0, 640, 360, 'ink', 0.55 * (1 - clamp((phaseT - 0.6) / 0.4, 0, 1)));
+    wash(g, 0, 0, W, H, 'ink', 0.55 * (1 - clamp((phaseT - 0.6) / 0.4, 0, 1)));
     const blind = run.blind;
-    const yy = lerp(-40, 150, Ease.outBack(k));
-    const w = 300;
-    UI.panel(g, 320 - w / 2, yy, w, 74, { style: 'brass', shadow: true, rivets: true });
-    UI.ribbon(g, 320 - 140, yy + 5, 280, blind ? blind.name : 'BLIND', { color: blind ? blind.color : 'gold' });
-    text(g, fmtBig(run.target), 320, yy + 22, 'wood0', { center: true, scale: 2 });
-    text(g, fmtBig(run.target), 320, yy + 21, 'white', { center: true, scale: 2, shadow: 'wood1' });
-    text(g, 'TO BEAT', 320, yy + 38, 'wood0', { font: 3, center: true });
+    const w = 460, cx = W / 2;
+    const yy = lerp(-70, 200, Ease.outBack(k));
+    UI.panel(g, cx - w / 2, yy, w, 116, { style: 'brass', shadow: true, rivets: true });
+    UI.ribbon(g, cx - 214, yy + 7, 428, blind ? blind.name : 'BLIND', { color: blind ? blind.color : 'gold', font: 5 });
+    text(g, fmtBig(run.target), cx, yy + 32, 'wood0', { center: true, scale: 3, font: 7 });
+    text(g, fmtBig(run.target), cx, yy + 30, 'white', { center: true, scale: 3, font: 7, shadow: 'wood1' });
+    text(g, 'TO BEAT', cx, yy + 66, 'wood0', { font: 5, center: true });
     // small print gets its own dark strip — engraved brass on brass is unreadable
     const sub = `ANTE ${run.ante}  ·  ${run.shotsLeft} SHOTS  ·  ${run.reracksLeft} RE-RACKS`;
-    const sw = Math.max(textW(sub, { font: 3 }), blind && blind.desc ? textW(blind.desc, { font: 3 }) : 0) + 14;
-    rect(g, 320 - sw / 2, yy + 46, sw, blind && blind.desc ? 20 : 12, 'wood0');
-    rect(g, 320 - sw / 2, yy + 46, sw, 1, 'brass1');
+    const sw = Math.max(textW(sub, { font: 5 }), blind && blind.desc ? textW(blind.desc, { font: 5 }) : 0) + 24;
+    const sh = blind && blind.desc ? 32 : 18;
+    rect(g, cx - sw / 2, yy + 80, sw, sh, 'wood0');
+    rect(g, cx - sw / 2, yy + 80, sw, 1, 'brass1');
     if (blind && blind.desc) {
-      text(g, blind.desc, 320, yy + 49, blind.color || 'bone', { font: 3, center: true });
-      text(g, sub, 320, yy + 58, 'brass2', { font: 3, center: true });
+      text(g, blind.desc, cx, yy + 84, blind.color || 'bone', { font: 5, center: true });
+      text(g, sub, cx, yy + 98, 'brass2', { font: 5, center: true });
     } else {
-      text(g, sub, 320, yy + 49, 'brass2', { font: 3, center: true });
+      text(g, sub, cx, yy + 84, 'brass2', { font: 5, center: true });
     }
   }
 
   function drawCleared(g) {
-    wash(g, 0, 0, 640, 360, 'ink', 0.5);
+    wash(g, 0, 0, W, H, 'ink', 0.5);
     const k = clamp(phaseT / 0.4, 0, 1);
-    const yy = lerp(-30, 128, Ease.outBack(k));
-    UI.panel(g, 170, yy, 300, 92, { style: 'brass', shadow: true });
-    text(g, 'BLIND CLEARED', 320, yy + 10, 'gold', { center: true, outline: 'ink' });
-    text(g, `${run.score} / ${run.target}`, 320, yy + 26, 'white', { center: true });
-    text(g, `shots left  +$${Math.max(0, run.shotsLeft)}`, 320, yy + 42, 'green1', { font: 3, center: true });
-    text(g, `interest  +$${Math.min(5, Math.floor(run.money / 5))}`, 320, yy + 50, 'green1', { font: 3, center: true });
-    text(g, `$${run.money} in hand`, 320, yy + 62, 'brass3', { center: true });
+    const cx = W / 2, w = 440;
+    const yy = lerp(-50, 170, Ease.outBack(k));
+    UI.panel(g, cx - w / 2, yy, w, 148, { style: 'brass', shadow: true });
+    text(g, 'BLIND CLEARED', cx, yy + 12, 'gold', { center: true, font: 7, scale: 2, outline: 'ink' });
+    text(g, `${run.score} / ${run.target}`, cx, yy + 46, 'white', { center: true, font: 7, scale: 2, shadow: 'ink' });
+    text(g, `shots left  +$${Math.max(0, run.shotsLeft)}`, cx, yy + 76, 'green1', { font: 5, center: true });
+    text(g, `interest  +$${Math.min(5, Math.floor(run.money / 5))}`, cx, yy + 90, 'green1', { font: 5, center: true });
+    text(g, `$${run.money} in hand`, cx, yy + 106, 'brass3', { center: true, font: 7 });
     if (phaseT > 0.8 && Math.floor(t * 2) % 2 === 0) {
-      text(g, 'CLICK TO SAIL TO THE DOCK', 320, yy + 78, 'bone', { font: 3, center: true });
+      text(g, 'CLICK TO SAIL FOR EDEN', cx, yy + 128, 'bone', { font: 5, center: true });
     }
   }
 
   function drawFailed(g) {
-    wash(g, 0, 0, 640, 360, 'red0', 0.45);
+    wash(g, 0, 0, W, H, 'red0', 0.45);
     const k = clamp(phaseT / 0.4, 0, 1);
-    const yy = lerp(-30, 132, Ease.outQuad(k));
-    UI.panel(g, 180, yy, 280, 76, { style: 'slate', shadow: true });
+    const cx = W / 2, w = 420;
+    const yy = lerp(-50, 178, Ease.outQuad(k));
+    UI.panel(g, cx - w / 2, yy, w, 120, { style: 'slate', shadow: true });
     const drowned = (run.flood || 0) >= 1 - 1e-6;
-    text(g, drowned ? 'THE WATER TAKES THE DECK' : 'OUT OF SHOTS', 320, yy + 8, 'red2',
-      { center: true, font: 7, shadow: 'ink' });
-    text(g, `${run.score} / ${run.target}`, 320, yy + 26, 'white', { center: true, scale: 2, shadow: 'ink' });
-    text(g, drowned ? 'the flood reached the felt' : 'not enough animals found a home',
-      320, yy + 46, 'grey2', { font: 3, center: true });
-    if (phaseT > 0.9 && Math.floor(t * 2) % 2 === 0) text(g, 'CLICK TO CONTINUE', 320, yy + 58, 'bone', { font: 3, center: true });
+    text(g, drowned ? 'THE WATER TAKES THE DECK' : 'OUT OF SHOTS', cx, yy + 10, 'red2',
+      { center: true, font: 7, scale: 2, shadow: 'ink' });
+    text(g, `${run.score} / ${run.target}`, cx, yy + 44, 'white', { center: true, font: 7, scale: 2, shadow: 'ink' });
+    text(g, drowned ? 'the flood reached the felt' : 'not enough animals found a berth',
+      cx, yy + 78, 'grey2', { font: 5, center: true });
+    if (phaseT > 0.9 && Math.floor(t * 2) % 2 === 0) {
+      text(g, 'CLICK TO CONTINUE', cx, yy + 98, 'bone', { font: 5, center: true });
+    }
   }
 
   /* ---------------------------------------------------------------- scene */
@@ -1047,7 +1208,7 @@ export function makeTableScene() {
     debug() {
       return {
         phase, charge, angle, spin, shotScore,
-        run, world, deck, selected, aimPath, projected,
+        run, world, deck, selected, handValue,
         rects: { rerack: rerackRect, feeds: feedRects },
       };
     },

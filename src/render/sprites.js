@@ -664,31 +664,90 @@ export function drawAnimal(g, animal, sx, sy, opts = {}) {
 /* -------------------------------------------------------------------- icon */
 
 /** A head-only badge for HUD lists. */
+/**
+ * A 16px badge. This is not a shrunken sprite -- at 16 pixels a whole animal is mud.
+ * It is a HEAD, cropped like a passport photo, and it earns its legibility from four
+ * things in this order: the body colour, the ear silhouette breaking the circle, one
+ * pattern mark, and the eyes. Everything else is left out on purpose.
+ */
 export function bakeIcon(recipe, size = ICON_SIZE) {
   const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
   const C = colourSet(rc, makeTone({}));
   const b = makeBoard(size, size);
   if (!b.canvas) return { canvas: null, w: size, h: size, cx: size / 2, cy: size / 2 };
   const cx = Math.round(size / 2), cy = Math.round(size / 2) + 1;
-  const r = Math.round(size * 0.36);
-  // ears, cropped to the badge
-  if (rc.ears === 'long') {
-    for (const side of [-1, 1]) rect(b, cx + side * 2 - 1, cy - r - 4, 2, 5, C.body);
-  } else if (rc.ears === 'pointy') {
-    for (const side of [-1, 1]) tri(b, cx + side * 2, cy - r + 1, cx + side * 5, cy - r - 4, cx + side * 1, cy - r - 1, C.body);
-  } else if (rc.ears === 'horn' || rc.ears === 'antler') {
-    for (const side of [-1, 1]) for (let i = 0; i < 4; i++) px(b, cx + side * (2 + (i >> 1)), cy - r - i, C.horn);
-  } else if (rc.ears !== 'none') {
-    for (const side of [-1, 1]) disc(b, cx + side * 3, cy - r + 1, 2, C.body);
+  const r = Math.round(size * 0.40);
+
+  // --- ears / horns first, so the head overlaps their roots
+  const et = rc.ears || 'round';
+  if (et === 'long') {
+    for (const side of [-1, 1]) {
+      rect(b, cx + side * 2 - 1, cy - r - 5, 3, 7, C.body);
+      px(b, cx + side * 2, cy - r - 4, C.earIn);
+    }
+  } else if (et === 'pointy') {
+    for (const side of [-1, 1]) tri(b, cx + side * 2, cy - r + 2, cx + side * 6, cy - r - 5, cx + side * 1, cy - r, C.body);
+  } else if (et === 'horn') {
+    for (const side of [-1, 1]) for (let i = 0; i < 5; i++) rect(b, cx + side * (2 + (i >> 1)), cy - r - i, 2, 1, C.horn);
+  } else if (et === 'antler') {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 6; i++) px(b, cx + side * (2 + (i >> 1)), cy - r - i, C.horn);
+      px(b, cx + side * 5, cy - r - 3, C.horn);
+    }
+  } else if (et === 'crest' || et === 'tuft') {
+    for (let i = 0; i < 5; i++) rect(b, cx - 4 + i * 2, cy - r - 2 - (i === 2 ? 2 : i === 1 || i === 3 ? 1 : 0), 2, 4, i & 1 ? C.pat : C.light);
+  } else if (et === 'fin') {
+    tri(b, cx - 1, cy - r + 2, cx - 6, cy - r - 4, cx, cy - r - 2, C.light);
+  } else if (et !== 'none') {
+    for (const side of [-1, 1]) { disc(b, cx + side * 4, cy - r + 2, 2, C.body); px(b, cx + side * 4, cy - r + 2, C.earIn); }
   }
+
   shadedOval(b, cx, cy, r, r - 1, C, {});
+
+  // --- one pattern mark: enough to tell a zebra from a horse, no more
+  switch (rc.pattern) {
+    case 'stripes':
+      for (let i = -1; i <= 1; i++) rect(b, cx + i * 3 - 0, cy - r + 2, 1, r, C.pat);
+      break;
+    case 'spots': case 'freckles': case 'patches':
+      px(b, cx - 3, cy + 1, C.pat); px(b, cx + 3, cy + 2, C.pat); px(b, cx + 1, cy - 3, C.pat);
+      break;
+    case 'bands': case 'scales': case 'plates':
+      rect(b, cx - r + 2, cy - 2, r * 2 - 4, 1, C.pat);
+      rect(b, cx - r + 3, cy + 2, r * 2 - 6, 1, C.pat);
+      break;
+    case 'wool':
+      for (const [dx, dy] of [[-4, -3], [0, -4], [4, -3], [-3, 2], [3, 2]]) disc(b, cx + dx, cy + dy, 1, C.light);
+      break;
+    default: break;
+  }
+
+  // --- eyes, in the animal's own style, then the face
   const st = rc.eyeStyle || 'dot';
   for (const side of [-1, 1]) {
-    if (st === 'sleepy') rect(b, cx + side * 2 - 1, cy - 1, 2, 1, C.eye);
-    else px(b, cx + side * 2, cy - 1, C.eye);
+    const ex = cx + side * 3, ey = cy - 1;
+    if (st === 'sleepy') { rect(b, ex - 1, ey, 3, 1, C.eye); continue; }
+    if (st === 'angry') { px(b, ex, ey, C.eye); px(b, ex - side, ey - 1, C.shade); continue; }
+    if (st === 'wide') { rect(b, ex - 1, ey - 1, 3, 3, C.WH); px(b, ex, ey, C.eye); continue; }
+    px(b, ex, ey, C.eye);
+    px(b, ex, ey - 1, C.WH);
   }
-  if (rc.face === 'beak') tri(b, cx - 1, cy + 1, cx + 1, cy + 1, cx, cy + 4, C.beak);
-  else ellipse(b, cx, cy + 2, 2, 1, C.muz);
+  if (rc.face === 'beak') { tri(b, cx - 2, cy + 1, cx + 2, cy + 1, cx, cy + 5, C.beak); }
+  else if (rc.face === 'snout' || rc.face === 'muzzle') {
+    ellipse(b, cx, cy + 3, 3, 2, C.muz); px(b, cx, cy + 2, C.nose || C.eye);
+  } else if (rc.face === 'trunk') { rect(b, cx - 1, cy + 1, 2, 5, C.body); }
+  else { ellipse(b, cx, cy + 3, 2, 1, C.muz); }
+
+  // --- a single feathered/finned hint at the shoulder for the flyers and swimmers
+  if (rc.extra === 'wing' || rc.extra === 'plume') {
+    for (let i = 0; i < 3; i++) px(b, cx + r - 1 + i, cy + 2 + i, i ? C.pat : C.light);
+  } else if (rc.extra === 'mane') {
+    for (let a2 = 0; a2 < 360; a2 += 40) {
+      const rad = (a2 * Math.PI) / 180;
+      px(b, cx + Math.cos(rad) * (r + 1), cy + Math.sin(rad) * (r + 1), C.pat);
+    }
+  }
+
   outline(b, 'ink');
   return { canvas: b.canvas, w: size, h: size, cx, cy };
 }

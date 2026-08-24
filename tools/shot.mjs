@@ -194,6 +194,26 @@ switch (which) {
     };
     break;
   }
+  case 'icons': {
+    const { ANIMALS } = await import('../src/data/animals.js');
+    const { drawAnimalIcon } = await import('../src/render/sprites.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    scene = {
+      update() {},
+      draw() {
+        rect(g, 0, 0, SW, SH, 'deep');
+        const COLS = 24;
+        ANIMALS.forEach((a, i) => {
+          const x = 22 + (i % COLS) * 39, y = 40 + Math.floor(i / COLS) * 46;
+          rect(g, x - 12, y - 12, 26, 26, 'shadow');
+          drawAnimalIcon(g, a, x, y, { scale: 1 });
+          text(g, a.name.slice(0, 8), x, y + 16, 'bone', { font: 3, center: true });
+        });
+        text(g, 'ICON BADGES @16px', SW / 2, 12, 'gold', { center: true, font: 7 });
+      },
+    };
+    break;
+  }
   case 'ui': {
     const UI = await import('../src/render/uikit.js');
     const { rect, text } = await import('../src/core/pixel.js');

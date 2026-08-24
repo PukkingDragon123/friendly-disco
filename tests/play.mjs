@@ -15,6 +15,7 @@ const { createRouter, guardScene } = await import('../src/game/router.js');
 const PH = await import('../src/game/physics.js');
 const T = await import('../src/render/table.js');
 const { ANIMAL_BY_ID } = await import('../src/data/animals.js');
+const { likeness } = await import('../src/data/habitats.js');
 
 const SEEDS = Number(process.argv[2]) || 3;
 const SHOTS = process.argv.includes('--shots');
@@ -94,8 +95,10 @@ function chooseShot(world, gates) {
       const power = Math.min(1, 0.3 + dist / 260);
       const p = PH.predict(world, b, ang, power, 60);
       const reaches = !!(p && p.hit && p.hit.kind === 'gate' && p.hit.id === gate.id);
-      const home = !!(a && (a.home === gate.habitatId || a.id === 'chameleon'));
-      const score = (reaches ? 100 : 0) + (home ? 55 : 0) + (a ? a.chips * 0.06 : 0) - dist * 0.05;
+      // traits, not biomes: a berth is worth what the animal thinks of it
+      const fit = a ? (a.id === 'chameleon' ? 1 : likeness(a, gate.habitatId)) : 0;
+      const home = fit >= 0.999;
+      const score = (reaches ? 100 : 0) + fit * 55 + (a ? a.chips * 0.06 : 0) - dist * 0.05;
       if (!best || score > best.score) best = { ball: b, gate, ang, power, score, home, reaches };
     }
   }
@@ -110,7 +113,7 @@ function playDeck(app, log) {
     if (d.phase === 'cleared' || d.phase === 'failed') {
       tick(app, 70);
       snap(d.phase);
-      pressAt(320, 200); tick(app, 2); releaseNow(); tick(app, 4);
+      pressAt(480, 300); tick(app, 2); releaseNow(); tick(app, 4);
       return d.phase;
     }
     if (d.phase === 'intro') { tick(app, 70); continue; }

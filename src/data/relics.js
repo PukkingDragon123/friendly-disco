@@ -252,7 +252,7 @@ export const RELICS = [
     art: { icon: 'snowflake', bg: 'water0', fg: 'ice' },
     tags: ['scoring', 'habitat'],
     hooks: {
-      onScoreAnimal(res) { if (res.habitatId === 'arctic') res.chips += 45; },
+      onScoreAnimal(res) { if (res.habitatId === 'frozen') res.chips += 45; },
     },
   },
   {
@@ -376,7 +376,7 @@ export const RELICS = [
     tags: ['scoring', 'habitat'],
     hooks: {
       onScoreAnimal(res, ctx) {
-        if (res.habitatId === 'jungle') { res.xmult *= 1.5; say(ctx, 'The idol wakes', 'green1'); }
+        if (res.habitatId === 'bushy') { res.xmult *= 1.5; say(ctx, 'The idol wakes', 'green1'); }
       },
     },
   },
@@ -522,7 +522,7 @@ export const RELICS = [
     desc: 'Each blind favours a new open gate: x1.6 Mult potting into it',
     art: { icon: 'wheel', bg: 'brass1', fg: 'brass3' },
     tags: ['scoring', 'habitat'],
-    state: { counter: 0, habitat: 'savanna' },
+    state: { counter: 0, habitat: 'warm' },
     hooks: {
       onBlindStart(ctx) {
         const st = stateOf(ctx);

@@ -79,6 +79,10 @@ const APOCRYPHA = {
 };
 for (const [home, list] of Object.entries(APOCRYPHA)) ROSTER[home] = ROSTER[home].concat(list);
 const ALL_IDS = Object.values(ROSTER).flat();
+
+// Berths advertise TRAITS, not biomes. ROSTER is still keyed by biome because that is
+// how the roster is authored; these are the ids a gate can actually carry.
+const TRAIT_IDS = ['warm', 'frozen', 'bushy', 'briny', 'dusty', 'tame', 'soaked', 'lofty', 'gloomy'];
 const TAGS = new Set(`predator prey herbivore carnivore omnivore bird fish mammal reptile insect amphibian
 cat canine bovine equine primate rodent bear pachyderm marsupial mustelid big small tiny flying swimming
 digging nocturnal social solitary tropical polar aquatic domestic wild exotic pack herd scavenger venomous
@@ -96,13 +100,14 @@ const RECIPE_ENUMS = {
 if (section('data/habitats') && M.habitats) {
   const H = M.habitats;
   ok(Array.isArray(H.HABITATS) && H.HABITATS.length === 9, 'HABITATS has 9 entries', H.HABITATS && H.HABITATS.length);
-  const wanted = Object.keys(ROSTER);
-  for (const id of wanted) ok(!!H.HABITAT_BY_ID[id], `habitat ${id} exists`);
+  const wanted = TRAIT_IDS;
+  for (const id of wanted) ok(!!H.HABITAT_BY_ID[id], `trait ${id} exists`);
+  ok(H.HABITATS.every((h) => TRAIT_IDS.includes(h.id)), 'no traits outside the vocabulary');
   ok(Array.isArray(H.GATE_LAYOUT) && H.GATE_LAYOUT.length === 6, 'GATE_LAYOUT is 6 slots');
   ok(typeof H.affinity === 'function', 'affinity() exported');
   if (typeof H.affinity === 'function') {
-    ok(H.affinity('savanna', 'savanna') === 1, 'affinity(x,x) === 1', H.affinity('savanna', 'savanna'));
-    ok(H.affinity('savanna', 'nope') === 0, 'affinity to unknown === 0');
+    ok(H.affinity('warm', 'warm') === 1, 'affinity(x,x) === 1', H.affinity('warm', 'warm'));
+    ok(H.affinity('warm', 'nope') === 0, 'affinity to unknown === 0');
     let sym = true, range = true;
     for (const a of wanted) for (const b of wanted) {
       const x = H.affinity(a, b), y = H.affinity(b, a);
@@ -115,7 +120,7 @@ if (section('data/habitats') && M.habitats) {
   for (const h of H.HABITATS || []) {
     ok(!!M.palette.P[h.color], `habitat ${h.id} colour is a palette key`, h.color);
     ok(typeof h.icon === 'string' && h.icon.length > 0, `habitat ${h.id} has an icon`);
-    ok(typeof h.short === 'string' && h.short.length <= 4, `habitat ${h.id} short label`, h.short);
+    ok(typeof h.short === 'string' && h.short.length <= 6, `trait ${h.id} short label`, h.short);
   }
 }
 
@@ -128,13 +133,30 @@ if (section('data/animals') && M.animals) {
   ok(missing.length === 0, 'every roster id present', missing.join(','));
   ok(extra.length === 0, 'no ids outside the roster', extra.join(','));
   ok(ids.length === new Set(ids).size, 'animal ids unique');
-  for (const [home, list] of Object.entries(ROSTER)) {
+  for (const [biome, list] of Object.entries(ROSTER)) {
     for (const id of list) {
       const a = A.ANIMAL_BY_ID[id];
       if (!a) continue;
-      ok(a.home === home, `${id} home === ${home}`, a.home);
+      ok(a.biome === biome, `${id} biome === ${biome}`, a.biome);
     }
   }
+  // every animal must want two or three legal traits, favourite first
+  let badLikes = [];
+  for (const a of A.ANIMALS || []) {
+    const L = a.likes;
+    if (!Array.isArray(L) || L.length < 2 || L.length > 3) { badLikes.push(`${a.id}:len`); continue; }
+    if (new Set(L).size !== L.length) badLikes.push(`${a.id}:dup`);
+    if (a.home !== L[0]) badLikes.push(`${a.id}:home!=likes[0]`);
+    for (const t of L) if (!TRAIT_IDS.includes(t)) badLikes.push(`${a.id}:${t}`);
+  }
+  ok(badLikes.length === 0, 'every animal likes 2-3 legal traits, favourite first', badLikes.slice(0, 6).join(','));
+  // and the demand has to be spread: no trait may be unwanted, none may own the board
+  const demand = {};
+  for (const t of TRAIT_IDS) demand[t] = 0;
+  for (const a of A.ANIMALS || []) for (const t of a.likes || []) demand[t]++;
+  const lo = Math.min(...Object.values(demand)), hi = Math.max(...Object.values(demand));
+  ok(lo >= 8, 'no trait is effectively unwanted', `min ${lo}`);
+  ok(hi <= (A.ANIMALS || []).length * 0.7, 'no trait dominates the roster', `max ${hi}`);
   let badTag = [], badRecipe = [], badCol = [], badNum = [];
   for (const a of A.ANIMALS || []) {
     for (const t of a.tags || []) if (!TAGS.has(t)) badTag.push(`${a.id}:${t}`);
@@ -186,7 +208,7 @@ if (section('data/interactions') && M.interactions) {
       if (!sel) continue;
       if (sel.id && !ALL_IDS.includes(sel.id)) badRef.push(`${r.id}:${sel.id}`);
       if (sel.tag && !TAGS.has(sel.tag)) badRef.push(`${r.id}:tag ${sel.tag}`);
-      if (sel.home && !Object.keys(ROSTER).includes(sel.home)) badRef.push(`${r.id}:home ${sel.home}`);
+      if (sel.home && !TRAIT_IDS.includes(sel.home)) badRef.push(`${r.id}:home ${sel.home}`);
     }
     for (const id of r.requireAll || []) if (!ALL_IDS.includes(id)) badRef.push(`${r.id}:req ${id}`);
     const g = r.gain || {};
@@ -232,7 +254,7 @@ if (section('data/relics') && M.relics) {
       const animal = rng.pick(A.ANIMALS);
       const inst = Object.assign({}, relic, { state: JSON.parse(JSON.stringify(relic.state || {})) });
       const res = {
-        animal, habitatId: rng.pick(Object.keys(ROSTER)),
+        animal, habitatId: rng.pick(TRAIT_IDS),
         match: rng.pick(['exact', 'partial', 'wrong']),
         chips: rng.irange(0, 400), mult: rng.irange(0, 20), xmult: 1, money: 0,
         tags: animal.tags || [], logs: [], consumed: [], otherEffects: [],
@@ -256,7 +278,7 @@ if (section('data/relics') && M.relics) {
         try { hookName === 'onScoreAnimal' ? h(res, ctx) : h(ctx); } catch (e) { hookErrors++; fails.push(`relic ${relic.id}.${hookName}: ${e.message}`); }
       }
       if (relic.hooks && relic.hooks.onPot) {
-        try { relic.hooks.onPot({ ball: { bounces: 2 }, animal, gate: { habitatId: 'farm' } }, ctx); } catch (e) { hookErrors++; }
+        try { relic.hooks.onPot({ ball: { bounces: 2 }, animal, gate: { habitatId: 'tame' } }, ctx); } catch (e) { hookErrors++; }
       }
       if (![res.chips, res.mult, res.xmult, res.money].every(num)) nanCount++;
       if (hookName_leak(before, run)) leak++;
@@ -383,7 +405,7 @@ if (section('data/cargo') && M.cargo) {
         if (it.kind === 'cue' && !cueIds.has(it.ref)) badRef++;
         if (it.kind === 'feed' && !feedIds.has(it.ref)) badRef++;
         if (it.kind === 'voucher' && !vIds.has(it.ref)) badRef++;
-        if (it.kind === 'habitat_up' && !Object.keys(ROSTER).includes(it.ref)) badRef++;
+        if (it.kind === 'habitat_up' && !TRAIT_IDS.includes(it.ref)) badRef++;
       }
     }
   }
@@ -411,10 +433,10 @@ if (section('physics') && M.physics) {
     const rng = makeRng('brk' + trial);
     const w = PH.createWorld({});
     PH.setGates(w, [
-      { id: 'tl', habitatId: 'farm', x: 6, y: 6, r: 9.5 },
-      { id: 'tr', habitatId: 'forest', x: PH.TABLE_W - 6, y: 6, r: 9.5 },
-      { id: 'bl', habitatId: 'ocean', x: 6, y: PH.TABLE_H - 6, r: 9.5 },
-      { id: 'br', habitatId: 'jungle', x: PH.TABLE_W - 6, y: PH.TABLE_H - 6, r: 9.5 },
+      { id: 'tl', habitatId: 'tame', x: 6, y: 6, r: 9.5 },
+      { id: 'tr', habitatId: 'gloomy', x: PH.TABLE_W - 6, y: 6, r: 9.5 },
+      { id: 'bl', habitatId: 'briny', x: 6, y: PH.TABLE_H - 6, r: 9.5 },
+      { id: 'br', habitatId: 'bushy', x: PH.TABLE_W - 6, y: PH.TABLE_H - 6, r: 9.5 },
     ]);
     PH.rack(w, rng.sample(A.ANIMALS, 10).map((a) => a.id), rng, rng.pick(['triangle', 'scatter', 'ring', 'diamond']));
     const cue = w.balls[rng.int(w.balls.length)];
@@ -457,27 +479,27 @@ if (section('scoring') && M.scoring && M.animals) {
   }, extra));
 
   const sheep = A.ANIMAL_BY_ID.sheep;
-  const exact = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'farm' } }]);
-  const wrong = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'ocean' } }]);
+  const exact = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'tame' } }]);
+  const wrong = mk([{ ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'briny' } }]);
   ok(exact.totalScore > wrong.totalScore * 3, 'exact habitat pays far more than wrong', `${exact.totalScore} vs ${wrong.totalScore}`);
   ok(exact.entries[0].match === 'exact', 'exact match detected');
   ok(wrong.entries[0].match === 'wrong', 'wrong match detected');
   ok(exact.totalMoney >= 1, 'exact pot pays money');
 
   const combo = mk([
-    { ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'farm' } },
-    { ball: { bounces: 0 }, animalId: 'cow', gate: { habitatId: 'farm' } },
-    { ball: { bounces: 0 }, animalId: 'pig', gate: { habitatId: 'farm' } },
+    { ball: { bounces: 0 }, animalId: 'sheep', gate: { habitatId: 'tame' } },
+    { ball: { bounces: 0 }, animalId: 'cow', gate: { habitatId: 'tame' } },
+    { ball: { bounces: 0 }, animalId: 'pig', gate: { habitatId: 'tame' } },
   ]);
   ok(combo.totalScore > exact.totalScore * 3, 'combos compound', `${combo.totalScore}`);
   ok(combo.perfect === true, 'all-exact multi-pot is perfect');
 
-  const eaten = mk([{ ball: { bounces: 0 }, animalId: 'fox', gate: { habitatId: 'forest' } }],
-    { residents: { forest: [A.ANIMAL_BY_ID.rabbit] } });
-  const foxAlone = mk([{ ball: { bounces: 0 }, animalId: 'fox', gate: { habitatId: 'forest' } }]);
+  const eaten = mk([{ ball: { bounces: 0 }, animalId: 'fox', gate: { habitatId: 'gloomy' } }],
+    { residents: { gloomy: [A.ANIMAL_BY_ID.rabbit] } });
+  const foxAlone = mk([{ ball: { bounces: 0 }, animalId: 'fox', gate: { habitatId: 'gloomy' } }]);
   ok(eaten.totalScore > foxAlone.totalScore, 'fox scores more with a rabbit present', `${eaten.totalScore} vs ${foxAlone.totalScore}`);
 
-  const chameleon = mk([{ ball: { bounces: 0 }, animalId: 'chameleon', gate: { habitatId: 'arctic' } }]);
+  const chameleon = mk([{ ball: { bounces: 0 }, animalId: 'chameleon', gate: { habitatId: 'frozen' } }]);
   ok(chameleon.entries[0].match === 'exact', 'chameleon is always at home');
 
   // no NaN across a lot of random shots
@@ -490,11 +512,11 @@ if (section('scoring') && M.scoring && M.animals) {
       potted.push({
         ball: { bounces: rng.int(4), shotsSurvived: rng.int(5), decoy: rng.chance(0.05) },
         animalId: rng.pick(A.ANIMALS).id,
-        gate: { habitatId: rng.pick(Object.keys(ROSTER)) },
+        gate: { habitatId: rng.pick(TRAIT_IDS) },
       });
     }
     const res = mk(potted, {
-      residents: { [rng.pick(Object.keys(ROSTER))]: rng.sample(A.ANIMALS, rng.int(4)) },
+      residents: { [rng.pick(TRAIT_IDS)]: rng.sample(A.ANIMALS, rng.int(4)) },
       tableAnimals: rng.sample(A.ANIMALS, rng.int(6)),
       deckAnimals: rng.sample(A.ANIMALS, rng.int(8)),
       blind: { ante: 1 + rng.int(8), kind: 'boss', effect: { chipsMul: rng.pick([1, 0.5, 2]), multMul: rng.pick([1, 0.5]), noInteractions: rng.chance(0.2), onceScoringPerHabitat: rng.chance(0.2), decoy: rng.chance(0.2) } },

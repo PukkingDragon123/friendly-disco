@@ -149,7 +149,7 @@ export const BOSSES = [
     id: 'vritra', name: 'Vritra', myth: 'Hindu',
     desc: 'The serpent has swallowed the rivers', disaster: 'Drink from my coils',
     color: 'orange', icon: 'sun', minAnte: 3,
-    effect: { closeHabitats: ['ocean', 'wetland'] },
+    effect: { closeHabitats: ['briny', 'soaked'] },
   }),
   boss({
     id: 'amaterasu', name: "Amaterasu's Absence", myth: 'Japanese',
@@ -173,7 +173,7 @@ export const BOSSES = [
     id: 'eden', name: 'The Sealing of Eden', myth: 'Hebrew',
     desc: 'Three gates shut, a sword at each', disaster: 'The flaming sword is at each',
     color: 'red2', icon: 'sword', minAnte: 5,
-    effect: { closeHabitats: ['arctic', 'mountain', 'forest'] },
+    effect: { closeHabitats: ['frozen', 'lofty', 'bushy'] },
   }),
   boss({
     id: 'ragnarok', name: 'Ragnarok', myth: 'Norse',

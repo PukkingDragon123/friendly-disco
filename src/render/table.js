@@ -27,8 +27,8 @@ import { drawAnimal, drawAnimalShadow } from './sprites.js';
 import { TABLE_W, TABLE_H, BALL_R } from '../game/physics.js';
 
 export const VIEW = {
-  ox: 132,      // screen x of table-unit x=0 at the NEAR rail
-  oy: 130,      // screen y of table-unit y=0
+  ox: 172,      // screen x of table-unit x=0 at the NEAR rail
+  oy: 123,      // screen y of table-unit y=0
   xs: 3,        // horizontal units -> pixels at the near rail
   tilt: 2,      // vertical units -> pixels (3 * 0.67 foreshortening)
   zs: 3,        // height units -> pixels
@@ -388,7 +388,7 @@ function bakeFrame(seed, assignment) {
 export function createDeck(o = {}) {
   const seed = (o.seed | 0) || 1337;
   let assignment = o.assignment || {
-    tl: 'savanna', tm: 'arctic', tr: 'jungle', bl: 'ocean', bm: 'desert', br: 'farm',
+    tl: 'warm', tm: 'frozen', tr: 'bushy', bl: 'briny', bm: 'dusty', br: 'tame',
   };
   const felt = bakeFelt(seed);
   let frameCv = bakeFrame(seed, assignment);
@@ -454,19 +454,28 @@ export function createDeck(o = {}) {
           }
         }
 
+        // the trait's mark, at double size -- this is the thing you aim AT, so it is
+        // the largest single glyph on the felt
         const ic = hasIcon(hab.icon) ? hab.icon : 'leaf';
-        drawIcon(g, ic, s.x - 4, s.y - 5 - (lit ? Math.round(pulse) : 0), {
-          color: lit ? 'white' : hab.accent || hab.color,
+        drawIcon(g, ic, s.x - 8, s.y - 10 - (lit ? Math.round(pulse) : 0), {
+          color: lit ? 'white' : hab.accent || hab.color, scale: 2,
         });
 
         if (!o2.hideLabels) {
+          // A brass plate bolted to the rail, naming the condition the berth offers.
+          // Traits are the whole puzzle, so the name is set in the 7px face and
+          // reads from across the room.
           const below = gate.y > TABLE_H / 2;
-          const ly = below ? s.y + ry + 3 : s.y - ry - 10;
-          const label = hab.short || hab.name.slice(0, 3).toUpperCase();
-          const w = textW(label, { font: 3 }) + 7;
-          box(g, s.x - w / 2, ly, w, 8, 'ink', 1);
-          rect(g, s.x - w / 2 + 1, ly, w - 2, 1, hab.color);
-          text(g, label, s.x, ly + 2, lit ? 'white' : hab.accent || hab.color, { font: 3, center: true });
+          const ly = below ? s.y + ry + 4 : s.y - ry - 20;
+          const label = hab.short || hab.name.toUpperCase();
+          const w = textW(label, { font: 7 }) + 14;
+          box(g, s.x - w / 2, ly, w, 16, 'ink', 1);
+          rect(g, s.x - w / 2 + 1, ly + 1, w - 2, 2, hab.color);
+          rect(g, s.x - w / 2 + 1, ly + 14, w - 2, 1, mix(col(hab.color), P.ink, 0.6));
+          text(g, label, s.x, ly + 4, lit ? 'white' : hab.accent || hab.color, { font: 7, center: true });
+          // rivets, so the plate belongs to the boat
+          px(g, s.x - w / 2 + 2, ly + 12, 'brass2');
+          px(g, s.x + w / 2 - 3, ly + 12, 'brass2');
         }
       }
     },

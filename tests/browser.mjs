@@ -67,7 +67,7 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.scriptId !== undefined) return 'cutscene';
-    if (d.rescue) return 'island';
+    if (d.field) return 'island';
     if (d.encounter) return 'choice';
     if (d.rects && d.rects.gates) return 'garden';
     if (d.at && d.at.isles) return 'ocean';
@@ -186,35 +186,50 @@ await page.screenshot({ path: `${OUT}-6-island.png` });
 const island = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
   return {
-    island: d.island.id, ashore: d.rescue.strand.length,
-    obstacles: d.rescue.obstacles.length, tideStep: +d.rescue.step.toFixed(3),
+    island: d.island.id,
+    ashore: d.field.animals.length,
+    dolls: (d.rects.dolls || []).length,
+    secondsLeft: Math.round(d.field.limit),
   };
 });
 console.log('island:', JSON.stringify(island));
 if (!island.ashore) errors.push('the island had nobody on it to rescue');
+if (!island.dolls) errors.push('the tray offered no dolls to place');
 
-// flick one animal home with a real drag, and check the physics ran
-const flicked = await page.evaluate(async () => {
+// PUT A DOLL DOWN WITH A REAL MOUSE. Two clicks -- the tray button, then a tile -- which
+// is the entire control scheme, so if this works the game is playable.
+const placed = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
-  const e = d.rescue.strand.find((s) => s.state === 'ashore');
-  if (!e) return null;
-  const before = d.rescue.shots;
-  const p = d.at(e.ball.x, e.ball.y);
+  const cr = d.field.animals.find((a) => a.state !== 'safe' && a.state !== 'lost');
+  if (!cr || !d.rects.dolls.length) return null;
+  const btn = d.rects.dolls[0];
+  const tile = d.at(cr.c | 0, cr.r | 0);
   const c = document.getElementById('game').getBoundingClientRect();
   const s = window.__ARK.app.scale;
-  return { before, x: c.left + p.x * s, y: c.top + p.y * s };
+  return {
+    before: d.field.dolls.length,
+    bx: c.left + (btn.rect.x + btn.rect.w / 2) * s,
+    by: c.top + (btn.rect.y + btn.rect.h / 2) * s,
+    tx: c.left + tile.x * s,
+    ty: c.top + tile.y * s,
+  };
 });
-if (flicked) {
-  await page.mouse.move(flicked.x, flicked.y);
-  await page.mouse.down();
+if (placed) {
+  await page.mouse.click(placed.bx, placed.by);
   await page.waitForTimeout(120);
-  await page.mouse.move(flicked.x + 170, flicked.y, { steps: 8 });
-  await page.waitForTimeout(120);
-  await page.mouse.up();
-  await page.waitForTimeout(2200);
-  const after = await page.evaluate(() => window.__ARK.app.scene.debug().rescue.shots);
-  if (after <= flicked.before) errors.push('a real mouse drag did not flick an animal');
-  else console.log(`flick: ${flicked.before} -> ${after} shots`);
+  const sel = await page.evaluate(() => JSON.stringify(window.__ARK.app.scene.debug().sel));
+  if (sel === 'null') errors.push('clicking a doll button selected nothing');
+  await page.mouse.click(placed.tx, placed.ty);
+  await page.waitForTimeout(200);
+  const after = await page.evaluate(() => window.__ARK.app.scene.debug().field.dolls.length);
+  if (after <= placed.before) errors.push('a real click on a tile put no doll down');
+  else console.log(`doll: ${placed.before} -> ${after} on the field`);
+  // and it should actually start moving animals home
+  await page.waitForTimeout(2500);
+  const homing = await page.evaluate(() => window.__ARK.app.scene.debug()
+    .field.animals.filter((a) => a.homing).length);
+  if (!homing) errors.push('a herder doll set nobody walking home');
+  else console.log(`homing: ${homing} animals heading for the ark`);
 }
 const islandT = await drawTime(page);
 console.log('island draw:', JSON.stringify(islandT));

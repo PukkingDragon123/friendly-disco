@@ -64,7 +64,8 @@ static is baked into an offscreen canvas once and blitted. What is cached:
 | the boat | `render/boat.js` | tier signature + damage |
 | island silhouettes | `render/islandart.js` | island id + size |
 | island backdrops | `render/islandart.js` | island id + size + horizon |
-| obstacles | `render/obstacles.js` | kind, radius, cleared, variant |
+| tiles | `render/tiles.js` | terrain code, biome, variant |
+| dolls and monsters | `render/dollart.js` | doll id + lit, monster id |
 | the ocean backdrop | `scenes/ocean.js` | screen size |
 | the garden | `scenes/eden.js` | once |
 
@@ -151,7 +152,7 @@ src/render/    font  sprites (ball animals)  folk (the cast + the wand)  portrai
                uikit  seascape  boat  islandart  obstacles  deal  cinematic
 src/data/      animals  abilities  obstacles  islands  items  gear  quests  npcs
                choices  story
-src/game/      physics  voyage  rescue  garden  choices  router
+src/game/      field  voyage  garden  choices  router
 src/scenes/    menu  cutscene  ocean  choice  island  eden  gameover
 tests/         run.mjs (contracts + balance)  play.mjs (voyages by clicking)
                browser.mjs (real Chromium)  mobile.mjs (real touch)
@@ -271,7 +272,7 @@ that uses a word the engine does not implement fails the build; that is the whol
   likes: [trait, ...],    // DERIVED from tags, ranked. Islands are keyed on these.
   tags: [...],            // closed vocabulary
   rarity: 'common'|'uncommon'|'rare'|'legendary',
-  mass: 0.6..1.6,         // goes straight into the rescue physics: a whale shoves
+  mass: 0.6..1.6,         // sets walking speed on a field: a whale is slower than
   size: 0.8..1.25,
   sprite: { body, shade, light, belly, eye, eyeStyle, ears, face, pattern,
             patternColor, extra },      // a RECIPE, not a bitmap
@@ -345,7 +346,7 @@ circus tent on the horizon.
 ```
 
 `effect` ∈ `loyal | tide | call | free | mend`, one line of implementation each in
-`game/rescue.js`. The boat's hold starts at **two** slots.
+`game/field.js`. The boat's hold starts at **two** slots.
 
 ### 5.6 Relic (`src/data/gear.js`) — three slots
 
@@ -402,7 +403,7 @@ do something the rest of the game has not been told about.
 The rule the file is written to: **no option is free, and no option is obviously right.**
 If one choice is strictly better it is not a choice, it is a prize with extra reading.
 
-### 5.10 Physics (`src/game/physics.js`)
+### 5.10 The field (`src/game/field.js`)
 
 ```js
 createWorld({w, h, friction, restitution, railRestitution, lookup})
@@ -450,12 +451,12 @@ The boat starts **half empty** — four farm animals, one of each kind, four abi
 berth an animal occupies is a berth a rescue cannot fill, and arriving at the first island
 with the pens full meant the first thing the game did was refuse to let you play it.
 
-### A rescue (`src/game/rescue.js`)
+### An island stage (`src/game/field.js`)
 ```
 field           880 × 306 px      ball radius     13 px (the sprite's own radius)
 world friction  1.5 / (1 + reach) shot power      0.28 + p × 1.32   (max 1.6)
 tide per action 0.075 + danger × 0.012 − patience
-obstacle radius data r × 1.7      full-power flick ≈ 800 px in 3.5 s
+tile 32 px, grid 29 x 11       an animal walks ~1.35 tiles a second
 ```
 
 The stranded spawn in a **band**, not against the far shore, and the tide starts just off
@@ -499,7 +500,7 @@ Four harnesses, and none of them is decoration.
 
 ```sh
 node tools/checksyntax.mjs      # every module imports under a stubbed DOM
-node tests/run.mjs              # 1,300+ assertions: contracts, physics, balance
+node tests/run.mjs              # 1,280+ assertions: contracts, field sim, balance
 node tests/play.mjs 4           # four whole voyages, played BY CLICKING
 node tools/profile.mjs          # canvas calls per frame per scene
 node tests/browser.mjs          # real Chromium: console errors, real draw time
@@ -518,7 +519,7 @@ Rules that have paid for themselves:
   everything a player clicks. It found a deal you could not get out of, and a keypress left
   over from skipping a cutscene that chose your route for you.
 * **Every closed vocabulary gets a test that the engine implements it.** Bonus keys, effect
-  keys, physics words, ability coverage, palette keys, icon names.
+  keys, doll and material ids, ability coverage, palette keys, icon names.
 * **Balance is printed, not asserted.** The greedy bot's saved/lost line is in the output of
   every run, so a tuning change that breaks the game is visible in one number.
 

@@ -15,7 +15,7 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.scriptId !== undefined) return 'cutscene';
-    if (d.rescue) return 'island';
+    if (d.field) return 'island';
     if (d.encounter) return 'choice';
     if (d.rects && d.rects.gates) return 'garden';
     if (d.at && d.at.isles) return 'ocean';
@@ -126,42 +126,51 @@ async function run(label, viewport, isPortrait) {
   if (kind !== 'island') { errors.push(`${label}: tapping a card led to "${kind}"`); await ctx.close(); return; }
   await page.waitForTimeout(900);
 
-  // the whole game is one gesture: touch an animal, drag AWAY, lift. Prove it on glass.
+  // THE WHOLE GAME IS TWO TAPS: a doll in the tray, then a tile. Prove both on glass,
+  // with real touch events -- a tray button that is comfortable with a mouse can still be
+  // under a thumb, and a tile you cannot hit is a game you cannot play.
   const pts = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
-    const e = d.rescue.strand.find((x) => x.state === 'ashore');
-    if (!e) return null;
-    const p = d.at(e.ball.x, e.ball.y);
+    const cr = d.field.animals.find((a) => a.state !== 'safe' && a.state !== 'lost');
+    if (!cr || !d.rects.dolls.length) return null;
+    const btn = d.rects.dolls[0].rect;
+    const tile = d.at(cr.c | 0, cr.r | 0);
     const c = document.getElementById('game').getBoundingClientRect();
     const s = window.__ARK.app.scale;
-    return { x: c.left + p.x * s, y: c.top + p.y * s, shots: d.rescue.shots };
+    return {
+      bx: c.left + (btn.x + btn.w / 2) * s, by: c.top + (btn.y + btn.h / 2) * s,
+      tx: c.left + tile.x * s, ty: c.top + tile.y * s,
+      dolls: d.field.dolls.length,
+      btnH: btn.h * s,
+    };
   });
-  if (!pts) { errors.push(`${label}: nobody ashore to flick`); await ctx.close(); return; }
+  if (!pts) { errors.push(`${label}: nothing to herd and no dolls to herd it with`); await ctx.close(); return; }
+  if (pts.btnH < 32) errors.push(`${label}: a doll button is ${Math.round(pts.btnH)}px tall, under a thumb`);
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts.x, y: pts.y }] });
-  for (let i = 1; i <= 8; i++) {
-    await cdp.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x: pts.x + (i / 8) * 150, y: pts.y }],
-    });
-    await page.waitForTimeout(45);
-  }
+  const tap = async (x, y) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(180);
+  };
+  await tap(pts.bx, pts.by);
+  const sel = await page.evaluate(() => JSON.stringify(window.__ARK.app.scene.debug().sel));
+  if (sel === 'null') errors.push(`${label}: tapping a doll button selected nothing`);
   await page.screenshot({ path: `shots/mobile-${label}-aiming.png` });
-  const wound = await page.evaluate(() => {
-    const d = window.__ARK.app.scene.debug();
-    return d.aim ? +d.aim.power.toFixed(2) : null;
-  });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await page.waitForTimeout(3200);
+  await tap(pts.tx, pts.ty);
+  await page.waitForTimeout(2800);
   const after = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
     return {
-      shots: d.rescue.shots, saved: d.rescue.rescued.length, lost: d.rescue.drowned.length,
-      tide: +d.rescue.tide.toFixed(2), fps: window.__ARK.app.fps,
+      dolls: d.field.dolls.length,
+      homing: d.field.animals.filter((a) => a.homing).length,
+      saved: d.field.saved.length, lost: d.field.lost.length,
+      fps: window.__ARK.app.fps,
     };
   });
-  if (after.shots <= pts.shots) errors.push(`${label}: a touch drag did not flick an animal`);
-  console.log(`${label}: wound=${wound} -> ${JSON.stringify(after)}`);
+  if (after.dolls <= pts.dolls) errors.push(`${label}: a tap on a tile put no doll down`);
+  if (!after.homing && !after.saved) errors.push(`${label}: the doll set nobody walking home`);
+  console.log(`${label}: sel=${sel} -> ${JSON.stringify(after)}`);
   await page.screenshot({ path: `shots/mobile-${label}-rescue.png` });
   await ctx.close();
 }

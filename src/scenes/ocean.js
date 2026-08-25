@@ -35,11 +35,14 @@ import { drawIslandFar } from '../render/islandart.js';
 import { drawAnimal } from '../render/sprites.js';
 import { drawFolk } from '../render/folk.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
+import { DOLL_BY_ID, costText, canCraft } from '../data/dolls.js';
+import { MATERIAL_IDS, MATERIAL_BY_ID } from '../data/materials.js';
+import { drawDoll } from '../render/dollart.js';
 import { abilityOf, ABILITY_BY_ID } from '../data/abilities.js';
 import { OBSTACLE_BY_ID } from '../data/obstacles.js';
 import {
   sailTo, capacity, hullMax, floodPerLeg, isLoyal,
-  LEGS_PER_CHAPTER, CHAPTERS,
+  LEGS_PER_CHAPTER, CHAPTERS, dollBox, craftDoll, say,
 } from '../game/voyage.js';
 
 const HUD_H = 46;
@@ -122,6 +125,9 @@ export function makeOceanScene() {
   let t = 0, intro = 0;
   let hover = -1;
   let cards = [];
+  let shop = false;          // the deck panel flips to the workshop
+  let craftRects = [];
+  let shopTab = null;
   let state = 'choose';
   let sailT = 0, picked = -1;
   let boatX = BOAT_X, boatY = BOAT_WL;
@@ -395,6 +401,57 @@ export function makeOceanScene() {
     return r;
   }
 
+/**
+   * THE WORKSHOP. Where the animals you saved become the dolls you herd with.
+   *
+   * It shares the deck panel rather than getting its own, and flips with one click. Two
+   * panels side by side would each be half the size, and both of them are lists you read
+   * rather than pictures you glance at -- so they take turns.
+   */
+  function drawWorkshop(g) {
+    UI.panel(g, DECK_X, DECK_Y, DECK_W, DECK_H, { style: 'wood', shadow: true, rivets: true });
+    UI.panelTitle(g, DECK_X, DECK_Y + 4, DECK_W, 'THE WORKSHOP', { color: 'clay4' });
+    craftRects = [];
+
+    // what the crossings have produced
+    let mx = DECK_X + 12;
+    const my = DECK_Y + 24;
+    for (const k of MATERIAL_IDS) {
+      const n = v.mats[k] || 0;
+      if (!n) continue;
+      const M2 = MATERIAL_BY_ID[k];
+      const label = `${n}`;
+      const w = textW(label, { font: 5 }) + 22;
+      if (mx + w > DECK_X + DECK_W - 12) break;
+      UI.icon(g, M2.icon, mx, my + 1, { color: M2.color });
+      text(g, label, mx + 13, my, 'cream', { font: 5 });
+      mx += w;
+    }
+    if (mx === DECK_X + 12) text(g, 'Nothing yet. A crossing with animals aboard pays.', mx, my, 'parch1', { font: 3 });
+
+    // and what can be made from it
+    const box = dollBox(v);
+    const cw = Math.floor((DECK_W - 24) / Math.max(1, Math.min(4, box.length)));
+    box.slice(0, 4).forEach((row, i) => {
+      const r0 = UI.rectOf(DECK_X + 12 + i * cw, DECK_Y + 44, cw - 6, 46);
+      const able = canCraft(row.def, v.mats);
+      const hot = UI.hover(r0, Input.mouse);
+      rect(g, r0.x, r0.y, r0.w, r0.h, able ? (hot ? 'wood2' : 'wood1') : 'wood0');
+      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, able ? (hot ? row.def.mark : 'wood0') : 'shadow');
+      rect(g, r0.x + 3, r0.y + 3, 22, r0.h - 6, able ? 'parch0' : 'shadow');
+      drawDoll(g, row.def, r0.x + 14, r0.y + r0.h - 4, t, { lit: able && hot, tile: 32 });
+      text(g, row.def.name.replace(' Doll', '').toUpperCase(), r0.x + 30, r0.y + 5,
+        able ? 'cream' : 'grey1', { font: 3 });
+      text(g, `HAVE ${row.have}`, r0.x + 30, r0.y + 17, 'brass3', { font: 3 });
+      text(g, costText(row.def), r0.x + 30, r0.y + 29, able ? 'leaf3' : 'red2', { font: 3 });
+      craftRects.push({ rect: r0, id: row.id, able });
+    });
+    if (!box.length) {
+      text(g, 'You know no shapes yet. Noah knows all of them.', DECK_X + 12, DECK_Y + 52,
+        'parch1', { font: 3 });
+    }
+  }
+
   /** The manifest: who is on the boat, and what each of them is for. */
   function drawDeck(g) {
     UI.panel(g, DECK_X, DECK_Y, DECK_W, DECK_H, { style: 'wood', shadow: true, rivets: true });
@@ -502,7 +559,14 @@ export function makeOceanScene() {
       if (!island) return;
       cards[i] = drawCard(g, i, island, have);
     });
-    drawDeck(g);
+    if (shop) drawWorkshop(g); else drawDeck(g);
+    // the tab that flips between them, top-right of whichever panel is up
+    shopTab = UI.rectOf(DECK_X + DECK_W - 108, DECK_Y + 2, 100, 18);
+    const tabHot = UI.hover(shopTab, Input.mouse);
+    rect(g, shopTab.x, shopTab.y, shopTab.w, shopTab.h, tabHot ? 'wood2' : 'wood0');
+    UI.boxEdge(g, shopTab.x, shopTab.y, shopTab.w, shopTab.h, tabHot ? 'brass3' : 'wood1');
+    text(g, shop ? 'ON DECK  [W]' : 'WORKSHOP  [W]', shopTab.x + shopTab.w / 2, shopTab.y + 4,
+      tabHot ? 'gold' : 'parch1', { font: 3, center: true });
     drawHud(g);
     parts.draw(g, 'front');
 
@@ -528,6 +592,19 @@ export function makeOceanScene() {
         if (cards[i] && UI.hover(cards[i], m)) { hover = i; break; }
       }
       if (hover >= 0 && hover !== was) Audio.sfx('hover');
+      // the workshop tab, and crafting inside it. Checked BEFORE the island cards, or a
+      // click that lands on the panel would also set a course.
+      if (Input.pressed('KeyW')) { shop = !shop; Audio.sfx('click'); }
+      if (m.pressed && shopTab && UI.hover(shopTab, m)) { shop = !shop; Audio.sfx('click'); return; }
+      if (m.pressed && shop) {
+        for (const cr of craftRects) {
+          if (!UI.hover(cr.rect, m)) continue;
+          const res = craftDoll(v, cr.id);
+          Audio.sfx(res.ok ? 'crate_open' : 'error');
+          if (res.ok) say(v, `${res.doll.name} made.`, res.doll.mark);
+          return;
+        }
+      }
       if (m.pressed && hover >= 0) choose(hover);
       for (let i = 0; i < 3; i++) if (Input.pressed('Digit' + (i + 1))) choose(i);
       // Enter commits the card the cursor is ON, and nothing else does. It used to sail
@@ -567,7 +644,9 @@ export function makeOceanScene() {
     debug() {
       return {
         voyage: v, cards, choose, state,
-        rects: { cards },
+        rects: { cards, craft: craftRects, tab: shopTab },
+        get shop() { return shop; },
+        workshop: (on) => { shop = on === undefined ? !shop : !!on; },
         at: { horizon: HORIZON, isles: ISLE_X.slice() },
       };
     },

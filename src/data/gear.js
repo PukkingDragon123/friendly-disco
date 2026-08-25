@@ -18,10 +18,10 @@
 //   basket      +item slots      game/voyage.js holdSize()
 //   beds        +garden slots    game/voyage.js gardenSize()
 //   coin        +$ per sale      game/voyage.js sellPrice()
-//   reach       longer flicks    game/rescue.js world friction
-//   patience    -tide per action game/rescue.js tidePerAction()
-//   dry         deep water washes an animal back instead of taking it   game/rescue.js
-//   sure        the first loss on each island does not happen           game/rescue.js
+//   reach       a wider circle on every clay doll                      game/field.js
+//   patience    the flood takes longer to cross the island              game/field.js
+//   dry         an animal the water reaches is washed back, once        game/field.js
+//   sure        one loss an island simply does not happen               game/field.js
 //
 // A relic whose bonus key is not in that list does nothing, and the tests fail on it.
 

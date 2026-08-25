@@ -124,6 +124,7 @@ switch (which) {
     scene = makeOceanScene();
     scene.enter({ voyage, onArrive: () => {}, onOver: () => {} }, app);
     if (process.env.SAIL) scene.debug().choose(Number(process.env.SAIL));
+    if (process.env.SHOP) scene.debug().workshop(true);
     mouse(Number(process.env.MX || 480), Number(process.env.MY || 280));
     break;
   }

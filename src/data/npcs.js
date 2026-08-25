@@ -55,8 +55,9 @@ export const NPCS = [
   },
   {
     id: 'noah', name: 'Noah', folk: 'noah',
-    title: 'works on the boat', color: 'wood4', icon: 'boat',
-    sells: 'upgrades', deal: [1, 2],
+    title: 'works on the boat, and knows the shapes', color: 'wood4', icon: 'boat',
+    // the biggest blanket of the five, because he is the only one who lays out a recipe
+    sells: 'upgrades', deal: [2, 3],
     greet: 'Right. Let us look at her properly.',
     idle: [
       'Pens first. Everything else is decoration until you have somewhere to put them.',

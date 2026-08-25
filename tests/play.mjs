@@ -15,7 +15,8 @@ const { SoftCanvas, writePNG } = await import('../tools/softcanvas.mjs');
 const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 const { createRouter, guardScene } = await import('../src/game/router.js');
-const RS = await import('../src/game/rescue.js');
+const FD = await import('../src/game/field.js');
+const { DOLL_BY_ID } = await import('../src/data/dolls.js');
 const V = await import('../src/game/voyage.js');
 const { ANIMAL_BY_ID } = await import('../src/data/animals.js');
 const { abilityOf } = await import('../src/data/abilities.js');
@@ -100,7 +101,7 @@ function dbg() {
 function where() {
   const d = dbg();
   if (d.scriptId !== undefined) return 'cutscene';
-  if (d.rescue) return 'island';
+  if (d.field) return 'island';
   if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
   if (d.rects && d.rects.cards && d.at && d.at.isles) return 'ocean';
@@ -166,13 +167,7 @@ function playOcean() {
         return need;
       }).length;
       void covered;
-      let answered = 0, blocked = 0;
-      for (const oid of isl.obstacles || []) {
-        const ob = RS.obstacleInfo ? RS.obstacleInfo(oid) : null;
-        void ob;
-      }
-      score = (isl.animals || 0) * 10 + (isl.reward || 1) * 6 - (isl.danger || 1) * 5
-        + answered * 8 - blocked * 4;
+      score = (isl.animals || 0) * 10 + (isl.reward || 1) * 6 - (isl.danger || 1) * 5;
     }
     if (score > bestScore) { bestScore = score; best = i; }
   });
@@ -184,92 +179,119 @@ function playOcean() {
 }
 
 /**
- * A rescue, played with the mouse.
+ * An island, played with the mouse.
  *
- * The bot does the three things a person does: put one animal down on something it
- * answers, flick everybody the water is about to reach, then cast off. It aims by
- * dragging BACK from the animal, which is the real gesture -- if this works the control
- * works.
+ * The bot does what a person does: pick a doll off the tray, click the tile with the most
+ * animals around it, repeat until the box is empty, put one carried animal down on
+ * something it answers, then let the clock run and cast off. Every one of those is a real
+ * click on a real rect -- if the bot can clear an island with a mouse, so can a person.
  */
 function playIsland() {
   paint();
-  const d0 = dbg();
-  const r = d0.rescue;
-  const v = d0.voyage;
+  let d0 = dbg();
+  const f = d0.field;
   snap('island');
 
-  // 1. spend one carried animal on a path, by clicking the rail and then the obstacle
-  const rail = (d0.rects && d0.rects.rail) || [];
-  for (let i = 0; i < rail.length; i++) {
-    const entry = rail[i];
-    if (!entry) continue;
-    const a = ANIMAL_BY_ID[entry.id];
-    if (!a) continue;
-    const ab = abilityOf(a).id;
-    const obIx = r.obstacles.findIndex((o) => !o.cleared && o.ob.clearedBy === ab);
-    if (obIx < 0) continue;
-    const [rx, ry] = centre(entry.rect);
-    clickAt(rx, ry);
-    paint();
-    const ob = r.obstacles[obIx];
-    const p = d0.at(ob.x, ob.y);
-    clickAt(p.x, p.y);
-    tick(4);
-    paint();
-    if (!r.obstacles[obIx].cleared) errors.push('island: placing on a matching obstacle did nothing');
-    break;
-  }
-
-  // 2. flick, most urgent first, until there is nobody left or no room for them
+  // 1. spend every doll charge on the fattest cluster it can find
   let guard = 0;
-  while (!r.over && RS.remaining(r).length && V.berthsFree(v) > 0 && guard++ < 26) {
-    paint();
-    const list = RS.remaining(r).slice().sort((a, b) => b.ball.x - a.ball.x);
-    const e = list[0];
-    const from = d0.at(e.ball.x, e.ball.y);
-    // where we want it to go: the nearest pen
-    const gy = Math.round(e.ball.y / (RS.FIELD_H / 3)) * (RS.FIELD_H / 3) + RS.FIELD_H / 6;
-    const to = d0.at(RS.GANGWAY_X, gy);
-    const ang = Math.atan2(to.y - from.y, to.x - from.x);
-    const dist = Math.hypot(to.x - from.x, to.y - from.y);
-    const pull = Math.min(210, 40 + dist * 0.3);
-    // drag BACK from the animal: press on it, move away along -angle, release
-    const before = r.shots;
-    pressAt(from.x, from.y);
-    tick(2);
-    at(Math.round(from.x - Math.cos(ang) * pull), Math.round(from.y - Math.sin(ang) * pull));
-    tick(3);
-    releaseNow();
-    tick(3);
-    let spin = 0;
-    while (!RS.isSettled(r.world) && spin++ < 900) tick(1);
-    if (r.shots === before) {
-      if (process.env.WHY) {
-        console.log('    WHY: settled', RS.isSettled(r.world), 'from', JSON.stringify(from),
-          'pull', pull, 'remaining', RS.remaining(r).length, 'berths', V.berthsFree(v),
-          'over', r.over, 'note', r.note && r.note.text);
+  for (const entry of (d0.rects.dolls || []).slice()) {
+    const def = DOLL_BY_ID[entry.id];
+    if (!def || def.effect !== 'lead') continue;
+    while (FD.dollCharges(f, entry.id) > 0 && guard++ < 20) {
+      paint();
+      d0 = dbg();
+      const dr = (d0.rects.dolls || []).find((x) => x.id === entry.id);
+      if (!dr) break;
+      const [bx, by] = centre(dr.rect);
+      clickAt(bx, by);
+      paint();
+      if (!d0.sel) { errors.push('island: clicking a doll button selected nothing'); break; }
+      // the tile with the most un-homed animals within reach
+      let best = null, bn = -1;
+      for (const cr of f.animals) {
+        if (cr.state === 'safe' || cr.state === 'lost' || cr.homing) continue;
+        const c = cr.c | 0, r = cr.r | 0;
+        let n = 0;
+        for (const o of f.animals) {
+          if (o.state === 'safe' || o.state === 'lost' || o.homing) continue;
+          if (Math.hypot(o.c - c - 0.5, o.r - r - 0.5) <= def.radius) n++;
+        }
+        if (n > bn) { bn = n; best = { c, r }; }
       }
-      errors.push('island: a drag from an animal did not flick it');
-      break;
+      if (!best) break;
+      const before = f.dolls.length;
+      const p = d0.at(best.c, best.r);
+      clickAt(p.x, p.y);
+      tick(3);
+      paint();
+      if (f.dolls.length === before) {
+        if (process.env.WHY) {
+          console.log('    WHY: doll', entry.id, 'at', JSON.stringify(best),
+            'charges', FD.dollCharges(f, entry.id), 'sel', JSON.stringify(dbg().sel));
+        }
+        errors.push('island: clicking a tile with a doll selected put nothing down');
+        break;
+      }
     }
   }
 
-  // 3. cast off, then through the summary card
+  // 2. put one carried animal down, and check its ability actually fired
   paint();
-  const cast = d0.rects && d0.rects.cast;
+  d0 = dbg();
+  const deck = (d0.rects.deck || []).slice();
+  for (const entry of deck) {
+    const a = ANIMAL_BY_ID[entry.id];
+    if (!a) continue;
+    const ab = abilityOf(a).id;
+    if (ab !== 'smash' && ab !== 'graze' && ab !== 'rally') continue;
+    const [rx, ry] = centre(entry.rect);
+    clickAt(rx, ry);
+    paint();
+    const held = f.voyage.aboard.length;
+    // somewhere in the middle of the field, on open ground
+    let put = null;
+    for (const cr of f.animals) {
+      if (cr.state === 'safe' || cr.state === 'lost') continue;
+      put = { c: cr.c | 0, r: cr.r | 0 };
+      break;
+    }
+    if (!put) break;
+    const p = d0.at(put.c, put.r);
+    clickAt(p.x, p.y);
+    tick(3);
+    paint();
+    if (f.voyage.aboard.length !== held - 1) {
+      errors.push('island: putting a carried animal down did not spend it');
+    }
+    break;
+  }
+
+  // 3. let the water come, then cast off
+  let spin = 0;
+  while (!f.over && spin++ < 3000) tick(1);
+  paint();
+  // Only a complaint if the bot actually HAD dolls to spend. An empty doll box and nobody
+  // saved is the economy working, not a bug -- which is exactly what the crafting loop is
+  // there to fix.
+  // Only a complaint if the bot had dolls to spend AND somewhere to put the animals. An
+  // empty doll box, or an ark with no berth left, and nobody saved is the economy working:
+  // that is what the workshop and the garden are for.
+  if (f.dolls.length > 0 && f.saved.length === 0 && f.startBerths > 0) {
+    errors.push('island: dolls were placed, berths were free, and still nobody was saved');
+  }
+  const cast = dbg().rects && dbg().rects.cast;
   if (cast) {
     const [cx, cy] = centre(cast);
     clickAt(cx, cy);
     tick(30);
     paint();
     snap('island-done');
-    const c2 = dbg().rects && dbg().rects.cast;
-    if (c2) { const [ax, ay] = centre(c2); clickAt(ax, ay); tick(10); }
   }
-  if (where() === 'island') {
-    // the card may need one more click
+  for (let i = 0; i < 3 && where() === 'island'; i++) {
     const c3 = dbg().rects && dbg().rects.cast;
-    if (c3) { const [ax, ay] = centre(c3); clickAt(ax, ay); tick(10); }
+    if (c3) { const [ax, ay] = centre(c3); clickAt(ax, ay); }
+    tick(20);
+    paint();
   }
   return true;
 }

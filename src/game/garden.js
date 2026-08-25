@@ -16,7 +16,9 @@
 import { ITEM_BY_ID, itemsFrom } from '../data/items.js';
 import { GEAR_BY_ID, gearFrom } from '../data/gear.js';
 import { NPC_BY_ID, rollGates, dealSize } from '../data/npcs.js';
-import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say } from './voyage.js';
+import { DOLLS, DOLL_BY_ID, costText } from '../data/dolls.js';
+import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say, learnRecipe,
+} from './voyage.js';
 import { QUESTS, currentQuest, questDone, progressOf } from '../data/quests.js';
 import { priceMod, gatesOpen } from './choices.js';
 
@@ -85,9 +87,26 @@ export function rollDeal(v, rng, npc) {
     stock = UPGRADE_IDS
       .filter((u) => tierCost(v, u) !== null)
       .map((u) => ({ kind: 'upgrade', id: u, price: priceOf(v, tierCost(v, u)) }));
+    // NOAH ALSO TEACHES SHAPES. He is the only one who knows how the other dolls are
+    // made, which is what makes finding him worth a leg of the voyage rather than just
+    // another shop. A recipe is cheap in coin and enormous in what it opens up, so it is
+    // priced like a favour and not like a relic.
+    for (const d of DOLLS) {
+      if (!d.unlock || v.recipes.indexOf(d.id) >= 0) continue;
+      stock.push({ kind: 'recipe', id: d.id, price: priceOf(v, 6) });
+    }
   }
   const out = [];
   const rest = stock.slice();
+  // ONE RECIPE, GUARANTEED, whenever he has one left to teach. Rolled fairly against ten
+  // upgrades a recipe turned up about a fifth of the time, which made the doll box a matter
+  // of luck rather than a thing you sail toward. Noah is the only source of shapes, so the
+  // trip to him has to be worth taking.
+  const recipeIx = rest.findIndex((o) => o.kind === 'recipe');
+  if (recipeIx >= 0) {
+    out.push(rest[recipeIx]);
+    rest.splice(recipeIx, 1);
+  }
   while (out.length < n && rest.length) {
     const i = rng.int(rest.length);
     out.push(rest[i]);
@@ -127,6 +146,13 @@ export function describeOffer(offer) {
       icon: u.icon, kind: 'upgrade', tag: 'THE BOAT',
     };
   }
+  if (offer.kind === 'recipe') {
+    const d = DOLL_BY_ID[offer.id];
+    return d && {
+      name: d.name, blurb: d.rule, sub: `MADE FROM ${costText(d).toUpperCase()}`,
+      color: d.mark, icon: 'shell', kind: 'recipe', tag: 'A SHAPE HE KNOWS',
+    };
+  }
   return null;
 }
 
@@ -140,6 +166,7 @@ export function buyOffer(v, npcId, offer) {
   let ok = false;
   let displaced = null;
   if (offer.kind === 'item') ok = addItem(v, offer.id);
+  else if (offer.kind === 'recipe') ok = learnRecipe(v, offer.id);
   else if (offer.kind === 'gear') {
     const relic = GEAR_BY_ID[offer.id];
     if (relic) { displaced = equip(v, relic); ok = true; }

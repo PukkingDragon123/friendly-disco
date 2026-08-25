@@ -91,8 +91,17 @@ for (const name of SCENES) {
     const voyage = V.newVoyage('PROF-0001');
     for (const k of V.UPGRADE_IDS) voyage.tiers[k] = 3;
     const island = I.ISLAND_BY_ID.jungle;
+    voyage.dolls = { herd: 6, bridge: 3, wolf: 2, lamp: 2 };
+    voyage.recipes = ['herd', 'bridge', 'wolf', 'lamp'];
     scene = makeIslandScene(); scene.enter({ voyage, island, onDone() {} }, app);
-    scene.debug().advance(4);
+    // A BUSY FIELD, not an empty one. The profile is worthless if it measures the first
+    // frame of a stage: put dolls down, let monsters land, let the flood take a few columns.
+    const d = scene.debug();
+    for (const [id, c, r] of [['herd', 8, 3], ['herd', 14, 6], ['wolf', 20, 4], ['lamp', 11, 8]]) {
+      d.pick(id);
+      d.put(c, r);
+    }
+    for (let i = 0; i < 60 * 26; i++) scene.update(1 / 60, app, 1 / 60);
   }
   if (!scene) {
     console.error('unknown scene', name);

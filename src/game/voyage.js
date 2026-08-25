@@ -20,6 +20,8 @@
 
 import { makeRng, randomSeedString } from '../core/rng.js';
 import { ANIMAL_BY_ID, STARTER_STOCK } from '../data/animals.js';
+import { STARTER_DOLLS, DOLL_BY_ID, payFor } from '../data/dolls.js';
+import { yieldFor, addMats } from '../data/materials.js';
 import { rollLeg, ISLAND_BY_ID, CHERUBIM } from '../data/islands.js';
 
 export const LEGS_PER_CHAPTER = 4;
@@ -141,6 +143,45 @@ export function spreadStock(list, n) {
 
 /* -------------------------------------------------------------------- state */
 
+/* ------------------------------------------------------- clay, dolls and recipes */
+
+/**
+ * What the deck produced on a crossing.
+ *
+ * Called once per leg, not per island: the yield is for the CROSSING, so a leg you sailed
+ * with a full deck pays whether the island went well or badly. That matters -- it means a
+ * disastrous rescue still leaves you with something to plan the next one with, which is
+ * the difference between a run that recovers and a run that spirals.
+ */
+export function harvest(v) {
+  const got = yieldFor(v.aboard, ANIMAL_BY_ID);
+  addMats(v.mats, got);
+  return got;
+}
+
+/** Spend the bill from data/dolls.js and add one doll to the box. */
+export function craftDoll(v, id) {
+  if (!v.recipes.includes(id)) return { ok: false, why: 'you do not know the shape' };
+  const d = DOLL_BY_ID[id];
+  if (!d) return { ok: false, why: 'no such doll' };
+  if (!payFor(d, v.mats)) return { ok: false, why: 'not enough to make it' };
+  v.dolls[id] = (v.dolls[id] || 0) + 1;
+  return { ok: true, doll: d };
+}
+
+/** Noah teaches one. Returns false if it was already known. */
+export function learnRecipe(v, id) {
+  if (!DOLL_BY_ID[id] || v.recipes.includes(id)) return false;
+  v.recipes.push(id);
+  return true;
+}
+
+/** Every doll the player knows and how many are in the box. */
+export function dollBox(v) {
+  return v.recipes.map((id) => ({ id, def: DOLL_BY_ID[id], have: v.dolls[id] || 0 }))
+    .filter((r) => r.def);
+}
+
 export function newVoyage(seed) {
   const s = seed || randomSeedString('voyage');
   const v = {
@@ -169,6 +210,16 @@ export function newVoyage(seed) {
     eden: [],               // animal ids kept safe forever
     gates: [],              // NPC ids the Cherubim have opened
     summoned: [],           // NPCs currently in Eden
+
+    // --- clay, dolls and recipes
+    //
+    // `mats` is what the deck has produced, `dolls` is how many of each you have made,
+    // and `recipes` is which ones you know how to make. The two starting dolls are known
+    // from the first island; the rest are taught by Noah, which is what makes finding him
+    // worth a leg of the voyage.
+    mats: { clay: 4 },
+    dolls: { herd: 2, bridge: 1 },
+    recipes: STARTER_DOLLS.slice(),
 
     // --- the golem
     slots: { hold: null, wear: null, consume: null },
@@ -253,6 +304,14 @@ export function sailTo(v, island) {
 /** Leave the current island and set up the next set of choices. */
 export function departIsland(v) {
   v.at = null;
+  // THE CROSSING PAYS. Whatever is on the deck produces on the way out, which is what
+  // turns the animals you saved on the last island into the dolls you herd the next one
+  // with. It happens here, once per leg, whether the island went well or badly -- a
+  // disastrous rescue still leaves you something to plan with, and that is the difference
+  // between a run that recovers and a run that spirals.
+  const got = harvest(v);
+  const names = Object.keys(got).filter((k) => got[k]);
+  if (names.length) say(v, `The crossing yields ${names.map((k) => `${got[k]} ${k}`).join(', ')}.`, 'clay4');
   v.leg++;
   if (v.leg > LEGS_PER_CHAPTER) {
     v.leg = 1;

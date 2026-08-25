@@ -153,6 +153,17 @@ export function panelCacheSize() { return panelCache.size; }
  *
  * Blits a baked panel. Everything that actually draws lives in paintPanel below.
  */
+/**
+ * A two-pixel frame. The commonest thing in the game's chrome now that every line is two
+ * pixels thick: a one-pixel border beside two-pixel art reads as a hairline crack.
+ */
+export function boxEdge(g, x, y, w, h, c) {
+  rect(g, x, y, w, 2, c);
+  rect(g, x, y + h - 2, w, 2, c);
+  rect(g, x, y, 2, h, c);
+  rect(g, x + w - 2, y, 2, h, c);
+}
+
 export function panel(g, x, y, w, h, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   if (w < 4 || h < 4) return rectOf(x, y, w, h);

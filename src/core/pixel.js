@@ -322,8 +322,9 @@ function glyphFor(font, ch) {
 export function charW(ch, font) {
   const gl = glyphFor(font, ch);
   if (ch === ' ') return font.spaceW || Math.max(2, Math.floor(font.w / 2));
-  if (!gl) return font.w;
-  if (font.widths && font.widths[ch] !== undefined) return font.widths[ch];
+  const b = font.bold ? 1 : 0;
+  if (!gl) return font.w + b;
+  if (font.widths && font.widths[ch] !== undefined) return font.widths[ch] + b;
   // trim empty right columns so text kerns tightly
   let used = 0;
   for (const row of gl) {
@@ -331,10 +332,26 @@ export function charW(ch, font) {
       if (row & (1 << (font.w - 1 - c))) used = Math.max(used, c + 1);
     }
   }
-  return used || Math.max(2, Math.floor(font.w / 2));
+  return (used || Math.max(2, Math.floor(font.w / 2))) + b;
 }
 
-function pickFont(f) { return f === 3 ? FONT3 : f === 7 ? FONT7 : FONT5; }
+// EVERY FONT MOVES UP ONE STEP.
+//
+// The game reads at 960x540, which at a 5x7 body face is about a hundred and thirty
+// characters to a line -- denser than a paperback and far denser than any farming game.
+// Small text is not a style, it is a thing you squint at. So the three names the whole
+// codebase already asks for now mean bigger faces:
+//
+//     font: 3   ->  FONT5     the small label on a sprite or a chip
+//     font: 5   ->  FONT7     body text, and the default
+//     font: 7   ->  FONT7 bold  headings and numbers you read across the room
+//
+// FONT3 is still compiled and still borrowed from for missing glyphs, but nothing asks
+// for it by name any more. Bold is the same face drawn one pixel wider per run, which at
+// this weight is a genuinely heavier letter rather than a blurred one.
+const FONT7B = Object.assign(Object.create(Object.getPrototypeOf(FONT7)), FONT7, { bold: true });
+
+function pickFont(f) { return f === 3 ? FONT5 : f === 7 ? FONT7B : FONT7; }
 
 export function textW(str, o = {}) {
   const font = pickFont(o.font);
@@ -384,7 +401,10 @@ export function text(g, str, x, y, c, o = {}) {
             const on = cc < font.w && (row & (1 << (font.w - 1 - cc)));
             if (on && runStart < 0) runStart = cc;
             else if (!on && runStart >= 0) {
-              g.fillRect(cx + runStart * sc, oy + (dy + r + bob) * sc, (cc - runStart) * sc, sc);
+              // bold widens each run by a pixel rather than stamping the glyph twice: one
+              // fillRect instead of two, and a cleaner letter
+              const wide = (cc - runStart + (font.bold ? 1 : 0)) * sc;
+              g.fillRect(cx + runStart * sc, oy + (dy + r + bob) * sc, wide, sc);
               runStart = -1;
             }
           }

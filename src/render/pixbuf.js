@@ -18,7 +18,7 @@
 // this is bake-time work that never shows up in a frame.
 
 import { P, mix } from '../core/palette.js';
-import { px } from '../core/pixel.js';
+import { px, rect } from '../core/pixel.js';
 
 /* -------------------------------------------------------------------- buffer */
 
@@ -266,12 +266,31 @@ export function outline(b, key = 'ink', o = {}) {
   return b;
 }
 
-/** Copy the buffer onto a real context. */
-export function flush(b, g, ox = 0, oy = 0) {
+/**
+ * Copy the buffer onto a real context, optionally with fat pixels.
+ *
+ * `s` is the size of one art pixel on screen. The whole cast draws at s = 2: the art is
+ * authored at half the resolution it displays at, so every shape is simpler, every
+ * outline comes out two pixels thick, and nothing can be finer than a 2x2 block. That is
+ * the look -- chunky, high-contrast, readable at a glance -- and it is also FASTER,
+ * because a quarter of the pixels come out of the run merge below as a quarter of the
+ * rects.
+ *
+ * Runs of one colour along a row merge into a single fillRect. A flat-coloured chunky
+ * sprite is mostly long runs, so a 16x16 buffer that would have been 256 calls at 1x
+ * lands around 60.
+ */
+export function flush(b, g, ox = 0, oy = 0, s = 1) {
   for (let y = 0; y < b.h; y++) {
-    for (let x = 0; x < b.w; x++) {
+    let x = 0;
+    while (x < b.w) {
       const c = b.c[y * b.w + x];
-      if (c !== null) px(g, ox + x, oy + y, c);
+      if (c === null) { x++; continue; }
+      let n = 1;
+      while (x + n < b.w && b.c[y * b.w + x + n] === c) n++;
+      if (s === 1 && n === 1) px(g, ox + x, oy + y, c);
+      else rect(g, ox + x * s, oy + y * s, n * s, s, c);
+      x += n;
     }
   }
   return b;

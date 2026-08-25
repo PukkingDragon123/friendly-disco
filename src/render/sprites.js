@@ -1,53 +1,87 @@
-// THE ANIMALS. Every one of them is a ball.
+// THE ANIMALS. A round body, two feet, and half the resolution.
 //
-// That is a design decision, not a shortcut: a sphere reads at 32 pixels, it rolls
-// convincingly, it squashes when it lands, and it lets ninety animals share one lighting
-// model so a jungle and a snowfield look like the same game. Species live in the details
-// that BREAK the circle -- ears, horns, a beak, a tail, a shell -- plus the pattern
-// wrapped onto the surface and two dot eyes.
+// WHY HALF RESOLUTION. The art is authored in a 16x16 buffer and blown up 2x, so a
+// finished animal is 32 screen pixels made of 2x2 blocks. Nothing can be finer than a
+// block, every outline comes out two pixels thick, and every shape has to justify itself
+// in about nine pixels of body. That constraint is the whole style: at 32 real pixels
+// there is room to render a shoulder blade and a nostril, and the result is mush at arm's
+// length and reads as machine-made up close. Chunky reads instantly and reads as drawn.
 //
-// WHAT WENT WRONG THE FIRST TIME, because it is all still avoidable:
+// It is also cheaper. Long runs of one colour merge into one fillRect in pixbuf.flush, and
+// a quarter of the pixels means a quarter of the runs.
 //
-//   NO CONTOUR. The ball had no dark edge, so on grass it turned to mush. Everything now
-//   goes through render/pixbuf.js and gets a one-pixel ink outline computed after the
-//   last shape is down -- and every attached part (ear, beak, trunk) gets its own, so it
-//   does not dissolve into the body it overlaps.
+// WHAT A SPECIES IS. One lighting model, one silhouette, and then the details that BREAK
+// the circle: ears, a horn, a beak, a tail, a chunky pattern, two dot eyes. Ninety animals
+// share the ball so a jungle and a snowfield look like one game.
 //
-//   A STRAIGHT TERMINATOR. Five tones split along a diagonal is a ball cut in half. The
-//   bands now follow the surface, with a rim on the shadow side and a bounce below it.
+// THREE BAKES, SPLIT BY WHAT MOVES:
 //
-//   PATTERNS THAT ATE THE ANIMAL. Mixing the pattern colour toward white on the lit side
-//   gave big pale blobs; a cow was an amoeba. The pattern now shades with the ball and
-//   never crosses the face.
+//     BACK[tint]         behind the body: tail, wing, shell, quills, hump, mane
+//     BODY[phase][tint]  the shaded ball, its pattern, AND the legs -- 4 walk frames
+//     FACE[mood][tint]   ears, species feature, eyes -- everything that stays upright
 //
-//   FACES TOO BIG. A muzzle covering the lower third is a snout, not a face. Eyes are two
-//   pixels, six apart, low on the ball, with one pixel of catch light. Small features,
-//   lots of ball.
-//
-// THREE BAKES PER ANIMAL, each memoised, split by WHAT MOVES:
-//
-//     BACK[tint]         behind the ball: tail, wing, shell, quills, hump, mane
-//     BODY[phase][tint]  the shaded sphere and its pattern, at 8 rotations
-//     FACE[mood][tint]   ears, features, eyes -- everything that must stay upright
-//
-// Drawing is three blits. The body spins as the animal rolls; the face never does,
-// because a cute face that rotates away from the camera stops being cute. Live pixels on
-// top handle wet sheen, drips and rain.
+// The legs live with the body because a walk is a body bobbing over planted feet: bake
+// them together and the bob is free, bake them apart and the feet float. The face and the
+// back layer are blitted at the bob offset instead.
 
-import { P, col, mix } from '../core/palette.js';
-import { makeCanvas, rect, px, ellipse, wash, clamp } from '../core/pixel.js';
+import { P, mix } from '../core/palette.js';
+import { makeCanvas, rect, ellipse, clamp } from '../core/pixel.js';
 import {
-  makeBuf, bset, bget, bmir, brect, bline, btri, orb, blob, limb, orbShade, outline, flush,
+  makeBuf, bset, bget, brect, bline, btri, orb, blob, orbShade, outline, flush,
 } from './pixbuf.js';
 
-export const SPRITE_SIZE = 32;
+export const SPRITE_SIZE = 32;            // on screen
 export const ICON_SIZE = 16;
 
-const CX = 16;
-const BALL_R = 13;
-const PHASES = 8;
-const EYE_Y = CX + 2;             // low on the ball: cuter
-const EYE_DX = 3;                 // 2px eyes at CX-4 and CX+2 -- close together
+const A = 16;                             // the art buffer: 16x16 ...
+const S = 2;                              // ... at 2x, so one art pixel is a 2x2 block
+const CX = 8;                             // body centre column; features mirror about it
+const CY = 7;                             // body centre row
+const R = 4;                              // body half-width at the waist
+const EYE_Y = 7;                          // eyes occupy rows EYE_Y and EYE_Y+1
+const EYE_DX = 3;                         // outer edge of each eye: CX-3 and CX+3
+const MOUTH_Y = 10;
+const HIP_Y = 11;                         // where the legs leave the body
+const FOOT_Y = 13;                        // row 14 is the contour under the feet
+const EAR_X = 3;                          // ears at CX-3..CX-4, TOUCHING the head
+const EAR_Y = 4;
+const LEG_X = [CX - 3, CX + 2];           // (5,6) and (10,11): mirrored about CX
+
+// THE BODY IS A ROW TABLE, NOT A CIRCLE, and there are two reasons that matters.
+//
+// A circle of radius four has a one-pixel top and a one-pixel bottom, so the contour pass
+// wraps each end into a little nub and the animal gets a pointed head. Eight hand-set row
+// widths give a chunky egg with a flat top instead.
+//
+// And every attachment point has to be a pixel something can TOUCH. The first cut put the
+// ears one pixel clear of the head; the contour pass fills an empty pixel that has a
+// filled neighbour, so that one-pixel gap came out solid ink -- three pixels of it either
+// side -- and every animal wore a black cap. Ears now overlap the row they sit on.
+const BODY_HW = [1, 2, 3, 4, 4, 4, 4, 3, 2];   // half-widths, rows CY-4 .. CY+4
+
+// The top three rows narrow 3, 5, 7 for a reason. A head whose top row is already the
+// full five pixels wide gets a straight five-pixel contour laid across it, and a straight
+// dark bar between two ears does not read as a skull -- it reads as a visor. Rounding the
+// dome costs two rows and buys a head.
+const PHASES = 4;
+
+// A SIXTEEN PIXEL BUDGET, and what it taught. The first cut gave the ball radius five and
+// the ears a radius of two, which came to fifteen pixels of width out of sixteen -- so the
+// contour pass wrapped the lot in one rounded rectangle and every animal was a shield with
+// a face on it. The ball has to be small enough that the ears, the feet and the contour
+// all fit OUTSIDE it, or the silhouette is a box no matter how well the ball is shaded.
+//
+//   row 0       contour
+//   rows 2-4    ears and horns, two pixels wide, never more
+//   rows 2-10   the ball, nine pixels across
+//   rows 10-13  legs, two pixels wide, feet three
+//   row 14      contour
+
+// A walk is four frames: plant, lift, plant, lift. The body rides up on the frames where
+// a leg is under it and drops on the frames where one is swinging -- that is the bob, and
+// it is the difference between walking and sliding.
+const BOB = [0, -1, 0, -1];
+const GAIT = [[0, 0], [1, -1], [0, 0], [-1, 1]];
 
 export const DEFAULT_RECIPE = {
   body: 'grey1', shade: 'grey0', light: 'grey2', belly: 'bone',
@@ -55,19 +89,33 @@ export const DEFAULT_RECIPE = {
   pattern: 'none', patternColor: 'ink', extra: 'none',
 };
 
+/** Fill the body from the row table, shading it as if it were a sphere. */
+function bodyFill(b, cy, shade) {
+  for (let i = 0; i < BODY_HW.length; i++) {
+    const y = cy - 4 + i, hw = BODY_HW[i];
+    for (let x = -hw; x <= hw; x++) {
+      const nx = x / 4.4, ny = (y - cy) / 4.4;
+      const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));
+      bset(b, CX + x, y, shade(nx, ny, nz));
+    }
+  }
+}
+
+/** Mirror-write about the body centre. Every symmetric feature goes through this. */
+function mir(b, x, y, k) { bset(b, x, y, k); bset(b, 2 * CX - x, y, k); }
+
 /* ------------------------------------------------------------------- colours */
 
-/** Tint a key toward another colour, for the wet/frozen/sick variants. */
 function tinted(key, tint, amt) {
   return tint ? mix(P[key] || key, P[tint] || tint, amt) : (P[key] || key);
 }
 
 /**
- * The full tone set for one animal.
+ * The tone set for one animal: FOUR body tones, not five.
  *
- * Five body tones from three recipe colours, because a roster written with three is not
- * going to be rewritten with five: `deep` and `hi` are derived, and derived tones are
- * consistent across ninety animals in a way hand-picked ones never are.
+ * Five bands across ten pixels of ball is not shading, it is noise -- each band ends up
+ * one or two pixels wide and the ball reads as speckled. Four bands give the terminator
+ * somewhere to be.
  */
 function tones(rc, o = {}) {
   const t = o.tint, a = o.tintAmt || 0.4;
@@ -75,511 +123,278 @@ function tones(rc, o = {}) {
   const shade = tinted(rc.shade || 'grey0', t, a);
   const light = tinted(rc.light || 'grey2', t, a);
   return {
-    deep: mix(shade, P.ink, 0.28),   // 0.45 put the shadow side into the background
+    deep: mix(shade, P.ink, 0.3),
     shade,
     body,
-    light,
-    hi: mix(light, P.white, 0.45),
+    light: mix(light, P.white, 0.12),
     belly: tinted(rc.belly || 'bone', t, a * 0.6),
-    pat: tinted(rc.patternColor || 'ink', t, a * 0.5),
+    // A pattern pulled toward the body colour stays a marking. Left at full strength it
+    // becomes a hole: a cow with four pure-ink patches on nine pixels of ball is a cow
+    // with a bite out of it.
+    pat: mix(tinted(rc.patternColor || 'ink', t, a * 0.5), body, 0.3),
     eye: rc.eye || 'ink',
-    ramp: null,
   };
 }
 
-function ramp(C) { return [C.deep, C.shade, C.body, C.light, C.hi]; }
+// THREE TONES ON THE BODY, and no `deep`.
+//
+// The generic five-band sphere shader is built for a thirty-pixel ball. On nine pixels its
+// thresholds land wherever they like: the band edge at 0.42 fell exactly down the middle
+// of the face, so the muzzle and the space between the eyes came out in shadow tone while
+// the cheeks stayed light -- a pale cow with a dirty stripe down its nose. And a deep band
+// plus a rim inside the contour makes the outer two pixels dark all the way round, which
+// turns any pale animal into a doughnut.
+//
+// So: a lit cap, the body over most of the surface, one crescent of shade at the
+// lower right, and the contour doing the work the deep band used to. Three tones is also
+// simply what nine pixels can hold.
+function ramp(C) { return [C.shade, C.shade, C.body, C.light]; }
 
-/* ---------------------------------------------------------------------- body */
+function bodyShade(C) {
+  return (nx, ny, nz) => {
+    const lam = nx * -0.52 + ny * -0.66 + nz * 0.54;
+    if (lam > 0.62) return C.light;
+    if (lam > 0.06) return C.body;
+    return C.shade;
+  };
+}
 
-/**
- * The shaded sphere, plus its pattern, plus a belly and a specular.
- *
- * `phase` spins the pattern; the shading never spins, because the light does not orbit
- * the animal when the animal rolls.
- */
+/* -------------------------------------------------------------- body + legs */
+
+/** Is this art pixel inside the face, where a pattern must not go? */
+function onFace(x, y) { return x >= CX - 3 && x <= CX + 3 && y >= EYE_Y - 1 && y <= MOUTH_Y + 1; }
+
+function ballPattern(b, rc, C) {
+  const k = rc.pattern || 'none';
+  if (k === 'none') return;
+  const put = (x, y) => { if (!onFace(x, y) && bget(b, x, y) !== null) bset(b, x, y, C.pat); };
+  const blk = (x, y, w, h) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j); };
+  // Nine pixels of ball. Two marks is a marking, four is a different animal.
+  if (k === 'bands') { for (let x = CX - R; x <= CX + R; x++) { put(x, CY - 2); put(x, CY + 2); } }
+  else if (k === 'stripes') { for (let y = CY - 3; y <= CY + 3; y++) { put(CX - 3, y); put(CX + 3, y); } }
+  else if (k === 'spots') { blk(CX - 3, CY - 2, 2, 2); blk(CX + 2, CY + 1, 2, 2); }
+  else if (k === 'patches') { blk(CX - 3, CY - 2, 2, 3); blk(CX + 2, CY, 2, 2); }
+  else if (k === 'freckles') { put(CX - 3, CY - 1); put(CX + 3, CY - 1); put(CX - 2, CY + 3); }
+  else if (k === 'plates') { for (let x = CX - 2; x <= CX + 2; x++) put(x, CY - 3); }
+  else if (k === 'scales') { for (let y = CY; y <= CY + 3; y++) for (let x = CX - 3; x <= CX + 3; x++) if ((x + y) % 2 === 0) put(x, y); }
+  else if (k === 'wool') { for (let x = CX - 3; x <= CX + 3; x += 2) put(x, CY - 3); }
+  else if (k === 'runes') { put(CX - 2, CY - 2); put(CX + 2, CY - 2); put(CX, CY + 3); }
+}
+
+/** The ball, its belly, its pattern -- and the two legs under it. */
 function ballBody(b, rc, C, phase) {
-  const r = BALL_R;
-  orb(b, CX, CX, r, orbShade(ramp(C), { bounce: 0.55 }));
+  const bob = BOB[phase % PHASES];
+  const cy = CY + bob;
+  const g = GAIT[phase % PHASES];
 
-  // The belly is a BIB: an oval low and central, strong in the middle and fading at its
-  // edge. As a wide fading crescent at a third strength it did nothing -- a penguin came
-  // out uniformly dark -- and at full strength across the lower half it washed the
-  // shading out and the ball went flat. An oval does both jobs.
-  const by = 5, brx = r * 0.62, bry = r * 0.52;
-  for (let y = -bry; y <= bry; y++) {
-    for (let x = -brx; x <= brx; x++) {
-      const t = (x * x) / (brx * brx) + (y * y) / (bry * bry);
-      if (t > 1) continue;
-      const cur = bget(b, CX + x, CX + by + y);
-      if (cur === null) continue;
-      const k = 0.85 * (1 - t * t);
-      bset(b, CX + x, CX + by + y, mix(P[cur] || cur, P[C.belly] || C.belly, k));
+  // Legs first, so the body sits over the hip and the join disappears. The near leg is
+  // body-toned and the far leg is shaded: two legs in one colour read as one thick post.
+  for (let i = 0; i < 2; i++) {
+    const swing = g[i];
+    const lift = swing > 0 ? 1 : 0;
+    const bot = FOOT_Y - lift;
+    brect(b, LEG_X[i], HIP_Y, 2, bot - HIP_Y, i === 0 ? C.body : C.shade);
+    brect(b, LEG_X[i], bot, 2, 1, C.deep);
+  }
+
+  bodyFill(b, cy, bodyShade(C));
+
+  // A belly makes a ball an animal -- but only just. Three pixels at the widest, low and
+  // short: any bigger and it is a bib, and a bib covers the face.
+  for (let y = cy + 2; y <= cy + 3; y++) {
+    const w = y > cy + 2 ? 0 : 1;
+    for (let x = CX - w; x <= CX + w; x++) {
+      if (bget(b, x, y) === null) continue;
+      bset(b, x, y, C.belly);
     }
   }
 
-  ballPattern(b, rc, C, (phase / PHASES) * Math.PI * 2, r);
+  ballPattern(b, rc, C);
 
-  // the specular: a small arc where the light hits, drawn last so nothing covers it
-  bset(b, CX - 5, CX - 6, C.hi);
-  bset(b, CX - 4, CX - 6, mix(P[C.hi] || C.hi, P.white, 0.6));
-  bset(b, CX - 6, CX - 5, C.hi);
-  bset(b, CX - 5, CX - 5, mix(P[C.hi] || C.hi, P.white, 0.35));
+  // ONE highlight pixel. Two read as dirt on the screen at this size.
+  bset(b, CX - 2, cy - 2, mix(C.light, P.white, 0.45));
+
+  // Ears and the species feature live HERE, not in the face layer, and that is a
+  // correctness fix rather than tidying. The face layer knows nothing about the body, so
+  // when the ears were baked into it the outline pass filled the pixels either side of
+  // each ear -- pixels the body was about to occupy -- and those two ink columns
+  // composited straight over the head. Anything that breaks the silhouette has to be
+  // outlined in the same pass as the silhouette.
+  ballEars(b, rc, C, cy);
+  ballSnout(b, rc, C, cy);
 }
 
-/**
- * The pattern, wrapped onto the sphere and rotated by `spin`.
- *
- * Evaluated in spherical coordinates (u = longitude + spin, v = latitude) rather than in
- * screen space, so a stripe bends round the ball and a spot squashes toward the edge.
- * That one detail is the difference between a patterned sphere and a decal.
- */
-function ballPattern(b, rc, C, spin, r) {
-  const kind = rc.pattern || 'none';
-  if (kind === 'none') return;
-  // NEVER pure ink. A cow's patches drawn in the same colour as the outline and the
-  // background made the ball look bitten -- one continuous black region over forty per
-  // cent of a white animal reads as missing geometry, not as a marking. One step back
-  // toward the body keeps it a marking.
-  const pat = mix(P[C.pat] || C.pat, P[C.body] || C.body, 0.24);
-  for (let y = -r; y <= r; y++) {
-    for (let x = -r; x <= r; x++) {
-      if (x * x + y * y > (r - 1) * (r - 1)) continue;
-      // KEEP OFF THE FACE. A patch across the eyes is not a marking, it is a blindfold.
-      if (y > 0 && Math.abs(x) < 6 && y < 9) continue;
-      const nx = x / r, ny = y / r;
-      const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
-      if (nz < 0.16) continue;
-      const u = Math.atan2(nx, nz) + spin;
-      const v = Math.asin(Math.max(-1, Math.min(1, ny)));
-      let on = false;
-      // Frequencies are tuned so a marking is SEVERAL SMALL SHAPES, not one region. The
-      // difference between "a spotted animal" and "half an animal in another colour" is
-      // entirely in these numbers.
-      switch (kind) {
-        case 'stripes': on = Math.sin(u * 5.5) > 0.58; break;
-        case 'bands': on = Math.sin(v * 8 + 0.6) > 0.52; break;
-        case 'spots': on = Math.sin(u * 4.6) * Math.cos(v * 4.8) > 0.62; break;
-        case 'patches': on = Math.sin(u * 3.1 + 1.1) * Math.cos(v * 3.3) > 0.5; break;
-        case 'freckles': on = Math.sin(u * 11) * Math.cos(v * 10) > 0.72; break;
-        case 'scales': on = Math.sin(u * 9) + Math.cos(v * 10) > 1.35; break;
-        case 'plates': on = Math.sin(v * 6.5) > 0.66; break;
-        case 'wool': on = Math.sin(u * 7.5) * Math.sin(v * 7) > 0.32; break;
-        default: break;
-      }
-      if (!on) continue;
-      // the pattern takes the ball's light, and NEVER mixes toward white: that is what
-      // turned a cow into a pale amoeba
-      const lam = nx * -0.52 + ny * -0.66 + nz * 0.54;
-      bset(b, CX + x, CX + y,
-        lam > 0.5 ? pat : lam > 0 ? mix(pat, P.ink, 0.18) : mix(pat, P.ink, 0.42));
-    }
-  }
-  // wool gets a fluffed rim, because a sheep is a silhouette before it is a texture
-  if (kind === 'wool') {
-    for (let a = 0; a < 360; a += 22) {
-      const rad = (a * Math.PI) / 180;
-      const wx = CX + Math.cos(rad) * (r - 1), wy = CX + Math.sin(rad) * (r - 1);
-      if (wy > CX + 2 && Math.abs(wx - CX) < 7) continue;         // not over the face
-      orb(b, wx, wy, 2.2, Math.sin(rad + spin) > 0 ? C.hi : C.light);
-    }
-  }
+/* ------------------------------------------------------- behind the body */
+
+/** A tapering chunky spur: horn, quill, antler tine. Two passes so it keeps an edge. */
+function spur(b, x0, y0, x1, y1, key, edge) {
+  bline(b, x0 - 1, y0, x1 - 1, y1, edge);
+  bline(b, x0 + 1, y0, x1 + 1, y1, edge);
+  bline(b, x0, y0 + 1, x1, y1 + 1, edge);
+  bline(b, x0, y0 - 1, x1, y1 - 1, edge);
+  bline(b, x0, y0, x1, y1, key);
 }
 
-/* ------------------------------------------------------------------- features
-
-Everything here has to CROSS the circle's edge -- that is the whole job. A detail that
-stays inside the silhouette is decoration; a detail that breaks it is a species.
-*/
-
-/**
- * A chain of shaded beads with ONE contour round the whole thing.
- *
- * Drawing each bead with its own `edge` looked fine for a limb and was a disaster for
- * anything thin: at radius one, a bead with a one-pixel outline is almost entirely
- * outline, so every horn, antler and tail came out as a chain of black blobs. Two passes
- * -- the whole chain slightly fat in ink, then the whole chain in colour -- gives one
- * clean edge and keeps the beads bright.
- */
-function chain(b, pts, ramp, edge) {
-  if (edge) {
-    for (const p of pts) {
-      const r = p.r + 0.9;
-      for (let y = -Math.ceil(r); y <= Math.ceil(r); y++) {
-        for (let x = -Math.ceil(r); x <= Math.ceil(r); x++) {
-          if (x * x + y * y > r * r) continue;
-          bset(b, p.x + x, p.y + y, edge);
-        }
-      }
-    }
-  }
-  const sh = orbShade(ramp);
-  for (const p of pts) {
-    for (let y = -Math.ceil(p.r); y <= Math.ceil(p.r); y++) {
-      for (let x = -Math.ceil(p.r); x <= Math.ceil(p.r); x++) {
-        const d = x * x + y * y;
-        if (d > p.r * p.r) continue;
-        const nx = x / Math.max(1, p.r), ny = y / Math.max(1, p.r);
-        const nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
-        bset(b, p.x + x, p.y + y, sh(nx, ny, nz));
-      }
-    }
-  }
-}
-
-/** Behind the ball: tails, wings, plumes, fins, shells, quills, humps, manes. */
 function backFeatures(b, rc, C) {
-  const r = BALL_R;
-  const lo = C.shade, mid = C.body, hi = C.light;
-  switch (rc.extra) {
-    case 'tail': {
-      // an S-curve with a tuft on the end: a straight diagonal stick is a stick
-      const pts = [];
-      let x = CX + r - 3, y = CX + 4;
-      for (let i = 0; i < 12; i++) {
-        const f = i / 11;
-        x += 1.1;
-        y -= Math.sin(f * 2.6) * 1.5;
-        pts.push({ x, y, r: 2.2 - f * 0.9 });
-      }
-      chain(b, pts, [lo, mid, hi], 'ink');
-      chain(b, [{ x: x + 1, y: y - 1, r: 3 }], [lo, mid, hi], 'ink');
-      break;
+  const k = rc.extra || 'none';
+  const dk = C.deep, md = C.shade, lt = C.light;
+  if (k === 'tail') {
+    spur(b, CX + 3, CY + 2, CX + 5, CY - 1, md, dk);
+    bset(b, CX + 5, CY - 2, lt);
+  } else if (k === 'wing') {
+    blob(b, CX + 4, CY, 2, 3, [dk, md, lt], { edge: dk });
+    bline(b, CX + 3, CY - 1, CX + 6, CY - 1, dk);
+    bline(b, CX + 3, CY + 1, CX + 6, CY + 1, dk);
+  } else if (k === 'wings2') {
+    blob(b, CX + 4, CY - 1, 2, 3, [dk, md, lt], { edge: dk });
+    blob(b, CX - 4, CY - 1, 2, 3, [dk, md, lt], { edge: dk });
+  } else if (k === 'flipper') {
+    blob(b, CX + 4, CY + 2, 2, 2, [dk, md, md], { edge: dk });
+    blob(b, CX - 4, CY + 2, 2, 2, [dk, md, md], { edge: dk });
+  } else if (k === 'shell') {
+    blob(b, CX, CY - 1, R + 1, R, [dk, md, lt], { edge: dk });
+    bline(b, CX - R, CY - 1, CX + R, CY - 1, dk);
+    bline(b, CX, CY - R - 1, CX, CY + 2, dk);
+  } else if (k === 'quills') {
+    for (let i = -2; i <= 2; i++) spur(b, CX + i * 2, CY - 2, CX + i * 3, CY - 7, md, dk);
+  } else if (k === 'hump') {
+    blob(b, CX, CY - 3, 3, 2, [md, lt, lt], { edge: dk });
+  } else if (k === 'mane') {
+    // A ruff is ONE pixel of collar proud of the head. Two pixels of dark ring plus the
+    // contour turned the lion into a life preserver with a face in the hole.
+    for (let i = 0; i < BODY_HW.length; i++) {
+      const y = CY - 4 + i, hw = BODY_HW[i] + 1;
+      bset(b, CX - hw, y, md); bset(b, CX + hw, y, md);
     }
-    case 'wing': {
-      // a FOLDED wing: one mass with three feather tips off the back of it. Four splayed
-      // limbs a side read as talons, which is not what anybody wants on a chicken.
-      for (const s of [-1, 1]) {
-        blob(b, CX + s * (r - 2), CX + 1, 5, 7, orbShade([lo, mid, hi]), { edge: 'ink' });
-        for (let k = 0; k < 3; k++) {
-          limb(b, CX + s * (r - 1), CX + 4 + k,
-            CX + s * (r + 4 + k), CX + 8 + k * 2,
-            1.6 - k * 0.2, 0.9, [lo, mid, hi], { edge: 'ink' });
-        }
-      }
-      break;
-    }
-    case 'plume': {
-      for (let i = 0; i < 5; i++) {
-        const a = -1.9 + i * 0.34;
-        limb(b, CX + 3, CX - r + 4,
-          CX + 3 + Math.cos(a) * 12, CX - r + 4 + Math.sin(a) * 12,
-          1.6, 0.9, [lo, mid, hi], { edge: 'ink' });
-      }
-      break;
-    }
-    case 'sail': {
-      for (let i = 0; i < 9; i++) {
-        const h = 9 - Math.abs(i - 4) * 1.4;
-        brect(b, CX - 8 + i * 2, CX - r - Math.round(h), 2, Math.round(h) + 3, i % 2 ? mid : lo);
-      }
-      break;
-    }
-    case 'flipper': {
-      for (const s of [-1, 1]) {
-        blob(b, CX + s * (r - 1), CX + 5, 4, 2.4, orbShade([lo, mid, hi]), { edge: 'ink' });
-      }
-      break;
-    }
-    case 'shell': {
-      // a dome BEHIND the ball, so the animal sits in it rather than wearing it
-      blob(b, CX, CX - 2, r + 2, r - 1, orbShade([mix(P[lo], P.ink, 0.3), lo, mid, hi]));
-      // plates: rings AND radial seams, or a shell is just a darker ball behind a ball
-      for (let i = 1; i <= 3; i++) {
-        const rr = 4 + i * 3.4;
-        for (let a = 3.25; a < 6.2; a += 0.09) {
-          bset(b, CX + Math.cos(a) * rr, CX - 2 + Math.sin(a) * rr * 0.82, mix(P[lo], P.ink, 0.45));
-          bset(b, CX + Math.cos(a) * (rr - 1), CX - 2 + Math.sin(a) * (rr - 1) * 0.82, hi);
-        }
-      }
-      for (let k = 0; k < 5; k++) {
-        const a = 3.3 + k * 0.66;
-        for (let d = 4; d < 15; d++) {
-          bset(b, CX + Math.cos(a) * d, CX - 2 + Math.sin(a) * d * 0.82, mix(P[lo], P.ink, 0.4));
-        }
-      }
-      break;
-    }
-    case 'quills': {
-      for (let a = -2.5; a < -0.6; a += 0.14) {
-        const len = 7 + Math.sin(a * 3) * 2;
-        const pts = [];
-        for (let i = 0; i <= 6; i++) {
-          const f = i / 6;
-          pts.push({
-            x: CX + Math.cos(a) * (r - 2 + f * (len + 2)),
-            y: CX + Math.sin(a) * (r - 2 + f * (len + 2)),
-            r: 1.5 - f * 0.9,
-          });
-        }
-        chain(b, pts, [lo, mid, hi], 'ink');
-      }
-      break;
-    }
-    case 'hump': {
-      blob(b, CX + 1, CX - r + 1, 8, 5, orbShade([lo, mid, hi]), { edge: 'ink' });
-      break;
-    }
-    case 'mane': {
-      // Overlapping locks with NO per-lock contour: eighteen little outlines round a ring
-      // gave a wall of dark speckle that read as stones, not fur. The layer's own outline
-      // pass draws the one edge that matters.
-      for (let a = 0; a < 6.28; a += 0.26) {
-        const wob = 2.4 + Math.sin(a * 3) * 1.3;
-        orb(b, CX + Math.cos(a) * (r + 1), CX + Math.sin(a) * (r + 1), wob,
-          orbShade([lo, mid, hi]));
-      }
-      // a few darker roots, so it has depth rather than being a doughnut
-      for (let a = 0.13; a < 6.28; a += 0.52) {
-        orb(b, CX + Math.cos(a) * (r - 1), CX + Math.sin(a) * (r - 1), 1.6, lo);
-      }
-      break;
-    }
-    case 'gill': {
-      for (const s of [-1, 1]) {
-        for (let i = 0; i < 3; i++) {
-          blob(b, CX + s * (r - 2), CX + 1 + i * 3, 3, 1.2, i % 2 ? 'red2' : 'red1');
-        }
-      }
-      break;
-    }
-    case 'antenna': {
-      for (const s of [-1, 1]) {
-        limb(b, CX + s * 3, CX - r + 3, CX + s * 8, CX - r - 6, 1.1, 0.8, [lo, mid, hi],
-          { edge: 'ink' });
-        orb(b, CX + s * 8, CX - r - 7, 1.8, orbShade([lo, mid, hi]), { edge: 'ink' });
-      }
-      break;
-    }
-    default: break;
+    for (let x = CX - 3; x <= CX + 3; x++) bset(b, x, CY - 5, md);
+  } else if (k === 'plume') {
+    spur(b, CX + 2, CY - 3, CX + 5, CY - R - 2, md, dk);
+    bset(b, CX + 5, CY - R - 3, lt);
+  } else if (k === 'sail') {
+    btri(b, CX - 1, CY - 2, CX + 2, CY - R - 3, CX + 3, CY + 1, md);
+    outlineTri(b, CX - 1, CY - 2, CX + 2, CY - R - 3, CX + 3, CY + 1, dk);
+  } else if (k === 'gill') {
+    for (let i = 0; i < 3; i++) bset(b, CX + 3 + (i & 1), CY - 1 + i, dk);
+  } else if (k === 'antenna') {
+    spur(b, CX - 1, CY - R, CX - 3, CY - R - 3, md, dk);
+    spur(b, CX + 1, CY - R, CX + 3, CY - R - 3, md, dk);
   }
 }
 
-/** Ears, horns and crests: the fastest way to tell two balls apart. */
-function ballEars(b, rc, C) {
-  const r = BALL_R;
-  const lo = C.shade, mid = C.body, hi = C.light;
-  const inner = mix(P.pink, P[mid] || mid, 0.45);
-  const kind = rc.ears || 'none';
-  if (kind === 'none') return;
-  for (const s of [-1, 1]) {
-    // out at the RIM, not on the face. Radius five at eight pixels in gave two balloons
-    // sitting on top of the head and every animal read as the same koala.
-    const bx = CX + s * 9, by = CX - 8;
-    switch (kind) {
-      case 'round':
-        orb(b, bx, by, 3.6, orbShade([lo, mid, hi]), { edge: 'ink' });
-        orb(b, bx, by + 1, 1.6, inner);
-        break;
-      case 'tiny':
-        orb(b, CX + s * 8, CX - 9, 2.6, orbShade([lo, mid, hi]), { edge: 'ink' });
-        bset(b, CX + s * 8, CX - 9, inner);
-        break;
-      case 'pointy':
-        btri(b, CX + s * 4, CX - 9, CX + s * 11, CX - 9, CX + s * 8, CX - 18, 'ink');
-        btri(b, CX + s * 5, CX - 9, CX + s * 10, CX - 9, CX + s * 8, CX - 16, mid);
-        btri(b, CX + s * 6, CX - 10, CX + s * 9, CX - 10, CX + s * 8, CX - 14, inner);
-        break;
-      case 'long':
-        // out and DOWN, not straight up: twelve pixels of vertical ear turned every
-        // long-eared animal into the same rabbit
-        limb(b, CX + s * 7, CX - 7, CX + s * 14, CX - 1, 3, 1.8, [lo, mid, hi], { edge: 'ink' });
-        limb(b, CX + s * 8, CX - 6, CX + s * 12, CX - 2, 1.4, 1, [inner, inner, inner]);
-        break;
-      case 'tuft':
-        for (let i = 0; i < 3; i++) {
-          limb(b, CX + s * (5 + i), CX - 9, CX + s * (7 + i * 2), CX - 16 - i,
-            1.6, 0.8, [lo, mid, hi], { edge: 'ink' });
-        }
-        break;
-      case 'horn': {
-        // A horn sweeps OUT and BACK and it has ridges. Curved gently inward and smooth,
-        // a pale tapering shape at the top of a head is just an ear -- which is exactly
-        // how the goat and the narwhal both came out wearing rabbit ears.
-        const pts = [];
-        for (let i = 0; i <= 9; i++) {
-          const f = i / 9;
-          pts.push({
-            x: CX + s * (5 + f * 9),
-            y: CX - 8 - f * 5 + f * f * 5,
-            r: 3 - f * 2.4,
-          });
-        }
-        chain(b, pts, ['sand', 'bone', 'white'], 'ink');
-        // the ridges, which is what says horn rather than ear
-        for (let i = 2; i <= 7; i += 2) {
-          const p = pts[i];
-          bset(b, p.x, p.y - p.r * 0.6, mix(P.sand, P.ink, 0.45));
-          bset(b, p.x + s, p.y - p.r * 0.2, mix(P.sand, P.ink, 0.3));
-        }
-        break;
-      }
-      case 'antler': {
-        const main = [];
-        for (let i = 0; i <= 8; i++) {
-          const f = i / 8;
-          main.push({ x: CX + s * (5 + f * 7), y: CX - 8 - f * 10, r: 2.2 - f * 1.3 });
-        }
-        chain(b, main, ['wood1', 'wood3', 'sand'], 'ink');
-        for (const k of [0, 1]) {
-          const br = [];
-          for (let i = 0; i <= 4; i++) {
-            const f = i / 4;
-            br.push({
-              x: CX + s * (7 + k * 3 + f * 5),
-              y: CX - 11 - k * 4 - f * 4,
-              r: 1.5 - f * 0.8,
-            });
-          }
-          chain(b, br, ['wood1', 'wood3', 'sand'], 'ink');
-        }
-        break;
-      }
-      case 'crest':
-        // a comb of soft lobes. Five bars of alternating red was a paper crown.
-        if (s < 0) {
-          for (let i = 0; i < 4; i++) {
-            const h = 3 - Math.abs(i - 1.5) * 1.2;
-            orb(b, CX - 4 + i * 2.4, CX - r + 1 - h, 2 + h * 0.5,
-              orbShade(['red0', 'red1', 'red2']), { edge: 'ink' });
-          }
-        }
-        break;
-      case 'fin':
-        if (s < 0) {
-          btri(b, CX - 4, CX - r + 3, CX + 4, CX - r + 3, CX, CX - r - 7, 'ink');
-          btri(b, CX - 3, CX - r + 3, CX + 3, CX - r + 3, CX, CX - r - 5, mid);
-          bline(b, CX, CX - r - 4, CX, CX - r + 3, hi);
-        }
-        break;
-      case 'frill':
-        for (let i = 0; i < 4; i++) {
-          const a = -2.3 + i * 0.3;
-          orb(b, CX + s * Math.abs(Math.cos(a) * (r + 2)), CX + Math.sin(a) * (r + 2), 2.6,
-            orbShade([lo, mid, hi]), { edge: 'ink' });
-        }
-        break;
-      default: break;
-    }
+function outlineTri(b, x0, y0, x1, y1, x2, y2, key) {
+  bline(b, x0, y0, x1, y1, key); bline(b, x1, y1, x2, y2, key); bline(b, x2, y2, x0, y0, key);
+}
+
+/* ----------------------------------------------------------------- the face */
+
+function ballEars(b, rc, C, cy = CY) {
+  const k = rc.ears || 'none';
+  const dk = C.deep, md = C.body, lt = C.light, in_ = mix(C.belly, P.red1, 0.3);
+  const EY = EAR_Y + (cy - CY);
+  const CYb = cy;   // the bobbed body centre: ears ride with the head
+  // TWO PIXELS WIDE. An ear with its own radius-two blob and its own edge comes to five
+  // pixels a side, which is wider than the head it is attached to.
+  const pair = (fn) => { fn(-1); fn(1); };
+  if (k === 'round') {
+    pair((s) => { brect(b, s < 0 ? CX - EAR_X - 1 : CX + EAR_X, EY - 1, 2, 3, md); bset(b, CX + s * EAR_X, EY, in_); });
+  } else if (k === 'tiny') {
+    pair((s) => { bset(b, CX + s * EAR_X, EY, md); bset(b, CX + s * EAR_X, EY + 1, md); });
+  } else if (k === 'pointy') {
+    pair((s) => { bset(b, CX + s * EAR_X, EY + 1, md); bset(b, CX + s * EAR_X, EY, md); bset(b, CX + s * (EAR_X + 1), EY - 1, md); });
+  } else if (k === 'long') {
+    pair((s) => { brect(b, s < 0 ? CX - EAR_X - 1 : CX + EAR_X, EY, 2, 5, md); bset(b, CX + s * EAR_X, EY + 4, dk); });
+  } else if (k === 'tuft') {
+    pair((s) => { bset(b, CX + s, CYb - 4, md); bset(b, CX + s * 2, CYb - 5, lt); });
+  } else if (k === 'horn') {
+    pair((s) => spur(b, CX + s * 2, CYb - 4, CX + s * 4, CYb - 5, C.belly, dk));
+  } else if (k === 'antler') {
+    pair((s) => { spur(b, CX + s * 2, CYb - 4, CX + s * 3, CYb - 6, C.belly, dk); bset(b, CX + s * 5, CYb - 5, C.belly); });
+  } else if (k === 'crest') {
+    const comb = mix(md, P.red2, 0.55);
+    for (let i = -1; i <= 1; i++) { bset(b, CX + i, CYb - 5, comb); bset(b, CX + i * 2, CYb - 6, comb); }
+  } else if (k === 'fin') {
+    btri(b, CX - 2, CYb - 4, CX, CYb - 6, CX + 2, CYb - 4, md);
+    outlineTri(b, CX - 2, CYb - 4, CX, CYb - 6, CX + 2, CYb - 4, dk);
+  } else if (k === 'frill') {
+    pair((s) => { bset(b, CX + s * (EAR_X + 1), EY + 2, md); bset(b, CX + s * (EAR_X + 1), EY + 4, md); });
+  } else if (k === 'spike') {
+    pair((s) => spur(b, CX + s * 2, CYb - 4, CX + s * 3, CYb - 7, mix(md, P.ink, 0.45), dk));
+  }
+}
+
+/** The species feature: everything that changes the head's OUTLINE. Baked with the body. */
+function ballSnout(b, rc, C, cy = CY) {
+  const k = rc.face || 'flat';
+  const dk = C.deep, snout = mix(C.belly, C.body, 0.2);
+  const my = MOUTH_Y + (cy - CY);
+  if (k === 'muzzle') {
+    brect(b, CX - 1, my, 3, 1, snout);
+  } else if (k === 'snout') {
+    brect(b, CX - 2, my, 5, 1, snout);
+    bset(b, CX - 1, my, dk); bset(b, CX + 1, my, dk);
+  } else if (k === 'beak') {
+    btri(b, CX - 2, my - 1, CX + 2, my - 1, CX, my + 2, 'brass2');
+    bset(b, CX - 2, my - 1, 'brass0'); bset(b, CX + 2, my - 1, 'brass0');
+  } else if (k === 'whiskers') {
+    brect(b, CX - 1, my, 3, 1, snout);
+    for (const s of [-1, 1]) bset(b, CX + s * 4, my - 1, dk);
+  } else if (k === 'tusk') {
+    brect(b, CX - 1, my, 3, 1, snout);
+    for (const s of [-1, 1]) bset(b, CX + s * 3, my + 1, 'white');
+  } else if (k === 'mandible') {
+    for (const s of [-1, 1]) bset(b, CX + s * 2, my + 1, dk);
+  } else if (k === 'trunk') {
+    brect(b, CX, my, 1, 3, C.shade);
+    bset(b, CX, my + 3, dk);
+  } else if (k === 'fang') {
+    for (const s of [-1, 1]) bset(b, CX + s * 2, my + 1, 'white');
   }
 }
 
 /**
- * The face: eyes, and one species feature. SMALL.
- *
- * The old muzzle covered the lower third of the ball and every animal looked like it was
- * wearing a mask. Two dot eyes six pixels apart with one pixel of catch light, a two
- * pixel nose, and a feature that pokes out of the silhouette.
+ * The face: eyes, mouth, blush. NOTHING that breaks the silhouette, so this layer needs
+ * no contour of its own -- which is the point, because a contour here lands on the body.
  */
 function ballFace(b, rc, C, mood) {
-  const lo = C.shade, mid = C.body, hi = C.light;
-  const ink = C.eye || 'ink';
-  const style = rc.eyeStyle || 'dot';
-  const blink = mood === 'blink';
+  const dk = C.deep;
   const happy = mood === 'happy';
   const scared = mood === 'scared';
 
-  // --- the species feature, drawn BEFORE the eyes so nothing covers them
-  switch (rc.face) {
-    case 'muzzle':
-      // no ink edge: a lighter region that blends into the ball, plus a nose. Outlined,
-      // it became a little white face floating in the middle of the big one.
-      blob(b, CX, EYE_Y + 4, 4, 2.4, orbShade([mix(P[C.belly], P[lo], 0.25), C.belly, 'white']));
-      bset(b, CX - 1, EYE_Y + 3, ink);
-      bset(b, CX, EYE_Y + 3, ink);
-      bline(b, CX - 2, EYE_Y + 5, CX + 2, EYE_Y + 5, mix(P[lo], P.ink, 0.35));
-      break;
-    case 'snout':
-      blob(b, CX, EYE_Y + 5, 4.5, 2.6, orbShade([mix(P.pink, P.ink, 0.3), 'pink', 'white']));
-      bmir(b, CX, CX - 2, EYE_Y + 5, mix(P.pink, P.ink, 0.6));
-      break;
-    case 'beak':
-      btri(b, CX - 3, EYE_Y + 3, CX + 3, EYE_Y + 3, CX, EYE_Y + 8, 'ink');
-      btri(b, CX - 2, EYE_Y + 3, CX + 2, EYE_Y + 3, CX, EYE_Y + 7, 'amber');
-      bline(b, CX - 1, EYE_Y + 5, CX + 1, EYE_Y + 5, mix(P.amber, P.ink, 0.45));
-      bset(b, CX - 1, EYE_Y + 4, 'gold');
-      break;
-    case 'trunk': {
-      // ONE tapering limb. Nine outlined beads down the middle of a face is a chain, and
-      // every one of those contours cut the trunk into segments of black.
-      limb(b, CX, EYE_Y + 3, CX + 2, EYE_Y + 13, 2.6, 1.2, [lo, mid, hi], { edge: 'ink' });
-      for (let i = 0; i < 4; i++) {
-        bset(b, CX - 1 + Math.round(i * 0.5), EYE_Y + 5 + i * 2, lo);
-        bset(b, CX + 1 + Math.round(i * 0.5), EYE_Y + 5 + i * 2, lo);
-      }
-      break;
-    }
-    case 'tusk':
-      blob(b, CX, EYE_Y + 5, 4, 2.6, orbShade([lo, mid, hi]));
-      for (const s of [-1, 1]) {
-        for (let i = 0; i < 5; i++) {
-          orb(b, CX + s * (3 + i * 0.6), EYE_Y + 6 + i, 1.6 - i * 0.2,
-            orbShade(['bone', 'white', 'white']), { edge: 'ink' });
-        }
-      }
-      break;
-    case 'whiskers':
-      blob(b, CX, EYE_Y + 4, 3.4, 2.2, orbShade([mix(P[C.belly], P[lo], 0.25), C.belly, 'white']));
-      bmir(b, CX, CX - 2, EYE_Y + 3, ink);
-      for (const s of [-1, 1]) {
-        for (let i = 0; i < 3; i++) {
-          bline(b, CX + s * 4, EYE_Y + 3 + i, CX + s * 13, EYE_Y + 1 + i * 3, 'white');
-        }
-      }
-      break;
-    case 'mandible':
-      for (const s of [-1, 1]) {
-        limb(b, CX + s * 3, EYE_Y + 4, CX + s * 8, EYE_Y + 9, 1.6, 0.9,
-          [mix(P[lo], P.ink, 0.3), lo, mid], { edge: 'ink' });
-      }
-      break;
-    case 'flat':
-      bline(b, CX - 4, EYE_Y + 5, CX + 4, EYE_Y + 5, mix(P[lo], P.ink, 0.4));
-      bmir(b, CX, CX - 3, EYE_Y + 3, ink);
-      break;
-    default: break;
+  // --- the mouth
+  if (happy) { bset(b, CX - 1, MOUTH_Y + 1, dk); bset(b, CX + 1, MOUTH_Y + 1, dk); bset(b, CX, MOUTH_Y + 2, dk); }
+  else if (scared) { brect(b, CX, MOUTH_Y + 1, 1, 2, dk); }
+  else { bset(b, CX - 1, MOUTH_Y + 1, dk); bset(b, CX + 1, MOUTH_Y + 1, dk); }
+
+  // --- the eyes.
+  //
+  // TWO PIXELS BY TWO, and it took three tries to accept that. A one-pixel eye is exactly
+  // the weight of the contour, so it reads as a nick in the outline rather than an eye,
+  // and the face vanishes -- worse on a pale animal, where the only dark marks on the
+  // whole sprite are the outline and the legs. Two-by-two with a single catch light is
+  // four art pixels: still a dot eye, and one you can actually see. It costs six of the
+  // nine pixels of body width, and that is correct -- a cute animal at this size is
+  // mostly eyes.
+  const st = rc.eyeStyle || 'dot';
+  const E = C.eye;
+  if (mood === 'blink') {
+    for (const s of [-1, 1]) brect(b, s < 0 ? CX - EYE_DX : CX + EYE_DX - 1, EYE_Y + 1, 2, 1, dk);
+    return;
   }
-
-  // --- the eyes
-  const drawEye = (s) => {
-    const ex = CX + (s < 0 ? -EYE_DX - 1 : EYE_DX);
-    if (blink) { brect(b, ex, EYE_Y + 1, 2, 1, ink); return; }
-    if (happy) {
-      bset(b, ex, EYE_Y + 1, ink);
-      bset(b, ex + 1, EYE_Y, ink);
-      bset(b, ex + (s < 0 ? 2 : -1), EYE_Y + 1, ink);
-      return;
-    }
-    const tall = scared || style === 'wide' ? 3 : 2;
-    brect(b, ex, EYE_Y, 2, tall, ink);
-    bset(b, ex, EYE_Y, 'white');                       // catch light, always upper-left
-    if (tall > 2) bset(b, ex + 1, EYE_Y + 2, mix(P.white, P.ink, 0.4));
-    if (style === 'sleepy') { brect(b, ex - 1, EYE_Y - 1, 4, 1, lo); bset(b, ex, EYE_Y, ink); }
-    if (style === 'angry') brect(b, ex - (s < 0 ? 1 : 0), EYE_Y - 2, 3, 1, mix(P[lo], P.ink, 0.5));
-    if (style === 'sparkle') {
-      bset(b, ex + (s < 0 ? -1 : 2), EYE_Y - 1, 'white');
-      bset(b, ex + (s < 0 ? -2 : 3), EYE_Y, 'gold');
-    }
-    if (style === 'goggle') {
-      for (let a = 0; a < 6.28; a += 0.5) {
-        bset(b, ex + 0.5 + Math.cos(a) * 3, EYE_Y + 0.5 + Math.sin(a) * 3, mix(P[lo], P.ink, 0.3));
-      }
-    }
-  };
-  drawEye(-1); drawEye(1);
-
-  // blush, and a mouth for the moods that want one
   for (const s of [-1, 1]) {
-    bset(b, CX + s * (EYE_DX + 4), EYE_Y + 2, mix(P.pink, P[mid] || mid, 0.25));
+    const x0 = s < 0 ? CX - EYE_DX : CX + EYE_DX - 1;   // left column of this eye
+    if (st === 'sleepy') { brect(b, x0, EYE_Y + 1, 2, 1, E); continue; }
+    brect(b, x0, EYE_Y, 2, 2, E);
+    // the catch light goes in the corner nearest the key light, up and to the left
+    bset(b, x0, EYE_Y, st === 'sparkle' ? 'white' : mix(P.white, P[E] || E, 0.15));
+    if (st === 'goggle') { bset(b, x0 + 1, EYE_Y, 'ice'); bset(b, x0, EYE_Y + 1, 'ice'); }
+    if (st === 'angry') bset(b, s < 0 ? CX - EYE_DX - 1 : CX + EYE_DX, EYE_Y - 1, dk);
+    if (st === 'wide') bset(b, x0 + 1, EYE_Y + 1, mix(P.white, P[E] || E, 0.35));
   }
-  if (happy && rc.face !== 'beak' && rc.face !== 'trunk') {
-    bset(b, CX - 2, EYE_Y + 7, ink);
-    brect(b, CX - 1, EYE_Y + 8, 2, 1, ink);
-    bset(b, CX + 2, EYE_Y + 7, ink);
-  }
-  if (scared) brect(b, CX - 1, EYE_Y + 7, 3, 2, ink);
+  if (scared) for (const s of [-1, 1]) bset(b, CX + s * EYE_DX, EYE_Y - 2, dk);
+  if (happy) for (const s of [-1, 1]) bset(b, CX + s * 4, EYE_Y + 1, mix(P.red1, C.body, 0.5));
 }
 
-/* ------------------------------------------------------------------- baking */
+/* ------------------------------------------------------------------- bakes */
 
 const backCache = new Map();
 const bodyCache = new Map();
@@ -587,86 +402,73 @@ const faceCache = new Map();
 const iconCache = new Map();
 const CACHE_CAP = 900;
 
-function tintKey(o) {
-  return o && o.tint ? `${o.tint}:${Math.round((o.tintAmt || 0.4) * 10)}` : '-';
-}
+function tintKey(o) { return (o && o.tint) ? o.tint + ':' + (o.tintAmt || 0.4) : ''; }
 
-function bakeLayer(w, h, paint, o = {}) {
-  const mk = makeCanvas(w, h);
-  if (!mk) return null;
-  const buf = makeBuf(w, h);
-  paint(buf);
-  outline(buf, 'ink', o);
-  flush(buf, mk.g);
-  return mk.canvas;
+/**
+ * Bake one layer. `paint` fills a 16x16 art buffer; the buffer is outlined and flushed at
+ * 2x onto a 32x32 canvas.
+ */
+function bakeLayer(paint, o = {}) {
+  const b = makeBuf(A, A);
+  paint(b);
+  if (!o.noOutline) outline(b, 'ink', o.outline || {});
+  const c = makeCanvas(SPRITE_SIZE, SPRITE_SIZE);
+  flush(b, c.g, 0, 0, S);
+  return { canvas: c.canvas, buf: b };
 }
 
 function bakeBody(rc, phase, o) {
   const C = tones(rc, o);
-  return bakeLayer(SPRITE_SIZE, SPRITE_SIZE, (buf) => ballBody(buf, rc, C, phase));
+  return bakeLayer((b) => ballBody(b, rc, C, phase)).canvas;
 }
 
 function bakeBack(rc, o) {
-  if (!rc.extra || rc.extra === 'none') return null;
   const C = tones(rc, o);
-  return bakeLayer(SPRITE_SIZE, SPRITE_SIZE, (buf) => backFeatures(buf, rc, C));
+  if ((rc.extra || 'none') === 'none') return null;
+  return bakeLayer((b) => backFeatures(b, rc, C)).canvas;
 }
 
 function bakeFace(rc, mood, o) {
   const C = tones(rc, o);
-  return bakeLayer(SPRITE_SIZE, SPRITE_SIZE, (buf) => {
-    ballEars(buf, rc, C);
-    ballFace(buf, rc, C, mood);
-  }, { outside: { cx: CX, cy: CX, r: BALL_R } });
+  // No contour on this layer. Everything in it is inside the body's silhouette, so an
+  // outline here could only ever draw a ring round an eye -- onto the head underneath.
+  return bakeLayer((b) => ballFace(b, rc, C, mood), { noOutline: true }).canvas;
 }
 
-/** One complete still, for tools and tests. */
 export function bakeAnimal(recipe, opts = {}) {
   const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
-  const mk = makeCanvas(SPRITE_SIZE, SPRITE_SIZE);
-  if (!mk) return null;
-  const back = bakeBack(rc, opts), body = bakeBody(rc, 0, opts), fc = bakeFace(rc, 'idle', opts);
-  if (back) mk.g.drawImage(back, 0, 0);
-  if (body) mk.g.drawImage(body, 0, 0);
-  if (fc) mk.g.drawImage(fc, 0, 0);
-  return mk.canvas;
+  return {
+    back: bakeBack(rc, opts),
+    body: bakeBody(rc, 0, opts),
+    face: bakeFace(rc, opts.mood || 'idle', opts),
+  };
 }
 
 function recipeOf(animal) {
-  return Object.assign({}, DEFAULT_RECIPE, (animal && animal.sprite) || {});
+  return Object.assign({}, DEFAULT_RECIPE, (animal && (animal.sprite || animal)) || {});
+}
+
+function fromCache(cache, key, make) {
+  let v = cache.get(key);
+  if (v === undefined) {
+    v = make();
+    if (cache.size > CACHE_CAP) cache.clear();
+    cache.set(key, v);
+  }
+  return v;
 }
 
 function cachedBack(animal, o) {
-  const k = `${animal && animal.id}/${tintKey(o)}`;
-  let hit = backCache.get(k);
-  if (hit === undefined) {
-    hit = bakeBack(recipeOf(animal), o);
-    if (backCache.size > CACHE_CAP) backCache.clear();
-    backCache.set(k, hit);
-  }
-  return hit;
+  const id = (animal && animal.id) || 'x';
+  return fromCache(backCache, id + '|' + tintKey(o), () => bakeBack(recipeOf(animal), o));
 }
-
 function cachedBody(animal, phase, o) {
-  const k = `${animal && animal.id}/${phase}/${tintKey(o)}`;
-  let hit = bodyCache.get(k);
-  if (hit === undefined) {
-    hit = bakeBody(recipeOf(animal), phase, o);
-    if (bodyCache.size > CACHE_CAP) bodyCache.clear();
-    bodyCache.set(k, hit);
-  }
-  return hit;
+  const id = (animal && animal.id) || 'x';
+  return fromCache(bodyCache, id + '|' + phase + '|' + tintKey(o), () => bakeBody(recipeOf(animal), phase, o));
 }
-
 function cachedFace(animal, mood, o) {
-  const k = `${animal && animal.id}/${mood}/${tintKey(o)}`;
-  let hit = faceCache.get(k);
-  if (hit === undefined) {
-    hit = bakeFace(recipeOf(animal), mood, o);
-    if (faceCache.size > CACHE_CAP) faceCache.clear();
-    faceCache.set(k, hit);
-  }
-  return hit;
+  const id = (animal && animal.id) || 'x';
+  return fromCache(faceCache, id + '|' + mood + '|' + tintKey(o), () => bakeFace(recipeOf(animal), mood, o));
 }
 
 export function getAnimalSprite(animal, o = {}) {
@@ -687,46 +489,57 @@ export function spriteCacheSize() {
 
 /* ------------------------------------------------------------------ drawing */
 
+/** Which of the four walk frames? `step` is explicit, `walk` is a 0..1 cycle. */
+export function walkPhase(opts) {
+  if (opts.step !== undefined) return ((opts.step | 0) % PHASES + PHASES) % PHASES;
+  if (opts.walk !== undefined) return Math.floor(((opts.walk % 1) + 1) % 1 * PHASES) % PHASES;
+  if (opts.roll !== undefined) {
+    return ((Math.round((opts.roll / (Math.PI * 2)) * PHASES) % PHASES) + PHASES) % PHASES;
+  }
+  return 0;
+}
+
 /**
  * drawAnimal(g, animal, sx, sy, opts)
- *   sx, sy   the CENTRE of the ball
- *   opts     { scale, roll, squash, mood, blink, flip, alpha, wet, rain, t }
+ *   sx, sy   the CENTRE of the body
+ *   opts     { scale, walk, step, squash, mood, blink, flip, alpha, wet, rain, t }
  *
- * Three blits. `roll` picks the baked rotation, `squash` is applied area-preserving --
- * a flattening ball must also widen, or it reads as shrinking rather than as landing.
+ * Three blits. The body layer already holds the bob and the planted feet; the back and
+ * face layers get the bob applied here so they ride with it.
  */
 export function drawAnimal(g, animal, sx, sy, opts = {}) {
   const sc = Math.max(1, Math.round(opts.scale || 1));
-  const S = SPRITE_SIZE * sc;
-  const phase = opts.roll !== undefined
-    ? ((Math.round((opts.roll / (Math.PI * 2)) * PHASES) % PHASES) + PHASES) % PHASES
-    : 0;
+  const SZ = SPRITE_SIZE * sc;
+  const phase = walkPhase(opts);
   const mood = opts.mood || (opts.blink ? 'blink' : 'idle');
   const back = cachedBack(animal, opts);
   const body = cachedBody(animal, phase, opts);
   const face = cachedFace(animal, mood, opts);
   if (!body && !face) return;
 
+  // A flattening ball must also widen, or it reads as shrinking rather than as landing.
   const q = opts.squash ? Math.max(0, Math.min(0.5, opts.squash)) : 0;
-  const dw = Math.round(S * (1 + q * 0.55));
-  const dh = Math.round(S * (1 - q * 0.55));
+  const dw = Math.round(SZ * (1 + q * 0.55));
+  const dh = Math.round(SZ * (1 - q * 0.55));
+  // the sprite's body centre sits at art row CY of 16, so anchor on that, not on the box
   const dx = Math.round(sx - dw / 2);
-  const dy = Math.round(sy - dh / 2 + (S - dh) / 2);
+  const dy = Math.round(sy - (dh * (CY + 0.5)) / A);
+  const bob = BOB[phase] * S * sc;
 
   const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
+  const put = (c, oy) => c && g.drawImage(c, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, oy, dw, dh);
   if (opts.flip) {
     g.save();
     g.translate(dx + dw, dy);
     g.scale(-1, 1);
-    if (back) g.drawImage(back, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
-    if (body) g.drawImage(body, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
-    if (face) g.drawImage(face, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, dw, dh);
+    put(back, bob); put(body, 0); put(face, bob);
     g.restore();
   } else {
-    if (back) g.drawImage(back, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
-    if (body) g.drawImage(body, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
-    if (face) g.drawImage(face, 0, 0, SPRITE_SIZE, SPRITE_SIZE, dx, dy, dw, dh);
+    g.save();
+    g.translate(dx, dy);
+    put(back, bob); put(body, 0); put(face, bob);
+    g.restore();
   }
   g.globalAlpha = prevA;
 
@@ -737,20 +550,19 @@ export function drawAnimal(g, animal, sx, sy, opts = {}) {
 /** A wet animal: a sheen along the top and one to three drips off the bottom. */
 function drawWet(g, sx, sy, sc, amt, t) {
   const a = clamp(amt, 0, 1);
-  const r = BALL_R * sc;
+  const r = R * S * sc;
   for (let i = 0; i < 3; i++) {
-    const ax = sx - r * 0.5 + i * r * 0.4;
-    rect(g, ax, sy - r * 0.72 + i * sc, sc * 2, sc, 'foam');
+    rect(g, sx - r * 0.5 + i * r * 0.4, sy - r * 0.72 + i * sc, sc * 2, sc * 2, 'foam');
   }
   const n = 1 + Math.round(a * 2);
   for (let i = 0; i < n; i++) {
     const seed = (sx * 3 + sy * 7 + i * 31) % 17;
     const k = ((t * (0.7 + i * 0.2) + seed * 0.13) % 1);
     const ox = ((seed % 5) - 2) * 3 * sc;
-    rect(g, sx + ox, sy + r * 0.7 + k * r * 0.8, sc, sc * 2, 'water3');
+    rect(g, sx + ox, sy + r * 0.7 + k * r * 0.8, sc * 2, sc * 2, 'water3');
     if (k > 0.85) {
-      rect(g, sx + ox - sc * 2, sy + r * 1.5, sc, sc, 'foam');
-      rect(g, sx + ox + sc * 2, sy + r * 1.5, sc, sc, 'foam');
+      rect(g, sx + ox - sc * 3, sy + r * 1.4, sc * 2, sc, 'foam');
+      rect(g, sx + ox + sc * 3, sy + r * 1.4, sc * 2, sc, 'foam');
     }
   }
 }
@@ -758,80 +570,73 @@ function drawWet(g, sx, sy, sc, amt, t) {
 /** Rain hitting an animal: a few bright ticks and a splash ring. */
 function drawRainHit(g, sx, sy, sc, amt, t) {
   const n = Math.round(2 + clamp(amt, 0, 1) * 3);
+  const r = R * S * sc;
   for (let i = 0; i < n; i++) {
-    const seed = (i * 41 + Math.floor(t * 6)) % 23;
-    const ox = ((seed % 7) - 3) * 3 * sc;
-    const oy = ((seed % 5) - 2) * 3 * sc;
-    rect(g, sx + ox, sy + oy, sc, sc, 'foam');
-    if (seed % 3 === 0) rect(g, sx + ox, sy + oy - sc, sc, sc, 'white');
+    const seed = (sx * 5 + sy * 3 + i * 47) % 23;
+    const k = ((t * 2.2 + seed * 0.09) % 1);
+    const ox = ((seed % 7) - 3) * 2 * sc;
+    rect(g, sx + ox, sy - r + k * r * 1.6, sc, sc * 3, 'ice');
+    if (k > 0.9) rect(g, sx + ox - sc, sy + r * 0.9, sc * 3, sc, 'foam');
   }
 }
 
-/** The shadow an animal casts. Not part of the sprite: it belongs to the ground. */
-export function drawAnimalShadow(g, sx, sy, sc, opts = {}) {
-  const r = BALL_R * Math.max(1, sc);
-  const a = opts.alpha !== undefined ? opts.alpha : 0.3;
-  ellipse(g, Math.round(sx), Math.round(sy), Math.round(r * 0.9), Math.round(r * 0.3), 'ink');
-  wash(g, sx - r, sy - 2, r * 2, 4, 'ink', a * 0.4);
+/** The contact shadow. An animal without one is a sticker. */
+export function drawAnimalShadow(g, sx, sy, sc = 1, opts = {}) {
+  const r = R * S * sc;
+  const k = opts.lift ? clamp(1 - opts.lift, 0.35, 1) : 1;
+  ellipse(g, sx, sy + r * 0.92, r * 0.82 * k, r * 0.3 * k, opts.color || 'shadow');
 }
 
-/* -------------------------------------------------------------------- icons
+/* -------------------------------------------------------------------- icons */
 
-A passport photo: the top half of the ball with the ears and the eyes, at whatever size
-the caller wants. Used in lists where a 32px sprite is too big.
-*/
+/**
+ * The icon IS the art buffer at 1x. That is the whole trick of authoring at half
+ * resolution: a 16-pixel icon and a 32-pixel sprite are the same drawing, so a roster
+ * list and the field can never disagree about what an animal looks like.
+ */
+/**
+ * Undo the contour where it crossed the face.
+ *
+ * The sprite avoids this by outlining the face layer with an `outside` circle, but the
+ * icon is one flat buffer, so it has to be cleaned up afterwards: a one-pass outline over
+ * a whole figure draws ink round both eyes and the muzzle, and at sixteen pixels those
+ * rings are the animal.
+ */
+function scrubFace(b) {
+  for (let y = EYE_Y - 1; y <= MOUTH_Y + 1; y++) {
+    for (let x = CX - 3; x <= CX + 3; x++) {
+      const d = (x - CX) * (x - CX) + (y - CY) * (y - CY);
+      if (d < (R - 0.5) * (R - 0.5) && bget(b, x, y) === 'ink') bset(b, x, y, null);
+    }
+  }
+}
 
 export function bakeIcon(recipe, size = ICON_SIZE) {
   const rc = Object.assign({}, DEFAULT_RECIPE, recipe || {});
   const C = tones(rc, {});
-  const mk = makeCanvas(size, size);
-  if (!mk) return null;
-  const buf = makeBuf(size, size);
-  const c = size / 2;
-  const r = size * 0.42;
-  orb(buf, c, c + 1, r, orbShade(ramp(C), { bounce: 0.5 }));
-  // one mark of the pattern, so a patterned animal is still recognisable at 16px
-  if (rc.pattern && rc.pattern !== 'none') {
-    blob(buf, c - r * 0.4, c - r * 0.2, r * 0.35, r * 0.28, C.pat);
-  }
-  // ears, in whatever the recipe says, simplified to a bump
-  if (rc.ears && rc.ears !== 'none') {
-    for (const s of [-1, 1]) {
-      orb(buf, c + s * r * 0.7, c - r * 0.7, r * 0.3, orbShade([C.shade, C.body, C.light]),
-        { edge: 'ink' });
-    }
-  }
-  const ey = Math.round(c + 1);
-  for (const s of [-1, 1]) {
-    bset(buf, Math.round(c + s * 2.2 - (s < 0 ? 1 : 0)), ey, C.eye || 'ink');
-    bset(buf, Math.round(c + s * 2.2 - (s < 0 ? 1 : 0)), ey + 1, C.eye || 'ink');
-  }
-  outline(buf, 'ink');
-  flush(buf, mk.g);
-  return { canvas: mk.canvas, cx: c, cy: c, size };
+  const b = makeBuf(A, A);
+  backFeatures(b, rc, C);
+  ballBody(b, rc, C, 0);            // body, ears and snout all in one
+  outline(b, 'ink', {});
+  scrubFace(b);                     // the contour crossed the face; take it back out
+  ballFace(b, rc, C, 'idle');       // eyes last, over the top, never outlined
+  const s = Math.max(1, Math.round(size / A));
+  const c = makeCanvas(A * s, A * s);
+  flush(b, c.g, 0, 0, s);
+  return c.canvas;
 }
 
 export function getAnimalIcon(animal, size = ICON_SIZE) {
-  const k = `${animal && animal.id}/${size}`;
-  let hit = iconCache.get(k);
-  if (hit === undefined) {
-    hit = bakeIcon(recipeOf(animal), size);
-    if (iconCache.size > CACHE_CAP) iconCache.clear();
-    iconCache.set(k, hit);
-  }
-  return hit;
+  const id = (animal && animal.id) || 'x';
+  return fromCache(iconCache, id + '|' + size, () => bakeIcon(recipeOf(animal), size));
 }
 
 export function drawAnimalIcon(g, animal, sx, sy, opts = {}) {
   const size = opts.size || ICON_SIZE;
-  const ic = getAnimalIcon(animal, size);
-  if (!ic || !ic.canvas) return;
-  const sc = Math.max(1, Math.round(opts.scale || 1));
-  const prev = g.globalAlpha;
+  const c = getAnimalIcon(animal, size);
+  if (!c) return;
+  const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
-  g.drawImage(ic.canvas, 0, 0, size, size,
-    Math.round(sx - ic.cx * sc), Math.round(sy - ic.cy * sc), size * sc, size * sc);
-  g.globalAlpha = prev;
+  g.drawImage(c, Math.round(sx - size / 2), Math.round(sy - size / 2));
+  g.globalAlpha = prevA;
 }
-
-void col; void px; void bline; void bmir;

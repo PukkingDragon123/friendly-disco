@@ -157,13 +157,21 @@ switch (which) {
             text(g, id.toUpperCase(), x, 506, 'brass3', { font: 7, center: true });
           });
         } else {
-          which.forEach((id, i) => {
+          // Each animal gets its four walk frames in a row: a sprite that only reads
+          // standing still is not finished, because the field is animals walking.
+          which.slice(0, 4).forEach((id, i) => {
             const a = A.ANIMAL_BY_ID[id];
             if (!a) return;
-            const x = 80 + (i % 3) * 300, y = 130 + Math.floor(i / 3) * 250;
-            rect(g, x - 74, y - 84, 290, 240, i % 2 ? 'leaf2' : 'sand');
-            S.drawAnimal(g, a, x + 60, y + 20, { scale: 6 });
-            text(g, a.name.toUpperCase(), x + 60, y + 130, 'brass3', { font: 5, center: true });
+            const y = 78 + i * 118;
+            rect(g, 0, y - 62, SW, 116, i % 2 ? 'leaf2' : 'sand');
+            text(g, a.name.toUpperCase(), 10, y - 56, 'brass3', { font: 5 });
+            for (let f = 0; f < 4; f++) {
+              const x = 150 + f * 160;
+              S.drawAnimalShadow(g, x, y + 44, 4);
+              S.drawAnimal(g, a, x, y, { scale: 4, step: f });
+            }
+            S.drawAnimal(g, a, 790, y, { scale: 4, mood: 'happy' });
+            S.drawAnimal(g, a, 890, y, { scale: 4, mood: 'scared' });
           });
         }
       },

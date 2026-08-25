@@ -26,7 +26,9 @@ import * as UI from '../render/uikit.js';
 import { drawAnimal, drawAnimalShadow, drawAnimalIcon } from '../render/sprites.js';
 import { drawFolk, drawWand } from '../render/folk.js';
 import { drawDoll, drawMonster, drawStrike, DOLL_W } from '../render/dollart.js';
-import { TILE, T, drawTile, drawProp, drawScatter, walkable, PROP_HEIGHT } from '../render/tiles.js';
+import {
+  TILE, T, drawTile, drawProp, drawScatter, drawPatches, walkable, PROP_HEIGHT,
+} from '../render/tiles.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { abilityOf } from '../data/abilities.js';
 import { DOLL_BY_ID } from '../data/dolls.js';
@@ -77,7 +79,12 @@ export function makeIslandScene() {
         drawTile(g, c * TILE, off + r * TILE, k, island.biome, f.vari[r * COLS + c]);
       }
     }
-    // scatter over the bare floor, before the props stand on it
+    // broad tonal patches first, then the small stuff on top of them
+    const open = (c, r) => {
+      const k = f.grid[r * COLS + c];
+      return k === T.GRASS || k === T.SAND || k === T.MUD;
+    };
+    drawPatches(g, 0, off, COLS, ROWS, island.biome, open);
     drawScatter(g, 0, off, COLS, ROWS, island.biome,
       (c, r) => walkable(f.grid[r * COLS + c]) && f.grid[r * COLS + c] !== T.DECK);
     for (let r = 0; r < ROWS; r++) {
@@ -479,15 +486,15 @@ export function makeIslandScene() {
       const id = apples[i];
       const it = id && ITEM_BY_ID[id];
       const on = it && f.sel && f.sel.kind === 'apple' && f.sel.id === id;
-      rect(g, r0.x, r0.y, r0.w, r0.h, on ? mix(P.red1, P.ink, 0.4) : it ? 'wood1' : 'wood0');
-      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? 'red2' : it ? 'wood0' : 'shadow');
+      rect(g, r0.x, r0.y, r0.w, r0.h, on ? mix(P.red1, P.ink, 0.4) : it ? 'wood1' : mix(P.wood0, P.wood1, 0.5));
+      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? 'red2' : it ? 'wood0' : 'wood0');
       if (it) {
         disc(g, r0.x + 21, r0.y + 15, 8, it.color || 'red2');
         rect(g, r0.x + 20, r0.y + 5, 2, 4, 'leaf1');
         text(g, it.short, r0.x + 21, r0.y + 27, 'cream', { font: 3, center: true });
         appleRects.push({ rect: r0, id });
       } else {
-        text(g, '-', r0.x + 21, r0.y + 14, 'shadow', { font: 5, center: true });
+        text(g, 'EMPTY', r0.x + 21, r0.y + 16, 'wood2', { font: 3, center: true });
       }
     }
 

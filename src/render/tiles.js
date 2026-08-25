@@ -328,7 +328,52 @@ export function drawProp(g, x, y, kind, biome, v) {
  * `ok(c, r)` is asked whether a tile will take detail, so nothing lands in the water or on
  * top of a rock.
  */
-export function drawScatter(g, ox, oy, cols, rows, biome, ok, n = 260) {
+/**
+ * Broad tonal patches under the scatter.
+ *
+ * A floor whose only variation is per-tile reads flat however good the tile is, because
+ * every part of it has the same average colour. Big soft areas give the eye something to
+ * travel across.
+ *
+ * Masked PER TILE, not per row. The first version tested only the leftmost tile of each
+ * row and skipped the whole row if it was blocked, so two patches of eighteen survived and
+ * both came out as rectangles. This is a bake, so walking every tile costs nothing.
+ */
+export function drawPatches(g, ox, oy, cols, rows, biome, ok) {
+  const G = groundOf(biome);
+  const tones = [
+    mix(P[G.turf[0]], P[G.turf[1]], 0.5),
+    mix(P[G.turf[2]], P[G.turf[1]], 0.55),
+    mix(P[G.mud[1]], P[G.turf[1]], 0.72),
+  ];
+  for (let i = 0; i < 26; i++) {
+    const h = tileHash(i, 5501, 3);
+    const cx = h % (cols * TILE);
+    const cy = (h >> 11) % (rows * TILE);
+    const rx = 22 + (h >> 3) % 62, ry = 12 + (h >> 7) % 30;
+    const tone = tones[(h >> 5) % tones.length];
+    for (let y = -ry; y <= ry; y += 4) {
+      const t2 = y / ry;
+      const w = Math.round(rx * Math.sqrt(Math.max(0, 1 - t2 * t2)));
+      if (w < 6) continue;
+      const yy = cy + y;
+      if (yy < 0 || yy >= rows * TILE) continue;
+      const rr = (yy / TILE) | 0;
+      // walk the span in tile-sized runs and skip the tiles that will not take it
+      let x = cx - w;
+      while (x < cx + w) {
+        const c = (x / TILE) | 0;
+        const next = Math.min(cx + w, (c + 1) * TILE);
+        if (c >= 0 && c < cols && (!ok || ok(c, rr))) {
+          rect(g, ox + x, oy + yy, next - x, 4, tone);
+        }
+        x = next;
+      }
+    }
+  }
+}
+
+export function drawScatter(g, ox, oy, cols, rows, biome, ok, n = 340) {
   const G = groundOf(biome);
   const accent = [G.turf[0], G.turf[2], G.mud[1]];
   for (let i = 0; i < n; i++) {

@@ -17,7 +17,7 @@
 import { P, col, mix } from '../core/palette.js';
 import { makeCanvas, rect, px, line, disc, ellipse, tri, wash, clamp } from '../core/pixel.js';
 import {
-  makeBuf, bset, brect, bline, btri, orb, blob, limb, orbShade, outline, flush,
+  makeBuf, bset, bget, brect, bline, btri, orb, blob, limb, orbShade, outline, flush,
 } from './pixbuf.js';
 
 const H2 = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
@@ -113,99 +113,217 @@ export function drawIslandFar(g, island, x, y, w, h, t = 0, o = {}) {
 
 /* --------------------------------------------------------------- stamps
 
-Scenery items are painted into a small pixbuf, OUTLINED, and blitted onto the backdrop.
-That gets every tree and rock its own dark contour -- the thing that makes a piece of
-scenery read as an object rather than as a smudge of a similar colour -- without
-outlining the sky and the sea along with it.
+Scenery items are painted into a small pixbuf at HALF RESOLUTION, outlined, and blitted at
+2x. Same treatment as the animals and the cast, for the same two reasons: every tree and
+rock gets a two-pixel dark contour, which is what makes a piece of scenery read as an
+object rather than as a smudge of a similar colour, and no detail can be finer than a 2x2
+block, which forces each thing to be a SHAPE.
+
+The shape is the whole problem. The first pass built every tree from overlapping shaded
+spheres, and five spheres of one colour with one outline round the lot is an ellipse on a
+stick -- a lollipop. A tree reads because its silhouette is LUMPY and because the canopy
+has a lit top and a dark underside. Both of those are now explicit.
 */
 
+/**
+ * Paint into a half-size buffer and blit it at 2x.
+ *
+ * `w` and `h` are SCREEN pixels; `paint` receives the buffer and its own half-space
+ * dimensions, so everything inside is authored in art pixels.
+ */
 function stamp(g, x, y, w, h, paint) {
-  const buf = makeBuf(w, h);
-  paint(buf);
+  const bw = Math.max(1, Math.ceil(w / 2)), bh = Math.max(1, Math.ceil(h / 2));
+  const buf = makeBuf(bw, bh);
+  paint(buf, bw, bh);
   outline(buf, 'ink');
-  flush(buf, g, Math.round(x), Math.round(y));
+  flush(buf, g, Math.round(x), Math.round(y), 2);
+}
+
+/** Three tones off a fake normal — the same shader the sprites use, for the same reason. */
+function shade3(ramp) {
+  const dk = ramp[0], md = ramp[1], lt = ramp[2] || ramp[1];
+  return (nx, ny) => {
+    const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));
+    const lam = nx * -0.52 + ny * -0.66 + nz * 0.54;
+    return lam > 0.55 ? lt : lam > -0.1 ? md : dk;
+  };
+}
+
+/** A shaded disc in half-space, shaded as part of a bigger mass centred on (mx,my). */
+function clump(b, cx, cy, r, mx, my, mr, sh) {
+  for (let y = -Math.ceil(r); y <= Math.ceil(r); y++) {
+    for (let x = -Math.ceil(r); x <= Math.ceil(r); x++) {
+      if (x * x + y * y > r * r) continue;
+      // the normal comes from the position within the WHOLE mass, not within this disc:
+      // shading each disc separately is what made a canopy look like a pile of balls
+      bset(b, cx + x, cy + y, sh((cx + x - mx) / mr, (cy + y - my) / mr));
+    }
+  }
 }
 
 /**
- * A tree: a tapering trunk with bark, then overlapping canopy orbs with a lit crown and
- * a shadowed underside. A stick with an ellipse on top is a lollipop; what makes a tree
- * is the canopy having a TOP and a BOTTOM.
+ * A canopy: one lumpy mass, lit as a single form, with notches cut out of its rim.
+ *
+ * The notches are the trick. Without them the union of five discs is a smooth blob and the
+ * contour pass wraps it into an ellipse; three or four single-pixel bites out of the edge
+ * and the same mass reads as foliage.
  */
+function canopy(b, cx, cy, r, ramp, seed = 0) {
+  const sh = shade3(ramp);
+  const pts = [
+    [0, 0, 1.0], [-r * 0.78, r * 0.3, 0.76], [r * 0.78, r * 0.28, 0.76],
+    [-r * 0.42, -r * 0.62, 0.62], [r * 0.46, -r * 0.56, 0.6],
+  ];
+  for (const [dx, dy, s] of pts) clump(b, Math.round(cx + dx), Math.round(cy + dy), r * s, cx, cy, r * 1.6, sh);
+  // notches, at fixed angles off the seed so a stand of trees is not five identical trees
+  for (let i = 0; i < 4; i++) {
+    const a = ((seed * 37 + i * 91) % 360) * Math.PI / 180;
+    const bx = Math.round(cx + Math.cos(a) * r * 1.5), by = Math.round(cy + Math.sin(a) * r * 1.1);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) bset(b, bx + dx, by + dy, null);
+  }
+  // and one bright row along the crown, so the mass has a top
+  for (let i = -Math.round(r * 0.7); i <= Math.round(r * 0.4); i++) {
+    bset(b, cx + i, Math.round(cy - r * 0.95 + Math.abs(i) * 0.35), ramp[ramp.length - 1]);
+  }
+}
+
+/** A trunk: flared at the foot, two-toned, with roots. A straight bar is a post. */
+function trunk(b, cx, by, h, w, lean = 0) {
+  for (let i = 0; i < h; i++) {
+    const f = i / Math.max(1, h);
+    const ww = Math.max(2, Math.round(w * (1 + (1 - f) * 0.7)));
+    const x0 = cx - (ww >> 1) + Math.round(lean * f * f);
+    brect(b, x0, by - i, ww, 1, 'bark');
+    bset(b, x0, by - i, 'wood2');
+    if (i % 4 === 2) bset(b, x0 + ww - 1, by - i, 'wood0');
+  }
+  brect(b, cx - w - 1, by, 2, 1, 'bark');
+  brect(b, cx + w, by, 2, 1, 'bark');
+}
+
 function treeStamp(g, x, base, th, tw, ramp, o = {}) {
-  const w = Math.round(tw * 2 + 6), h = Math.round(th + tw + 8);
-  const cx = Math.round(w / 2), by = h - 3;
-  stamp(g, x - cx, base - by, w, h, (b) => {
-    const trunkW = Math.max(2, Math.round(tw * 0.22));
-    for (let i = 0; i < th; i++) {
-      const f = i / th;
-      const ww = Math.max(2, Math.round(trunkW * (1 - f * 0.35)));
-      const lean = Math.round((o.lean || 0) * f * f);
-      brect(b, cx - Math.floor(ww / 2) + lean, by - i, ww, 1, 'bark');
-      bset(b, cx - Math.floor(ww / 2) + lean, by - i, 'wood2');
-      if (i % 5 === 0) bset(b, cx + Math.ceil(ww / 2) - 1 + lean, by - i, 'wood0');
-    }
-    // roots
-    bset(b, cx - trunkW, by, 'bark'); bset(b, cx + trunkW, by, 'bark');
-    const topY = by - th;
-    const lobes = o.lobes || 5;
-    for (let i = 0; i < lobes; i++) {
-      const a = -Math.PI / 2 + (i - (lobes - 1) / 2) * (1.9 / lobes);
-      const d = tw * (i === Math.floor(lobes / 2) ? 0.2 : 0.62);
-      orb(b, cx + Math.cos(a) * d + (o.lean || 0), topY + Math.sin(a) * d * 0.5,
-        tw * (0.5 + (i % 2) * 0.12), orbShade(ramp));
-    }
-    // the sun on the crown, and the shade under the skirt
-    for (let i = 0; i < Math.round(tw); i++) {
-      bset(b, cx - tw * 0.5 + i + (o.lean || 0), topY - tw * 0.5 + Math.abs(i - tw * 0.5) * 0.3,
-        ramp[ramp.length - 1]);
-    }
+  const W = Math.round(tw * 2.6 + 12), H = Math.round(th + tw * 1.4 + 14);
+  stamp(g, x - W / 2, base - H + 4, W, H, (b, bw, bh) => {
+    const cx = bw >> 1, by = bh - 2;
+    const hh = Math.round(th / 2), hr = Math.max(3, Math.round(tw / 2));
+    trunk(b, cx, by, hh, Math.max(1, Math.round(tw * 0.09)), (o.lean || 0) / 2);
+    canopy(b, cx + Math.round((o.lean || 0) / 2), by - hh - Math.round(hr * 0.3), hr, ramp, o.seed || 0);
   });
 }
 
-/** A bush: three overlapping domes with a dark base. */
+/** A bush: a low canopy with no trunk. */
 function bushStamp(g, x, base, r, ramp) {
-  const w = Math.round(r * 3.2), h = Math.round(r * 2.4);
-  stamp(g, x - w / 2, base - h + 2, w, h, (b) => {
-    const cx = Math.round(w / 2), by = h - 3;
-    for (const [ox, sc] of [[-r * 0.6, 0.72], [r * 0.6, 0.66], [0, 0.95]]) {
-      orb(b, cx + ox, by - r * sc * 0.7, r * sc, orbShade(ramp));
-    }
-    for (let i = 0; i < 5; i++) bset(b, cx - r + i * r * 0.5, by - r * 1.3, ramp[ramp.length - 1]);
+  const W = Math.round(r * 3.6), H = Math.round(r * 3);
+  stamp(g, x - W / 2, base - H + 3, W, H, (b, bw, bh) => {
+    canopy(b, bw >> 1, bh - Math.round(r * 0.55) - 2, Math.max(2, Math.round(r * 0.45)), ramp, r | 0);
   });
 }
 
-/** A rock: a lumpy shaded stone with facets. */
+/**
+ * A rock: FACETS, not a sphere.
+ *
+ * A shaded sphere in grey is a ball bearing. A stone reads because it has flat planes
+ * meeting at hard edges -- a lit top, a mid-tone left face, a dark right face -- and
+ * because its outline has corners in it.
+ */
 function rockStamp(g, x, base, r, ramp) {
-  const w = Math.round(r * 2.6), h = Math.round(r * 2.2);
-  stamp(g, x - w / 2, base - h + 3, w, h, (b) => {
-    const cx = Math.round(w / 2), cy = h - r - 2;
-    orb(b, cx, cy, r, orbShade(ramp), { squashY: 0.85 });
-    bline(b, cx - r * 0.3, cy - r * 0.4, cx + r * 0.5, cy + r * 0.3, ramp[0]);
-    bline(b, cx - r * 0.6, cy + r * 0.2, cx, cy + r * 0.5, ramp[0]);
-    for (let i = 0; i < 3; i++) bset(b, cx - r * 0.5 + i, cy - r * 0.7, ramp[ramp.length - 1]);
+  const W = Math.round(r * 2.8), H = Math.round(r * 2.4);
+  stamp(g, x - W / 2, base - H + 3, W, H, (b, bw, bh) => {
+    const cx = bw >> 1, by = bh - 2;
+    const hr = Math.max(2, Math.round(r / 2));
+    const lo = ramp[0], md = ramp[1], hi = ramp[2] || ramp[1];
+    // the body: a squat hexagon, widest one row above the foot
+    for (let i = 0; i <= hr * 1.6; i++) {
+      const f = i / (hr * 1.6);
+      const ww = Math.round(hr * (0.45 + (1 - Math.abs(f - 0.75) / 0.75) * 0.55));
+      brect(b, cx - ww, by - i, ww * 2 + 1, 1, md);
+    }
+    // the top facet, lit
+    for (let i = 0; i <= hr * 0.55; i++) {
+      const ww = Math.round(hr * (0.5 - i / (hr * 1.4)));
+      brect(b, cx - ww - 1, by - Math.round(hr * 1.6) + i, ww * 2 + 1, 1, i === 0 ? hi : md);
+    }
+    // the right face, in shadow, and one crack
+    for (let i = 0; i <= hr * 1.4; i++) {
+      const f = i / (hr * 1.4);
+      const ww = Math.round(hr * (0.9 - f * 0.5));
+      brect(b, cx + Math.round(hr * 0.25), by - i, Math.max(1, ww - Math.round(hr * 0.25)), 1, lo);
+    }
+    bline(b, cx - Math.round(hr * 0.5), by - Math.round(hr * 1.3), cx + Math.round(hr * 0.2), by - Math.round(hr * 0.4), lo);
   });
 }
 
 /** A pine: stacked tiers, which is the only conifer shape that reads at this size. */
 function pineStamp(g, x, base, th, tw) {
-  const w = Math.round(tw * 2 + 6), h = Math.round(th + 8);
-  stamp(g, x - w / 2, base - h + 3, w, h, (b) => {
-    const cx = Math.round(w / 2), by = h - 4;
-    brect(b, cx - 1, by - 4, 3, 6, 'wood1');
+  const W = Math.round(tw * 2.4 + 10), H = Math.round(th + 12);
+  stamp(g, x - W / 2, base - H + 3, W, H, (b, bw, bh) => {
+    const cx = bw >> 1, by = bh - 2;
+    const hh = Math.round(th / 2), hw = Math.max(2, Math.round(tw / 2));
+    trunk(b, cx, by, Math.round(hh * 0.22), 1, 0);
     const tiers = 4;
     for (let k = 0; k < tiers; k++) {
       const f = k / (tiers - 1);
-      const ty = by - 4 - f * (th - 6);
-      const twid = tw * (1 - f * 0.7);
-      for (let i = 0; i <= twid * 2; i++) {
-        const dx = i - twid;
-        const hgt = Math.round((1 - Math.abs(dx) / Math.max(1, twid)) * th * 0.22) + 1;
+      const ty = by - Math.round(hh * (0.18 + f * 0.78));
+      const wid = Math.max(1, Math.round(hw * (1 - f * 0.72)));
+      const dep = Math.max(2, Math.round(hh * 0.2));
+      for (let dx = -wid; dx <= wid; dx++) {
+        const hgt = Math.round((1 - Math.abs(dx) / (wid + 1)) * dep) + 1;
         for (let j = 0; j < hgt; j++) {
-          bset(b, cx + dx, ty - j, dx < 0 ? 'leaf2' : dx < twid * 0.4 ? 'leaf1' : 'leaf0');
+          bset(b, cx + dx, ty - j, dx < -wid * 0.3 ? 'leaf2' : dx < wid * 0.35 ? 'leaf1' : 'leaf0');
+        }
+      }
+      // a lit edge along each tier's upper left, so the tiers separate
+      for (let dx = -wid; dx < 0; dx++) bset(b, cx + dx, ty - Math.round((1 - Math.abs(dx) / (wid + 1)) * dep), 'leaf3');
+    }
+    bset(b, cx, by - hh - 1, 'leaf3');
+  });
+}
+
+/**
+ * A mountain: a ridge, a lit face and a shaded face.
+ *
+ * Three shaded domes on a horizon are three stains -- and if the width comes from
+ * sqrt(1-f^2) with f running top-down, they are three UPSIDE-DOWN domes, which read as a
+ * row of satellite dishes. A mountain has a peak that is off centre, a straight lit flank,
+ * a straight dark flank, and a hard line where they meet.
+ */
+function mountainStamp(g, x, base, w, h, ramp, o = {}) {
+  const W = Math.round(w), H = Math.round(h + 6);
+  stamp(g, x - W / 2, base - H, W, H, (b, bw, bh) => {
+    const by = bh - 1;
+    const peak = Math.round(bw * (o.peak !== undefined ? o.peak : 0.42));
+    const top = 1;
+    const lo = ramp[0], md = ramp[1], hi = ramp[2] || ramp[1];
+    for (let y = top; y <= by; y++) {
+      const f = (y - top) / Math.max(1, by - top);
+      // the two flanks have different slopes, which is what stops it being a triangle
+      const lw = Math.round(peak * f);
+      const rw = Math.round((bw - peak) * Math.pow(f, 0.86));
+      for (let x2 = peak - lw; x2 <= peak + rw; x2++) {
+        const across = (x2 - (peak - lw)) / Math.max(1, lw + rw);
+        bset(b, x2, y, across < 0.42 ? md : across < 0.52 ? lo : lo);
+      }
+      // the lit flank
+      for (let x2 = peak - lw; x2 < peak - lw + Math.max(1, Math.round(lw * 0.5)); x2++) bset(b, x2, y, md);
+      for (let x2 = peak - lw; x2 < peak - lw + 2; x2++) bset(b, x2, y, hi);
+    }
+    // a snow cap or a bare crown
+    if (o.snow) {
+      for (let y = top; y < top + Math.max(2, Math.round(bh * 0.22)); y++) {
+        const f = (y - top) / Math.max(1, Math.round(bh * 0.22));
+        const lw = Math.round(peak * f * 0.5), rw = Math.round((bw - peak) * f * 0.4);
+        for (let x2 = peak - lw; x2 <= peak + rw; x2++) bset(b, x2, y, x2 < peak ? 'white' : 'ice');
+      }
+    }
+    // two gullies down the dark flank, so the face is not flat
+    for (let k = 0; k < 2; k++) {
+      const sx = peak + Math.round((bw - peak) * (0.3 + k * 0.35));
+      for (let y = Math.round(bh * 0.3); y <= by; y++) {
+        if (bget(b, sx + Math.round((y - bh * 0.3) * 0.2), y) !== null) {
+          bset(b, sx + Math.round((y - bh * 0.3) * 0.2), y, lo);
         }
       }
     }
-    bset(b, cx, by - th, 'leaf3');
   });
 }
 
@@ -218,30 +336,29 @@ function scenery(b, island, cx, base, w, h, sc) {
     const name = names[n];
     const seed = n * 31 + island.id.length * 7;
     switch (name) {
-      case 'hills':
+      case 'hills': {
+        // three mountains, near to far, each with its own peak offset so the ridge line
+        // is not a repeat
         for (let i = 0; i < 3; i++) {
-          const hx = cx + (H2(seed + i) - 0.5) * w * 0.6;
-          const hr = w * (0.13 + H2(seed + i * 3) * 0.06);
-          // a lit crown and a shaded skirt: a flat ellipse is a stain
-          // widest at the BASE. Taking the width from sqrt(1-f^2) with f running from the
-          // top down builds the dome upside down, and three upside-down domes on a
-          // horizon look like a row of satellite dishes.
-          const hb = base - h * 0.28;
-          for (let y = 0; y < hr * 0.8; y++) {
-            const f = 1 - y / (hr * 0.8);
-            const ww = Math.round(hr * Math.sqrt(Math.max(0, 1 - f * f)));
-            rect(b, hx - ww, hb - hr * 0.8 + y, ww * 2, 1,
-              f > 0.7 ? mix(P[G[1]], P.white, 0.12) : f > 0.3 ? P[G[1]] : mix(P[G[1]], P.ink, 0.18));
-          }
+          const hx = cx + (H2(seed + i) - 0.5) * w * 0.66;
+          const hw = w * (0.3 + H2(seed + i * 3) * 0.16);
+          const hh = h * (0.2 + H2(seed + i * 5) * 0.14);
+          const shaded = mix(P[G[1]], P.ink, 0.3);
+          mountainStamp(b, hx, base - h * 0.24, hw, hh,
+            [shaded, P[G[1]], mix(P[G[1]], P.white, 0.16)],
+            { peak: 0.3 + H2(seed + i * 7) * 0.4, snow: island.biome === 'tundra' || island.biome === 'peak' });
         }
         break;
+      }
       case 'wall': {
         // a dry stone wall running across the slope: one course of stones with a
         // capstone line. The old version was seven tall posts, which read as a fence
         // grid laid over the hill rather than a wall standing on it.
         // built out of STONES, in two courses, with capstones and a shadow at its foot.
         // One grey bar with speckles on it read as a kerb.
-        const wy = Math.round(base - h * 0.24);
+        // ON THE GROUND. At base - h*0.24 this sat up level with the hilltops, a grey
+        // brick strip floating across the sky that read as a railway viaduct.
+        const wy = Math.round(base - h * 0.06);
         const ww = Math.round(w * 0.62), wx = Math.round(cx - ww / 2);
         const wh = Math.max(5, 4 * sc);
         stamp(b, wx, wy - 2, ww, wh + 4, (bb) => {

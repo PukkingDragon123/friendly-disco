@@ -13,6 +13,7 @@ import {
   makeCanvas, blit,
 } from '../core/pixel.js';
 import { makeRng } from '../core/rng.js';
+import { makeBuf, bset, btri, outline, flush } from './pixbuf.js';
 
 export const TIME_OF_DAY = { dawn: 0, day: 0.25, dusk: 0.5, night: 0.75 };
 
@@ -199,6 +200,148 @@ export function drawBoat(g, boat, t = 0) {
 
 /* --------------------------------------------------------------- seascape */
 
+/* -------------------------------------------------------------- swells and dolphins
+
+Two things a sea needs that dashed foam crests do not give it: SWELL, meaning long waves
+you can watch travel toward you, and LIFE.
+*/
+
+/**
+ * Long rolling swells.
+ *
+ * Drawn in four-pixel steps, which is both the look and the budget. A per-pixel sine
+ * across a 960-wide sea is a thousand fillRects a swell; stepping four and drawing a
+ * four-wide block is a quarter of that, and the result is chunky in exactly the way the
+ * rest of the art is chunky.
+ */
+function drawSwells(g, x, y, w, hy, waterH, t, keys, foamC, storm) {
+  const STEP = 4;
+  const n = storm > 0.4 ? 3 : 2;
+  for (let s = 0; s < n; s++) {
+    // each swell walks from the horizon to the viewer, easing out as it nears
+    const ph = ((t * (0.055 + s * 0.018) + s * 0.41) % 1);
+    const base = hy + Math.round(Math.pow(ph, 0.62) * waterH);
+    if (base < hy + 3 || base > hy + waterH - 3) continue;
+    const k = (base - hy) / waterH;
+    const amp = 1.5 + k * 6 + storm * 4;
+    const per = 90 + k * 200;
+    const th = 1 + Math.round(k * 3);
+    const crest = mix(P[foamC], P[keys[Math.min(keys.length - 1, 2)]], 0.45 - k * 0.3);
+    const trough = mix(P[keys[Math.min(keys.length - 1, Math.round(2 + k * 2))]], P.ink, 0.3);
+    for (let i = 0; i < w; i += STEP) {
+      const wy = base + Math.round(Math.sin((i / per) * Math.PI * 2 + t * 0.9 + s * 2.1) * amp);
+      if (wy < hy || wy > hy + waterH - 2) continue;
+      rect(g, x + i, wy, STEP, th, crest);
+      rect(g, x + i, wy + th, STEP, 1, trough);
+    }
+  }
+}
+
+/**
+ * A dolphin, baked in three poses.
+ *
+ * Rotating pixel art is off the table, so a leap is three sprites: nose up on the way out,
+ * level at the apex, nose down on the way in. Flip for direction. Authored at half
+ * resolution like everything else, so it comes out 28x18 with two-pixel lines.
+ */
+const DOLPHIN_POSES = ['rise', 'apex', 'dive'];
+const dolphinCache = new Map();
+
+function bakeDolphin(pose) {
+  const hit = dolphinCache.get(pose);
+  if (hit !== undefined) return hit;
+  const AW = 14, AH = 9;
+  const mk = makeCanvas(AW * 2, AH * 2);
+  if (!mk) { dolphinCache.set(pose, null); return null; }
+  const b = makeBuf(AW, AH);
+  // the spine: a shallow arc whose tilt is the pose
+  const tilt = pose === 'rise' ? -0.42 : pose === 'dive' ? 0.42 : 0;
+  const spine = [];
+  for (let i = 0; i < 12; i++) {
+    const f = i / 11;
+    spine.push([1 + i, 4 + Math.round(tilt * (f - 0.5) * 9 + Math.sin(f * Math.PI) * -0.9)]);
+  }
+  // body: thick in the middle, tapering both ways
+  for (let i = 0; i < spine.length; i++) {
+    const f = i / (spine.length - 1);
+    const th = Math.max(1, Math.round(3.1 * Math.sin(Math.PI * Math.min(1, f * 1.18)) - f * 0.6));
+    const [sx, sy] = spine[i];
+    for (let d = -th; d <= th; d++) {
+      // back dark, belly pale: the one thing that makes a dolphin a dolphin
+      // A dark back on dark water is a smudge. The back is water1, the flank water3, the
+      // belly ice: light enough that the silhouette survives against the deep ramp.
+      bset(b, sx, sy + d, d < -th * 0.15 ? 'water1' : d < th * 0.45 ? 'water3' : 'ice');
+    }
+  }
+  const [hx, hy2] = spine[spine.length - 1];
+  const [tx, ty] = spine[0];
+  // the beak
+  bset(b, hx + 1, hy2, 'water3'); bset(b, hx + 2, hy2 + (tilt > 0 ? 1 : 0), 'water1');
+  // the eye: one dark pixel, which on a pale flank is plenty
+  bset(b, hx - 1, hy2 - 1, 'ink');
+  // the dorsal fin
+  const mid = spine[6];
+  btri(b, mid[0] - 1, mid[1] - 2, mid[0] + 2, mid[1] - 2, mid[0] - 2, mid[1] - 5, 'water1');
+  // the tail fluke
+  btri(b, tx + 1, ty, tx - 1, ty - 3, tx - 1, ty + 3, 'water1');
+  // a flipper
+  btri(b, mid[0] + 2, mid[1] + 1, mid[0] + 4, mid[1] + 3, mid[0], mid[1] + 2, 'water1');
+  outline(b, 'ink');
+  flush(b, mk.g, 0, 0, 2);
+  dolphinCache.set(pose, mk.canvas);
+  return mk.canvas;
+}
+
+/**
+ * A pod, arcing.
+ *
+ * Each dolphin runs one cycle: most of it underwater as a travelling shadow and a V of
+ * wake, then a leap along a parabola with a splash at each end. The whole pod shares a
+ * cycle length and staggers by index, which is what makes them look like they are
+ * together rather than three animals that happen to be nearby.
+ */
+function drawPod(g, pod, x, y, w, hy, waterH, t, foamC) {
+  for (const d of pod) {
+    const cyc = (t / d.period + d.phase) % 1;
+    const bandY = hy + Math.round(waterH * d.band);
+    const travel = ((cyc + d.phase) % 1);
+    const dx = x + Math.round((d.dir > 0 ? travel : 1 - travel) * (w + 80)) - 40;
+    if (cyc < 0.62) {
+      // under: a dark smudge and a wake, so you can see them coming
+      const a = 0.5 + 0.5 * Math.sin(cyc * 14);
+      rect(g, dx, bandY, 10, 2, mix(P.water0, P.deep, 0.4));
+      rect(g, dx + (d.dir > 0 ? -6 : 8), bandY - 1, 5, 1, mix(P[foamC], P.water1, 0.5 + a * 0.3));
+      continue;
+    }
+    // out: a parabola, with the pose picked from where it is on the arc
+    const k = (cyc - 0.62) / 0.38;
+    const lift = Math.round(Math.sin(k * Math.PI) * (10 + d.band * 22));
+    const pose = k < 0.36 ? 'rise' : k < 0.64 ? 'apex' : 'dive';
+    const cv = bakeDolphin(pose);
+    const sc = 1;
+    if (cv) {
+      const dw = cv.width * sc, dh = cv.height * sc;
+      const px2 = dx - dw / 2;
+      const py2 = Math.max(hy + 1, bandY - lift - dh);   // never above the horizon
+      if (d.dir > 0) {
+        g.drawImage(cv, Math.round(px2), Math.round(py2), dw, dh);
+      } else {
+        g.save();
+        g.translate(Math.round(px2) + dw, Math.round(py2));
+        g.scale(-1, 1);
+        g.drawImage(cv, 0, 0, dw, dh);
+        g.restore();
+      }
+    }
+    // splash on the way out and on the way back in
+    if (k < 0.16 || k > 0.84) {
+      for (let i = 0; i < 4; i++) {
+        rect(g, dx - 8 + i * 5, bandY - 2 - (i % 2) * 2, 3, 2, foamC);
+      }
+    }
+  }
+}
+
 export function createSeascape(seed, o = {}) {
   const rng = makeRng(String(seed || 'sea'));
   let t = 0;
@@ -238,6 +381,19 @@ export function createSeascape(seed, o = {}) {
     });
   }
   isles[rng.int(isles.length)].light = true;   // one gets a lighthouse
+
+  // a pod of three, staggered on one shared cycle so they read as travelling together
+  const pod = [];
+  for (let i = 0; i < 3; i++) {
+    pod.push({
+      period: rng.range(11, 17),
+      phase: i * 0.11 + rng.range(0, 0.5),
+      // the NEAR half of the water only. A pod at band 0.3 leaping sixteen pixels clears
+      // the horizon line and appears to jump out of the sky.
+      band: 0.5 + i * 0.13 + rng.range(-0.04, 0.04),
+      dir: rng.chance(0.5) ? 1 : -1,
+    });
+  }
   const birds = [];
   for (let i = 0; i < 5; i++) {
     birds.push({ x: rng.range(-200, 640), y: rng.range(24, 80), sp: rng.range(14, 30), ph: rng.range(0, 6), scale: rng.chance(0.4) ? 2 : 1 });
@@ -465,6 +621,7 @@ export function createSeascape(seed, o = {}) {
         const bh = Math.max(1, (opt.h || 360) - bake.hy);
         g.drawImage(bake.cv, 0, bake.hy, w, bh, x, hy, w, waterH);
       }
+      drawSwells(g, x, y, w, hy, waterH, t, keys, foamC, storm);
       for (let i = 0; i < waterH; i++) {
         const yy = hy + i;
         // depth curve: rows bunch up near the horizon, which is what sells the recession
@@ -529,6 +686,8 @@ export function createSeascape(seed, o = {}) {
             mix(p.glowC, keys[Math.min(keys.length - 1, 1)], 0.3), 'rgba(0,0,0,0)', Math.round((i / 34) * 15));
         }
       }
+
+      if (opt.life !== false) drawPod(g, pod, x, y, w, hy, waterH, t, foamC);
 
       // live splashes
       for (const s of splashes) {

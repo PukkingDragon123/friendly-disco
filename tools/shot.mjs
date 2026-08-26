@@ -297,22 +297,25 @@ switch (which) {
   }
   case 'sprites': {
     const { ANIMALS } = await import('../src/data/animals.js');
-    const { drawAnimal } = await import('../src/render/sprites.js');
+    const { drawAnimal, SPRITE_SIZE, SPRITE_H } = await import('../src/render/sprites.js');
     const { rect, text } = await import('../src/core/pixel.js');
     const { abilityOf } = await import('../src/data/abilities.js');
     scene = {
       draw() {
         rect(g, 0, 0, SW, SH, 'deep');
-        const COLS = 18, CW = 52, CH = 62;
+        // one cell per animal, sized off the sprite so the sheet cannot go stale when the
+        // art buffer changes -- it silently overlapped every label when it did
+        const CW = Math.round(SPRITE_SIZE * 0.62), CH = Math.round(SPRITE_H * 0.62);
+        const COLS = Math.floor((SW - 20) / CW);
         ANIMALS.forEach((a, i) => {
-          const x = 30 + (i % COLS) * CW, y = 46 + Math.floor(i / COLS) * CH;
+          const x = 12 + CW / 2 + (i % COLS) * CW, y = 30 + CH - 14 + Math.floor(i / COLS) * CH;
           // a strip of the animal's ABILITY colour: the roster's own index of what
           // each of them is for, now that berth traits are gone
           const ab = abilityOf(a);
-          rect(g, x - 25, y - 26, 50, 58, 'shadow');
-          rect(g, x - 25, y - 26, 50, 2, ab.color);
-          drawAnimal(g, a, x, y, { scale: 1 });
-          text(g, a.name.slice(0, 11), x, y + 22, 'bone', { font: 3, center: true });
+          rect(g, x - CW / 2 + 1, y - CH + 16, CW - 2, CH - 2, 'shadow');
+          rect(g, x - CW / 2 + 1, y - CH + 16, CW - 2, 2, ab.color);
+          drawAnimal(g, a, x, y, { scale: 0.62 });
+          text(g, a.name.slice(0, 9), x, y + 4, 'bone', { font: 3, center: true });
         });
         text(g, `${ANIMALS.length} ANIMALS`, SW / 2, 10, 'gold', { center: true, font: 7 });
       },

@@ -7,8 +7,9 @@ import { Input } from '../core/input.js';
 import { Juice, Ease, approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
 import { createParticles } from '../core/particles.js';
-import { createSeascape, drawBoat } from '../render/seascape.js';
+import { createSeascape } from '../render/seascape.js';
 import * as UI from '../render/uikit.js';
+import { drawBoat as drawArkSprite } from '../render/boat.js';
 import { drawAnimal } from '../render/sprites.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { randomSeedString, makeRng } from '../core/rng.js';
@@ -106,59 +107,30 @@ export function makeMenuScene() {
     });
   }
 
+  /**
+   * The ark on the title screen, and it is the SAME ark the game draws everywhere else.
+   * This used to be a bespoke hull with a strip of green felt down the deck -- a pool
+   * table riding on a boat, left over from the game this one used to be.
+   */
   function drawArk(g, cx, cy, roll) {
-    const w = 400, h = 42;
-    const y = Math.round(cy);
-    // hull
-    for (let i = 0; i < h; i++) {
-      const inset = Math.round((i / h) ** 1.7 * 34);
-      const c = i < 4 ? 'wood3' : i < 10 ? 'wood2' : i < 18 ? 'wood1' : 'wood0';
-      rect(g, cx - w / 2 + inset, y + i, w - inset * 2, 1, c);
-    }
-    // deck rail + felt strip: the pool table riding on top
-    rect(g, cx - w / 2 + 6, y - 8, w - 12, 8, 'wood2');
-    rect(g, cx - w / 2 + 10, y - 6, w - 20, 5, 'cloth1');
-    rect(g, cx - w / 2 + 10, y - 6, w - 20, 1, 'cloth2');
-    for (let i = 0; i < 6; i++) {
-      const gx = cx - w / 2 + 16 + i * ((w - 32) / 5);
-      ellipse(g, gx, y - 4, 3, 2, 'ink');
-    }
-    // gunwale highlight
-    rect(g, cx - w / 2 + 6, y - 9, w - 12, 1, 'wood4');
-    // mast + sail — a proper canvas, not a sliver
-    const mx = cx + 66;
-    rect(g, mx, y - 78, 3, 70, 'wood2');
-    rect(g, mx, y - 78, 1, 70, 'wood3');
-    rect(g, mx - 34, y - 74, 37, 2, 'wood1');          // yard
-    const sailH = 58;
-    for (let i = 0; i < sailH; i++) {
-      const bulge = Math.round(Math.sin((i / sailH) * Math.PI) * 32) + 3;
-      const sxx = mx - bulge;
-      rect(g, sxx, y - 72 + i, bulge, 1, 'white');
-      rect(g, sxx, y - 72 + i, Math.max(1, Math.round(bulge * 0.3)), 1, 'bone');
-      if (i % 11 === 0) rect(g, sxx, y - 72 + i, bulge, 1, 'bone');
-    }
-    // a reefed jib forward of the mast
-    for (let i = 0; i < 22; i++) {
-      const bl = Math.round(Math.sin((i / 22) * Math.PI) * 9) + 1;
-      rect(g, mx + 2, y - 46 + i, bl, 1, i % 7 < 4 ? 'bone' : 'white');
-    }
-    // pennant
-    const fl = Math.round(Math.sin(t * 4) * 2);
-    rect(g, mx + 2, y - 76, 10, 4, 'red2');
-    rect(g, mx + 2, y - 76 + fl, 10, 1, 'red1');
-    // animals on deck
+    const SC = 3;
+    const wl = Math.round(cy + 34);
+    drawArkSprite(g, cx, wl, t, { tiers: { capacity: 2, speed: 2, hull: 1, hold: 1 }, scale: SC, speed: 0.3 });
+    // animals along the foredeck, in front of the house
+    const deckY = wl - 8 * SC + Math.round(Math.sin(t * 1.15) * 1.6) * SC;
     CAST.forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
-      const ax = cx - 104 + i * 26;
-      const ay = y - 12 + Math.round(Math.sin(t * 2.2 + i * 0.8) * 1.2) + Math.round(roll * (i - 3.5) * 0.4);
-      drawAnimal(g, a, ax, ay + 14, { scale: 0.5, flip: i % 2 === 1, blink: ((t * 1.3 + i) % 5) < 0.12 ? 1 : 0 });
+      const ax = cx + 30 + i * 30;
+      if (ax > cx + 30 * SC + 40) return;
+      const ay = deckY + Math.round(Math.sin(t * 2.2 + i * 0.8) * 1.2) + Math.round(roll * (i - 3.5) * 0.4);
+      drawAnimal(g, a, ax, ay, { scale: 0.5, flip: i % 2 === 1, blink: ((t * 1.3 + i) % 5) < 0.12 ? 1 : 0 });
     });
-    // waterline foam
-    for (let i = 0; i < 3; i++) {
-      const ww = w - 40 - i * 18;
-      rect(g, cx - ww / 2, y + h - 2 + i, ww, 1, i === 0 ? 'foam' : 'water3');
+    // and a couple looking out of the house windows
+    for (let i = 0; i < 2; i++) {
+      const a = ANIMAL_BY_ID[CAST[(i + 3) % CAST.length]];
+      if (!a) continue;
+      drawAnimal(g, a, cx - 60 + i * 44, deckY - 26, { scale: 0.5, flip: i === 1 });
     }
   }
 

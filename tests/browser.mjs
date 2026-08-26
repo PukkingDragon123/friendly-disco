@@ -163,11 +163,16 @@ await clickRect(page, ['rects', 'cards', 0]);
 await page.waitForTimeout(3200);
 let kind = await sceneKind(page);
 if (kind === 'cutscene') {
-  for (let i = 0; i < 30 && kind === 'cutscene'; i++) {
+  // Two presses a line -- one to finish the typing, one to advance -- so the budget has
+  // to be twice the longest script plus the fade out, not a round number that happened to
+  // fit the scripts that were there when this was written.
+  for (let i = 0; i < 90 && kind === 'cutscene'; i++) {
     await page.keyboard.press('Space');
-    await page.waitForTimeout(140);
+    await page.waitForTimeout(90);
     kind = await sceneKind(page);
   }
+  await page.waitForTimeout(900);
+  kind = await sceneKind(page);
 }
 if (kind === 'choice') {
   await page.screenshot({ path: `${OUT}-5-choice.png` });
@@ -179,7 +184,14 @@ if (kind === 'choice') {
   await page.waitForTimeout(1600);
   kind = await sceneKind(page);
 }
-if (kind !== 'island') errors.push(`sailing led to "${kind}" instead of an island`);
+if (kind !== 'island') {
+  errors.push(`sailing led to "${kind}" instead of an island`);
+  console.log('logs:', logs.slice(-12).join(' | '));
+  console.log('errors so far:', errors.join(' | '));
+  await page.screenshot({ path: `${OUT}-x-stuck.png` });
+  await browser.close();
+  process.exit(1);
+}
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${OUT}-6-island.png` });
 

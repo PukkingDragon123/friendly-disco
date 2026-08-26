@@ -240,10 +240,13 @@ function playIsland() {
       if (!pick(want)) { errors.push('island: clicking a beast card selected nothing'); break; }
       put(wr, wc);
       if (f.plants.length > before) planted++;
-      else {
+      else if (f.clay >= def(want).cost && !f.over) {
+        // A refusal is only a bug if the beast was still affordable when the click
+        // landed: the drought event halves the bank between the card and the tile, and
+        // the game is right to say no.
         if (process.env.WHY) {
           console.log('    WHY: plant', want, 'at', wr, wc, 'clay', f.clay,
-            'sel', JSON.stringify(dbg().sel), 'plantable', LA.plantable(f, wr, wc),
+            'sel', JSON.stringify(dbg().sel), 'plantable', LA.plantable(f, wr, wc, def(want)),
             'lastAct', JSON.stringify(dbg().lastAct), 'hover', JSON.stringify(dbg().hover));
         }
         errors.push('island: clicking a tile with a beast selected planted nothing');

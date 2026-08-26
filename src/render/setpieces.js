@@ -179,7 +179,9 @@ function wrathSky(g, u, t) {
   const gy = 388;
   vBand(g, 0, gy, ['night', 'purple0', 'rust', 'brass2', 'gold']);
   // the lid, closing
-  const lid = Math.round(lerp(-70, 250, Ease.inOutCubic(u)));
+  // The lid is already there in the first frame: an establishing shot of an empty
+  // sunset says nothing is wrong, which is the opposite of the beat.
+  const lid = Math.round(lerp(24, 268, Ease.inOutCubic(u)));
   cloudLid(g, lid, t, 1);
   ridge(g, gy + 26, 54, 3.1, 'ink', 'wood0');
   village(g, gy + 24, 40, W - 40, 5, 'ink', 'amber');
@@ -868,7 +870,6 @@ function forgeBank(g, u, t) {
     const a = Math.PI + (i / 40) * Math.PI;
     disc(g, hx + Math.cos(a) * hw, hy + Math.sin(a) * hh, 6 + h(i) * 9, 'clay2');
   }
-  rect(g, hx - hw, hy - hh - 2, hw * 2, 3, 'clay4');
   // water pooling in the bottom of it
   ellipse(g, hx - 10, hy + hh * 0.5, hw * 0.5, hh * 0.22, 'water0');
   ellipse(g, hx - 10, hy + hh * 0.5 - 1, hw * 0.42, hh * 0.15, 'water1');

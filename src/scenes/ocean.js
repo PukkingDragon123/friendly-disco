@@ -35,14 +35,12 @@ import { drawIslandFar } from '../render/islandart.js';
 import { drawAnimal } from '../render/sprites.js';
 import { drawFolk } from '../render/folk.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
-import { DOLL_BY_ID, costText, canCraft } from '../data/dolls.js';
-import { MATERIAL_IDS, MATERIAL_BY_ID } from '../data/materials.js';
-import { drawDoll } from '../render/dollart.js';
+import { BEAST_BY_ID, UPGRADES as BEAST_UPGRADES } from '../data/beasts.js';
 import { abilityOf, ABILITY_BY_ID } from '../data/abilities.js';
 import { OBSTACLE_BY_ID } from '../data/obstacles.js';
 import {
   sailTo, capacity, hullMax, floodPerLeg, isLoyal,
-  LEGS_PER_CHAPTER, CHAPTERS, dollBox, craftDoll, say,
+  LEGS_PER_CHAPTER, CHAPTERS, beastBox, buyBeastUpgrade, say,
 } from '../game/voyage.js';
 
 const HUD_H = 46;
@@ -402,54 +400,46 @@ export function makeOceanScene() {
   }
 
 /**
-   * THE WORKSHOP. Where the animals you saved become the dolls you herd with.
+   * THE BENCH. Where Noah's work on your beasts is paid for.
    *
    * It shares the deck panel rather than getting its own, and flips with one click. Two
    * panels side by side would each be half the size, and both of them are lists you read
    * rather than pictures you glance at -- so they take turns.
+   *
+   * One upgrade per beast, and only for beasts you have TAMED, which is the whole point:
+   * the tower side of the run is built out of what walked at you and lost.
    */
   function drawWorkshop(g) {
     UI.panel(g, DECK_X, DECK_Y, DECK_W, DECK_H, { style: 'wood', shadow: true, rivets: true });
-    UI.panelTitle(g, DECK_X, DECK_Y + 4, DECK_W, 'THE WORKSHOP', { color: 'clay4' });
+    UI.panelTitle(g, DECK_X, DECK_Y + 4, DECK_W, 'THE BENCH', { color: 'clay4' });
     craftRects = [];
 
-    // what the crossings have produced
-    let mx = DECK_X + 12;
-    const my = DECK_Y + 24;
-    for (const k of MATERIAL_IDS) {
-      const n = v.mats[k] || 0;
-      if (!n) continue;
-      const M2 = MATERIAL_BY_ID[k];
-      const label = `${n}`;
-      const w = textW(label, { font: 5 }) + 22;
-      if (mx + w > DECK_X + DECK_W - 12) break;
-      UI.icon(g, M2.icon, mx, my + 1, { color: M2.color });
-      text(g, label, mx + 13, my, 'cream', { font: 5 });
-      mx += w;
+    const box = beastBox(v);
+    if (!box.length) {
+      text(g, 'Nothing tamed yet. Knock one down on an island and throw an apple.',
+        DECK_X + 12, DECK_Y + 28, 'parch1', { font: 3 });
+      return;
     }
-    if (mx === DECK_X + 12) text(g, 'Nothing yet. A crossing with animals aboard pays.', mx, my, 'parch1', { font: 3 });
-
-    // and what can be made from it
-    const box = dollBox(v);
     const cw = Math.floor((DECK_W - 24) / Math.max(1, Math.min(4, box.length)));
     box.slice(0, 4).forEach((row, i) => {
-      const r0 = UI.rectOf(DECK_X + 12 + i * cw, DECK_Y + 44, cw - 6, 46);
-      const able = canCraft(row.def, v.mats);
+      const def = BEAST_BY_ID[row.id];
+      if (!def) return;
+      const r0 = UI.rectOf(DECK_X + 12 + i * cw, DECK_Y + 24, cw - 6, DECK_H - 34);
+      const able = row.up && !row.bought && v.money >= row.up.cost;
       const hot = UI.hover(r0, Input.mouse);
-      rect(g, r0.x, r0.y, r0.w, r0.h, able ? (hot ? 'wood2' : 'wood1') : 'wood0');
-      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, able ? (hot ? row.def.mark : 'wood0') : 'shadow');
-      rect(g, r0.x + 3, r0.y + 3, 22, r0.h - 6, able ? 'parch0' : 'shadow');
-      drawDoll(g, row.def, r0.x + 14, r0.y + r0.h - 4, t, { lit: able && hot, tile: 32 });
-      text(g, row.def.name.replace(' Doll', '').toUpperCase(), r0.x + 30, r0.y + 5,
-        able ? 'cream' : 'grey1', { font: 3 });
-      text(g, `HAVE ${row.have}`, r0.x + 30, r0.y + 17, 'brass3', { font: 3 });
-      text(g, costText(row.def), r0.x + 30, r0.y + 29, able ? 'leaf3' : 'red2', { font: 3 });
-      craftRects.push({ rect: r0, id: row.id, able });
+      rect(g, r0.x, r0.y, r0.w, r0.h, row.bought ? 'wood0' : able ? (hot ? 'wood2' : 'wood1') : 'wood0');
+      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, row.bought ? 'clay4' : able && hot ? 'brass3' : 'wood0');
+      rect(g, r0.x + 3, r0.y + 3, 30, 30, 'parch0');
+      const a = ANIMAL_BY_ID[def.base];
+      if (a) drawAnimalIcon(g, a, r0.x + 18, r0.y + 18, { size: 28 });
+      text(g, def.name.toUpperCase(), r0.x + 38, r0.y + 4, 'cream', { font: 3 });
+      if (!row.up) { text(g, 'NOTHING TO DO', r0.x + 38, r0.y + 18, 'grey1', { font: 3 }); return; }
+      text(g, row.up.name.toUpperCase(), r0.x + 38, r0.y + 17, row.bought ? 'clay4' : 'brass3', { font: 3 });
+      text(g, row.bought ? 'DONE' : `$${row.up.cost}`, r0.x + 38, r0.y + 30,
+        row.bought ? 'leaf4' : able ? 'gold' : 'red2', { font: 5 });
+      text(g, row.up.blurb, r0.x + 5, r0.y + 46, 'parch1', { font: 3 });
+      if (!row.bought) craftRects.push({ rect: r0, id: row.id, able });
     });
-    if (!box.length) {
-      text(g, 'You know no shapes yet. Noah knows all of them.', DECK_X + 12, DECK_Y + 52,
-        'parch1', { font: 3 });
-    }
   }
 
   /** The manifest: who is on the boat, and what each of them is for. */
@@ -565,7 +555,7 @@ export function makeOceanScene() {
     const tabHot = UI.hover(shopTab, Input.mouse);
     rect(g, shopTab.x, shopTab.y, shopTab.w, shopTab.h, tabHot ? 'wood2' : 'wood0');
     UI.boxEdge(g, shopTab.x, shopTab.y, shopTab.w, shopTab.h, tabHot ? 'brass3' : 'wood1');
-    text(g, shop ? 'ON DECK  [W]' : 'WORKSHOP  [W]', shopTab.x + shopTab.w / 2, shopTab.y + 4,
+    text(g, shop ? 'ON DECK  [W]' : 'THE BENCH  [W]', shopTab.x + shopTab.w / 2, shopTab.y + 4,
       tabHot ? 'gold' : 'parch1', { font: 3, center: true });
     drawHud(g);
     parts.draw(g, 'front');
@@ -599,9 +589,8 @@ export function makeOceanScene() {
       if (m.pressed && shop) {
         for (const cr of craftRects) {
           if (!UI.hover(cr.rect, m)) continue;
-          const res = craftDoll(v, cr.id);
-          Audio.sfx(res.ok ? 'crate_open' : 'error');
-          if (res.ok) say(v, `${res.doll.name} made.`, res.doll.mark);
+          const res = buyBeastUpgrade(v, cr.id);
+          Audio.sfx(res.ok ? 'upgrade' : 'error');
           return;
         }
       }

@@ -1,0 +1,73 @@
+// A COMPETENT PLAYER, on every island, so the lane game can be balanced against something
+// that plays it properly. Wells at the back, walls at the front, thorns in between, and an
+// apple thrown at anything it knocks down.
+import { installDom } from './stubdom.mjs';
+installDom();
+const LA = await import('../src/game/lane.js');
+const { ISLANDS } = await import('../src/data/islands.js');
+const V = await import('../src/game/voyage.js');
+
+function play(isl, seed) {
+  const v = V.newVoyage(seed);
+  const f = LA.newLane(v, isl, 'x');
+  let steps = 0, tamed = 0;
+  while (!f.over && steps++ < 40000) {
+    LA.update(f, 1 / 30);
+    // a ripe apple is always worth the click
+    for (const tr of f.trees) if (tr.ripe) LA.harvest(f, tr.row, tr.col);
+    for (let guard = 0; guard < 3; guard++) {
+      let did = false;
+      // A WATER ROW WITH NO REED IN IT IS AN OPEN DOOR. Left alone it is the row every
+      // breach comes through, and the ark falls with four guards still standing.
+      if (!did && f.hand.some((b) => b.id === 'reed') && f.clay >= 25) {
+        for (const r of f.waterRows) {
+          for (let c = 6; c >= 2 && !did; c--) {
+            if (LA.plant(f, 'reed', r, c).ok) did = true;
+          }
+          if (did) break;
+        }
+      }
+      const wells = f.plants.filter((p) => p.def.kind === 'gen').length;
+      if (!did && wells < 4 && f.clay >= 50) {
+        for (let r = 0; r < LA.ROWS && !did; r++) if (LA.plant(f, 'well', r, 0).ok) did = true;
+      }
+      if (!did && f.clay >= 100) {
+        for (let r = 0; r < LA.ROWS && !did; r++) {
+          if (f.plants.some((p) => p.row === r && p.def.kind === 'shoot')) continue;
+          for (let c = 1; c <= 3 && !did; c++) if (LA.plant(f, 'thorn', r, c).ok) did = true;
+        }
+      }
+      if (!did && f.clay >= 50) {
+        for (let r = 0; r < LA.ROWS && !did; r++) {
+          if (f.plants.some((p) => p.row === r && p.def.kind === 'wall')) continue;
+          for (let c = 7; c >= 5 && !did; c--) if (LA.plant(f, 'boar', r, c).ok) did = true;
+        }
+      }
+      if (!did && f.clay >= 220) {
+        for (let r = 0; r < LA.ROWS && !did; r++) {
+          for (let c = 1; c <= 4 && !did; c++) if (LA.plant(f, 'thorn', r, c).ok) did = true;
+        }
+      }
+      if (!did) break;
+    }
+    if (f.stunned.length && f.apples > 0) {
+      const st = f.stunned[0];
+      if (LA.tame(f, st.row, Math.round(st.col)).ok) tamed++;
+    }
+  }
+  return { f, tamed, v };
+}
+
+let held = 0;
+for (const isl of ISLANDS) {
+  const { f, tamed, v } = play(isl, 'BOT-' + isl.id);
+  if (f.why === 'clear') held++;
+  console.log(
+    isl.id.padEnd(10), ('d' + isl.danger).padEnd(3), f.why.padEnd(8),
+    'guards', f.guards.filter(Boolean).length, 'ark', f.ark.hp,
+    '| tamed', String(tamed).padStart(2), 'kept', String(f.saved.length).padStart(2),
+    'lost', f.lost.length, '| plants', String(f.plants.length).padStart(2),
+    '| knows', (v.beasts || []).length, '| t', f.t.toFixed(0) + 's',
+  );
+}
+console.log(`\n${held}/${ISLANDS.length} islands held`);

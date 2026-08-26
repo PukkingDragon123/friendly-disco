@@ -1,52 +1,49 @@
-// THE ISLAND. A tile stage, a rising flood, and a box of clay dolls.
+// THE ISLAND. Five rows, nine columns, and everything the flood ruined walking down them.
 //
-// The whole scene is three layers and a HUD:
+// THE READ IS THE WHOLE JOB. A lane defence lives or dies on whether the player can answer
+// four questions without thinking: how much clay have I got, what is coming, what is in
+// each row, and which of those things is nearly down. So:
 //
-//   THE FLOOR, baked. Twenty-nine by eleven tiles plus every rock, briar and tree standing
-//   on them, composited into one canvas and blitted as a single drawImage. It is re-baked
-//   only when the terrain actually changes -- a bridge goes down, a ram breaks something,
-//   the flood takes a column -- which is a few times a stage. Drawing it live would be
-//   three hundred and nineteen tiles of work every frame for a floor that does not move.
+//   CLAY is the biggest number on the screen, top left, where the eye starts.
+//   ROWS are banded in alternating tone, so a beast's row is never in doubt.
+//   HEALTH sits over anything damaged, and only over things that are damaged.
+//   THE DAZED get a ring and a bouncing apple prompt, because that window is the game.
 //
-//   THE LIVE FIELD: animals, monsters, dolls, lightning, the water's edge. Everything here
-//   moves, so nothing here is baked; but everything is a blit of something that was.
-//
-//   THE WEATHER: rain over the lot, at whatever the island's sky is doing.
-//
-// The HUD's job is one number -- how long until the water arrives -- and one question:
-// which doll, and where. Both are as big as they can be without eating the field.
+// The floor is baked once into a single canvas -- lawn, water, rocks, trees, the ark's hull
+// -- and blitted as one call. Everything that moves is a blit of something that was baked.
 
-import { W, H, rect, text, textW, wash, clamp, lerp, disc, makeCanvas, line } from '../core/pixel.js';
+import { W, H, rect, text, textW, wash, clamp, disc, makeCanvas } from '../core/pixel.js';
 import { P, mix } from '../core/palette.js';
 import { Input } from '../core/input.js';
 import { approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
 import { createParticles } from '../core/particles.js';
 import * as UI from '../render/uikit.js';
-import { drawAnimal, drawAnimalShadow, drawAnimalIcon } from '../render/sprites.js';
+import { drawAnimal, drawAnimalIcon, drawAnimalShadow } from '../render/sprites.js';
 import { drawFolk, drawWand } from '../render/folk.js';
-import { drawDoll, drawMonster, drawStrike, DOLL_W } from '../render/dollart.js';
-import {
-  TILE, T, drawTile, drawProp, drawScatter, drawPatches, walkable, PROP_HEIGHT,
-} from '../render/tiles.js';
+import { drawScatter, drawPatches } from '../render/tiles.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
-import { abilityOf } from '../data/abilities.js';
-import { DOLL_BY_ID } from '../data/dolls.js';
-import { berthsFree, dollBox } from '../game/voyage.js';
+import { berthsFree } from '../game/voyage.js';
 import {
-  newField, update as tickField, placeAt, select, dollCharges, canPlaceDoll, radiusOf,
-  basket, endField, result, remaining, secondsLeft, COLS, ROWS, ARK_COLS,
-} from '../game/field.js';
-import { ITEM_BY_ID } from '../data/items.js';
+  newLane, update as tickLane, actAt, select, uproot, plantable, plantAt, canAfford,
+  endLane, result, waveText, COLS, ROWS, L,
+} from '../game/lane.js';
 
-/* ------------------------------------------------------------------- layout */
+/* -------------------------------------------------------------------- layout */
 
-const FX = 16;                       // the field's left edge
-const FY = 58;                       // and its top
-const FW = COLS * TILE;              // 928
-const FH = ROWS * TILE;              // 352
-const BAR_Y = FY + FH + 4;           // the tray
-const HUD_H = 54;
+const HUD_H = 72;
+const TW = 96, TH = 66;                     // one tile
+const FX = 48, FY = 78;                     // the field's top-left
+const FW = COLS * TW, FH = ROWS * TH;       // 864 x 330
+const BAR_Y = FY + FH + 4;                  // the tray
+
+// corrupted, blessed and dazed are the SAME sprite in three tints. That is the point: the
+// lion walking at you is visibly the lion you will plant next island.
+// The state REPLACES the material and keeps only the shape (see render/sprites.js). A
+// blessed beast is clay with a gold eye, a corrupted one is bruised dark with a red one,
+// and both are the same animal you will recognise when you tame it.
+const CORRUPT_TINT = { material: 'corrupt' };
+const BLESSED_TINT = { material: 'clay' };
 
 export function makeIslandScene() {
   let v = null, island = null, onDone = null;
@@ -55,71 +52,119 @@ export function makeIslandScene() {
   let parts = null;
   let hoverTile = null;
   let flash = 0, shake = 0;
-  let dollRects = [], deckRects = [], appleRects = [], castRect = null;
-  let floorCv = null, floorRev = -1;
+  let cardRects = [], appleRect = null, castRect = null;
+  let floorCv = null;
 
-  /* ----------------------------------------------------------- the floor bake */
+  /* ------------------------------------------------------------- the floor bake */
 
-  /**
-   * Bake the whole floor, props included.
-   *
-   * Props are drawn back to front by row: a tree is one and a half tiles tall so it hangs
-   * up over the row behind it, and drawing them in grid order would put the far one in
-   * front of the near one.
-   */
   function bakeFloor() {
-    if (!floorCv) floorCv = makeCanvas(FW, FH + PROP_HEIGHT);
+    if (!floorCv) floorCv = makeCanvas(FW, FH);
     if (!floorCv) return;
     const g = floorCv.g;
-    g.clearRect(0, 0, FW, FH + PROP_HEIGHT);
-    const off = PROP_HEIGHT;              // props can stick up above row 0
+    const G = groundTones();
+    g.clearRect(0, 0, FW, FH);
     for (let r = 0; r < ROWS; r++) {
+      const water = f.terrain[r * COLS] === L.WATER;
       for (let c = 0; c < COLS; c++) {
-        const k = f.grid[r * COLS + c];
-        drawTile(g, c * TILE, off + r * TILE, k, island.biome, f.vari[r * COLS + c]);
+        const x = c * TW, y = r * TH;
+        // BANDED ROWS, and banded by row rather than checkered by tile. A checkerboard
+        // tells you which tile you are over; a band tells you which ROW something is in,
+        // and the row is the only thing that matters in a lane game.
+        const base = water ? (r % 2 ? 'water1' : 'water0')
+          : (r % 2 ? G.dark : G.mid);
+        rect(g, x, y, TW, TH, base);
+        // a lit lip along the top of each band and a dark one along the bottom. Subtler
+        // than this and the rows do not separate, and a row you cannot see is a lane game
+        // you cannot play.
+        if (!water) {
+          rect(g, x, y, TW, 3, mix(P[G.light], P[base], 0.35));
+          rect(g, x, y + TH - 3, TW, 3, mix(P.ink, P[base], 0.65));
+        }
       }
-    }
-    // broad tonal patches first, then the small stuff on top of them
-    const open = (c, r) => {
-      const k = f.grid[r * COLS + c];
-      return k === T.GRASS || k === T.SAND || k === T.MUD;
-    };
-    drawPatches(g, 0, off, COLS, ROWS, island.biome, open);
-    drawScatter(g, 0, off, COLS, ROWS, island.biome,
-      (c, r) => walkable(f.grid[r * COLS + c]) && f.grid[r * COLS + c] !== T.DECK);
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const k = f.grid[r * COLS + c];
-        if (k === T.ROCK || k === T.BUSH || k === T.TREE || k === T.CLIFF) {
-          drawProp(g, c * TILE, off + r * TILE, k, island.biome, f.vari[r * COLS + c]);
+      if (water) {
+        for (let i = 0; i < 26; i++) {
+          rect(g, (i * 37) % FW, r * TH + 8 + (i % 6) * 9, 12, 2, i % 3 ? 'water3' : 'foam');
         }
       }
     }
-    floorRev = f.rev || 0;
+    // texture, off world position so nothing lines up with the 96-pixel grid
+    const dry = (c, r) => f.terrain[r * COLS + c] !== L.WATER;
+    drawPatches(g, 0, 0, Math.ceil(FW / 32), Math.ceil(FH / 32), island.biome,
+      (c, r) => dry(Math.min(COLS - 1, (c * 32 / TW) | 0), Math.min(ROWS - 1, (r * 32 / TH) | 0)));
+    drawScatter(g, 0, 0, Math.ceil(FW / 32), Math.ceil(FH / 32), island.biome,
+      (c, r) => dry(Math.min(COLS - 1, (c * 32 / TW) | 0), Math.min(ROWS - 1, (r * 32 / TH) | 0)), 420);
+    // the grid, faint. Enough to plant against, not enough to look at.
+    for (let c = 1; c < COLS; c++) rect(g, c * TW, 0, 1, FH, mix(P.ink, P[G.mid], 0.72));
+    for (let r = 1; r < ROWS; r++) rect(g, 0, r * TH, FW, 1, mix(P.ink, P[G.mid], 0.72));
+    // rocks and trees, which are part of the floor because they never move
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const k = f.terrain[r * COLS + c];
+        if (k === L.ROCK) drawRock(g, c * TW + TW / 2, r * TH + TH - 6);
+        if (k === L.TREE) drawTrunk(g, c * TW + TW / 2, r * TH + TH - 4);
+      }
+    }
   }
 
-  /** Tile under a screen point, or null. */
+  function groundTones() {
+    const b = island.biome;
+    if (b === 'desert' || b === 'coral') return { dark: 'wood1', mid: 'sand', light: 'cream' };
+    if (b === 'snow' || b === 'tundra' || b === 'peak') return { dark: 'snow0', mid: 'snow1', light: 'white' };
+    if (b === 'volcano') return { dark: 'ink', mid: 'ash', light: 'stone1' };
+    if (b === 'swamp') return { dark: 'deep', mid: 'green0', light: 'moss' };
+    if (b === 'ruins' || b === 'mountain') return { dark: 'stone1', mid: 'stone2', light: 'stone3' };
+    return { dark: 'green0', mid: 'leaf2', light: 'leaf3' };
+  }
+
+  /** A boulder: a faceted lump, wide at the foot. */
+  function drawRock(g, cx, by) {
+    const prof = [16, 16, 15, 14, 12, 10, 8, 5];
+    for (let i = 0; i < prof.length; i++) {
+      const hw = prof[i], y = by - i * 3;
+      rect(g, cx - hw, y, hw * 2, 3, i > 5 ? 'stone3' : i > 2 ? 'stone2' : 'stone1');
+      rect(g, cx + Math.round(hw * 0.3), y, hw - Math.round(hw * 0.3), 3, 'stone0');
+    }
+    rect(g, cx - 18, by + 2, 36, 3, mix(P.ink, P.shadow, 0.4));
+    rect(g, cx - 8, by - 22, 8, 3, 'stone4');
+  }
+
+  /** An apple tree's trunk and canopy. The fruit is live, because it ripens. */
+  function drawTrunk(g, cx, by) {
+    for (let i = 0; i < 9; i++) rect(g, cx - 4, by - i * 4, 8, 4, i % 3 === 0 ? 'wood0' : 'bark');
+    rect(g, cx - 4, by - 34, 3, 34, 'wood2');
+    for (const [dx, dy, r] of [[0, -50, 22], [-16, -40, 15], [16, -40, 15], [-8, -60, 14], [9, -58, 14]]) {
+      disc(g, cx + dx, by + dy, r, 'leaf1');
+    }
+    for (const [dx, dy, r] of [[-6, -56, 12], [10, -50, 9]]) disc(g, cx + dx, by + dy, r, 'leaf2');
+    for (let i = 0; i < 9; i++) rect(g, cx - 20 + i * 5, by - 66 + (i % 3) * 3, 4, 3, 'leaf3');
+  }
+
+  const tx = (c) => FX + c * TW;
+  const ty = (r) => FY + r * TH;
+  const cxOf = (c) => FX + c * TW + TW / 2;
+  const cyOf = (r) => FY + r * TH + TH - 8;
+
   function tileAtPoint(x, y) {
-    const c = Math.floor((x - FX) / TILE);
-    const r = Math.floor((y - FY) / TILE);
+    const c = Math.floor((x - FX) / TW);
+    const r = Math.floor((y - FY) / TH);
     if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return null;
     return { c, r };
   }
-  const tx = (c) => FX + c * TILE;
-  const ty = (r) => FY + r * TILE;
 
   /* ------------------------------------------------------------------ update */
 
   function finish() {
     if (outro >= 0) return;
-    endField(f, f.floodCols >= COLS - ARK_COLS - 1 ? 'flood' : 'cast off');
+    endLane(f, f.ark.hp <= 0 ? 'overrun' : 'clear');
     outro = 0;
     Audio.sfx(f.saved.length ? 'fanfare' : 'fail');
   }
 
-  function pickDoll(id) {
-    if (dollCharges(f, id) <= 0) { Audio.sfx('error'); return; }
-    select(f, { kind: 'doll', id });
+  function pickBeast(id) {
+    const def = f.hand.find((b) => b.id === id);
+    if (!def) return;
+    if (!canAfford(f, def)) { Audio.sfx('error'); return; }
+    select(f, { kind: 'beast', id });
     Audio.sfx('click');
   }
 
@@ -139,452 +184,511 @@ export function makeIslandScene() {
       return;
     }
 
-    const before = f.strikes.length;
-    tickField(f, dt);
-    if (f.strikes.length > before) { shake = 0.3; Audio.sfx('boss_sting'); }
+    const guardsBefore = f.guards.filter(Boolean).length;
+    const arkBefore = f.ark.hp;
+    tickLane(f, dt);
+    if (f.guards.filter(Boolean).length < guardsBefore) { shake = 0.25; Audio.sfx('crate_land'); }
+    if (f.ark.hp < arkBefore) { shake = 0.45; Audio.sfx('boss_sting'); }
     if (f.over) { finish(); return; }
 
     hoverTile = tileAtPoint(m.x, m.y);
 
-    // --- keys: a number picks a doll, escape drops the selection
-    const box = dollBox(v);
-    for (let i = 0; i < Math.min(9, box.length); i++) {
-      if (Input.pressed('Digit' + (i + 1))) pickDoll(box[i].id);
+    for (let i = 0; i < Math.min(9, f.hand.length); i++) {
+      if (Input.pressed('Digit' + (i + 1))) pickBeast(f.hand[i].id);
     }
-    if (Input.pressed('Escape') || m.rightPressed) select(f, null);
+    if (Input.pressed('KeyA')) { select(f, { kind: 'apple' }); Audio.sfx('click'); }
+    if (Input.pressed('Escape')) select(f, null);
     if (Input.pressed('Space') || Input.pressed('Enter')) { finish(); return; }
 
+    // right-click digs one back up, which is the only way to correct a mistake
+    if (m.rightPressed && hoverTile) {
+      const res = uproot(f, hoverTile.r, hoverTile.c);
+      Audio.sfx(res.ok ? 'crate_open' : 'error');
+      return;
+    }
     if (!m.pressed) return;
 
-    // --- the tray
-    for (const dr of dollRects) {
-      if (!UI.hover(dr.rect, m)) continue;
-      pickDoll(dr.id);
-      return;
-    }
-    for (const ar of deckRects) {
-      if (!UI.hover(ar.rect, m)) continue;
-      select(f, { kind: 'animal', id: ar.id });
-      Audio.sfx('click');
-      return;
-    }
-    for (const ar of appleRects) {
-      if (!UI.hover(ar.rect, m)) continue;
-      select(f, { kind: 'apple', id: ar.id });
-      Audio.sfx('click');
+    for (const cr of cardRects) if (UI.hover(cr.rect, m)) { pickBeast(cr.id); return; }
+    if (appleRect && UI.hover(appleRect, m)) {
+      if (f.apples > 0) { select(f, { kind: 'apple' }); Audio.sfx('click'); }
+      else Audio.sfx('error');
       return;
     }
     if (castRect && UI.hover(castRect, m)) { finish(); return; }
 
-    // --- the field
-    if (hoverTile && f.sel) {
-      const res = placeAt(f, hoverTile.c, hoverTile.r);
+    if (hoverTile) {
+      const res = actAt(f, hoverTile.r, hoverTile.c);
+      lastAct = { r: hoverTile.r, c: hoverTile.c, res };
       if (res.ok) {
-        flash = 0.35;
+        flash = 0.3;
         Audio.sfx('crate_land');
-        parts.burst('dust', tx(hoverTile.c) + TILE / 2, ty(hoverTile.r) + TILE / 2, { count: 8 });
-      } else {
+        parts.burst('dust', cxOf(hoverTile.c), cyOf(hoverTile.r), { count: 8 });
+      } else if (res.why && res.why !== 'pick something first') {
         Audio.sfx('error');
+        note(res.why);
       }
     }
   }
+
+  let hint = null, hintT = 0;
+  let lastAct = null;
+  function note(why) { hint = why.toUpperCase(); hintT = 1.6; }
 
   /* -------------------------------------------------------------------- draw */
 
-  /** The sky and the far shore above the field, so the stage is somewhere. */
+  /** The sky and the far shore above the field, so the fight is happening somewhere. */
   function drawBackdrop(g) {
     const sky = (island.sky && island.sky[0]) || 'sky';
-    rect(g, 0, 0, W, FY + 8, sky);
-    rect(g, 0, FY - 14, W, 14, mix(P.water1, P[sky], 0.35));
-    for (let i = 0; i < 22; i++) {
-      const wx = (i * 47 + Math.round(t * 9)) % (W + 40) - 20;
-      rect(g, wx, FY - 12 + (i % 3) * 4, 8, 2, 'water3');
+    rect(g, 0, HUD_H, W, FY - HUD_H + 6, sky);
+    // THE FAR SHORE. The field is 864 of 960 wide, and the strip beyond its right edge was
+    // showing the page background -- a black band exactly where the enemy walks in from.
+    // It is the water they are wading out of, which is also the right answer thematically.
+    for (let x = FX + FW; x < W; x++) {
+      const fr = (x - FX - FW) / (W - FX - FW);
+      rect(g, x, FY, 1, FH, fr < 0.3 ? 'water0' : fr < 0.7 ? 'deep' : 'night');
+    }
+    for (let i = 0; i < 18; i++) {
+      const wy = FY + ((t * 22 + i * 23) % FH);
+      rect(g, FX + FW + 4 + (i % 4) * 9, wy, 10, 2, i % 3 ? 'water3' : 'foam');
+    }
+    rect(g, 0, FY - 8, W, 8, mix(P.water1, P[sky], 0.4));
+    for (let i = 0; i < 26; i++) {
+      const wx = (i * 41 + Math.round(t * 8)) % (W + 40) - 20;
+      rect(g, wx, FY - 7 + (i % 3) * 3, 9, 2, 'water3');
     }
   }
 
-  /** The water that is already over the field, plus the edge that is coming. */
-  function drawFlood(g) {
-    const edge = COLS - Math.floor(f.floodCols);
-    if (edge >= COLS) return;
-    const x0 = tx(Math.max(0, edge));
-    // the surface: chunky moving dashes, because still water reads as a blue rectangle
+  /**
+   * The ark's side, down the left edge, with a guard block per row.
+   *
+   * The guards are the most important thing on this strip: five one-shot saves, and the
+   * player has to be able to count them at a glance while something is walking.
+   */
+  function drawArk(g) {
+    for (let x = 0; x < FX; x++) {
+      const fr = x / FX;
+      rect(g, x, FY, 1, FH, fr < 0.25 ? 'wood0' : fr < 0.6 ? 'wood1' : 'wood2');
+    }
+    for (let y = FY; y < FY + FH; y += 9) rect(g, 0, y, FX, 1, 'wood0');
+    rect(g, FX - 3, FY, 3, FH, 'wood3');
     for (let r = 0; r < ROWS; r++) {
-      const yy = ty(r);
-      for (let i = 0; i < 8; i++) {
-        const dx = ((t * 22 + i * 31 + r * 17) % (FX + FW - x0));
-        rect(g, x0 + dx, yy + 6 + (i % 4) * 7, 10, 2, i % 3 ? 'water3' : 'foam');
-      }
-    }
-    // THE EDGE ITSELF, bright and busy. It is the only thing on screen that is a deadline,
-    // so it gets a hard white lip and a row of spray.
-    rect(g, x0 - 2, FY, 4, FH, 'foam');
-    for (let i = 0; i < 24; i++) {
-      const yy = FY + ((t * 40 + i * 19) % FH);
-      rect(g, x0 - 6 - (i % 3) * 3, yy, 4, 3, i % 2 ? 'white' : 'foam');
-    }
-  }
-
-  /** A doll's ghost under the cursor, and whether it can go there. */
-  function drawGhost(g) {
-    if (!f.sel || !hoverTile) return;
-    const { c, r } = hoverTile;
-    if (f.sel.kind === 'doll') {
-      const d = DOLL_BY_ID[f.sel.id];
-      if (!d) return;
-      const bad = canPlaceDoll(f, d, c, r);
-      const cx = tx(c) + TILE / 2, cy = ty(r) + TILE - 2;
-      // the radius FIRST, because that is the thing being decided
-      const rr = radiusOf(f, d);
-      if (rr > 0) {
-        const rad = rr * TILE;
-        const steps = Math.max(20, Math.round(rad / 3));
-        for (let i = 0; i < steps; i++) {
-          if (i % 3 === 2) continue;
-          const a = (i / steps) * Math.PI * 2 + t * 0.6;
-          rect(g, cx + Math.cos(a) * rad - 1, cy + Math.sin(a) * rad * 0.52 - 1, 2, 2,
-            bad ? 'red1' : d.mark);
-        }
-      }
-      rect(g, tx(c), ty(r), TILE, TILE, bad ? mix(P.red1, P.ink, 0.4) : mix(P[d.mark], P.ink, 0.55));
-      tileFrame(g, tx(c), ty(r), bad ? 'red2' : d.mark);
-      const prev = g.globalAlpha;
-      g.globalAlpha = 0.7;
-      drawDoll(g, d, cx, cy, t, { lit: !bad, tile: TILE });
-      g.globalAlpha = prev;
-      if (bad) {
-        const lw = textW(bad.toUpperCase(), { font: 3 }) + 8;
-        wash(g, cx - lw / 2, ty(r) - 14, lw, 12, 'ink', 0.85);
-        text(g, bad.toUpperCase(), cx, ty(r) - 12, 'red2', { font: 3, center: true });
-      }
-    } else {
-      const a = ANIMAL_BY_ID[f.sel.id];
-      if (!a) return;
-      const ab = abilityOf(a);
-      rect(g, tx(c), ty(r), TILE, TILE, mix(P[ab.color], P.ink, 0.5));
-      tileFrame(g, tx(c), ty(r), ab.color);
-      const prev = g.globalAlpha;
-      g.globalAlpha = 0.72;
-      drawAnimal(g, a, tx(c) + TILE / 2, ty(r) + TILE - 3, { scale: 1 });
-      g.globalAlpha = prev;
-      text(g, ab.verb, tx(c) + TILE / 2, ty(r) - 12, ab.color, { font: 3, center: true });
-    }
-  }
-
-  /** Everything that lives on the field, in back-to-front order by row. */
-  function drawLive(g) {
-    // dolls first: they are furniture, and animals walk in front of them
-    for (const d of f.dolls) {
-      drawDoll(g, d.d, tx(d.c - 0.5) + TILE / 2, ty(d.r - 0.5) + TILE - 2, t,
-        { lit: d.lit, ring: true, tile: TILE });
-    }
-    // one sorted pass so a near animal covers a far one
-    const bodies = [];
-    for (const cr of f.animals) {
-      if (cr.state === 'safe' || cr.state === 'lost') continue;
-      bodies.push({ kind: 'a', r: cr.r, e: cr });
-    }
-    for (const m of f.monsters) bodies.push({ kind: 'm', r: m.r, e: m });
-    bodies.sort((p, q) => p.r - q.r);
-    for (const b of bodies) {
-      const e = b.e;
-      const x = FX + e.c * TILE, y = FY + e.r * TILE;
-      if (b.kind === 'a') {
-        drawAnimalShadow(g, x, y + 10, 1, { color: 'shadow' });
-        drawAnimal(g, e.a, x, y, {
-          scale: 1,
-          walk: e.state === 'wander' ? 0 : e.walk,
-          step: e.state === 'wander' ? 0 : undefined,
-          flip: e.face < 0,
-          mood: e.state === 'flee' ? 'scared' : e.led > 0 ? 'happy' : 'idle',
-          blink: (e.blink % 4) < 0.12 ? 1 : 0,
-          wet: e.wet > 0.4 ? e.wet : 0,
-          rain: f.rain > 0.6 ? f.rain : 0,
-          t,
-        });
-        // led animals get a chevron: the one bit of state you must be able to read at a
-        // glance, because it tells you whether a doll you spent is doing anything
-        if (e.led > 0 || e.state === 'lead') {
-          for (let i = 0; i < 2; i++) {
-            const k = ((t * 1.6 + i * 0.5) % 1);
-            rect(g, x - 10 - k * 8, y - 20 + i * 3, 5, 2, 'gold');
-          }
-        }
-        if (e.loyal) rect(g, x + 8, y - 16, 4, 4, 'red2');
+      const y = ty(r);
+      if (f.guards[r]) {
+        // a plug of clay in the gap: lit, alive, and obviously about to be spent
+        const bob = Math.round(Math.sin(t * 2 + r) * 1);
+        rect(g, FX - 16, y + 10 + bob, 20, TH - 22, 'clay2');
+        rect(g, FX - 16, y + 10 + bob, 20, 3, 'clay4');
+        rect(g, FX - 16, y + TH - 15 + bob, 20, 3, 'clay0');
+        UI.icon(g, 'shield', FX - 12, y + TH / 2 - 6 + bob, { color: 'gold' });
       } else {
-        drawMonster(g, e.def, x, y + 12, t, {
-          size: e.def.size, flip: e.face < 0, scare: true, tile: TILE, calm: e.calm,
-        });
+        rect(g, FX - 16, y + 10, 20, TH - 22, mix(P.ink, P.wood0, 0.5));
+        for (let i = 0; i < 3; i++) rect(g, FX - 14 + i * 6, y + 16 + i * 6, 4, 4, 'clay0');
       }
     }
-    for (const s of f.strikes) drawStrike(g, tx(s.c) + TILE / 2, ty(s.r) + TILE - 4, s.t / 0.34);
+  }
+
+  /** A ripe apple hanging in a tree, and a hand cursor over it. */
+  function drawTrees(g) {
+    for (const tr of f.trees) {
+      const cx = cxOf(tr.col), by = cyOf(tr.row);
+      if (!tr.ripe) {
+        // a bud, so a tree that is coming back is visibly coming back
+        const k = clamp(tr.t / 24, 0, 1);
+        rect(g, cx + 8, by - 52, 4, 4, mix(P.leaf0, P.red2, k));
+        continue;
+      }
+      const bob = Math.round(Math.sin(t * 2.4) * 2);
+      disc(g, cx + 10, by - 50 + bob, 7, 'red2');
+      disc(g, cx + 8, by - 52 + bob, 3, 'red1');
+      rect(g, cx + 9, by - 58 + bob, 2, 5, 'wood1');
+      rect(g, cx + 11, by - 59 + bob, 4, 2, 'leaf3');
+      // a ring, because a ripe apple is a thing you must be told to click
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2 + t * 1.4;
+        rect(g, cx + 10 + Math.cos(a) * 14 - 1, by - 50 + Math.sin(a) * 14 - 1 + bob, 2, 2, 'gold');
+      }
+    }
+  }
+
+  /** Everything alive, back to front by row. */
+  function drawLive(g) {
+    // plants first: they are behind the walkers that come at them
+    for (const p of f.plants) {
+      const cx = cxOf(p.col), by = cyOf(p.row);
+      const a = ANIMAL_BY_ID[p.def.base];
+      if (p.def.kind === 'pad') {
+        // a reed is a raft, drawn flat rather than as an animal standing on water
+        for (let i = 0; i < 3; i++) rect(g, cx - 30 + i * 22, by - 6, 18, 8, i % 2 ? 'leaf1' : 'leaf2');
+        rect(g, cx - 32, by - 8, 64, 3, 'leaf3');
+      }
+      if (a) {
+        drawAnimalShadow(g, cx, by, 1);
+        drawAnimal(g, a, cx, by, Object.assign({
+          scale: 1, blessed: true, t,
+          mood: p.flash > 0 ? 'scared' : 'happy',
+          step: p.def.rate ? Math.floor((f.t / Math.max(0.2, p.def.rate)) * 2) % 4 : 0,
+        }, BLESSED_TINT));
+      }
+      if (p.hp < p.max) hpBar(g, cx, by - 62, p.hp / p.max, 'leaf3');
+      if (p.flash > 0) wash(g, cx - 30, by - 60, 60, 62, 'red2', p.flash * 0.5);
+    }
+
+    // the dazed: ordinary animals again, ringed, with an apple prompt
+    for (const s of f.stunned) {
+      const cx = cxOf(s.col), by = cyOf(s.row);
+      const left = 1 - s.t / s.life;
+      drawAnimalShadow(g, cx, by, 1);
+      drawAnimal(g, s.a, cx, by, { scale: 1, mood: 'blink', flip: true, t });
+      // the ring counts the window down, which is the clearest clock in the game
+      const steps = 22;
+      for (let i = 0; i < steps; i++) {
+        if (i / steps > left) continue;
+        const ang = -Math.PI / 2 + (i / steps) * Math.PI * 2;
+        rect(g, cx + Math.cos(ang) * 34 - 2, by - 24 + Math.sin(ang) * 26 - 2, 4, 4,
+          left > 0.35 ? 'gold' : 'red2');
+      }
+      const bob = Math.round(Math.sin(t * 5) * 3);
+      disc(g, cx, by - 68 + bob, 8, 'red2');
+      rect(g, cx - 1, by - 76 + bob, 2, 5, 'wood1');
+      text(g, 'CLICK', cx, by - 90 + bob, 'cream', { font: 3, center: true });
+    }
+
+    // the corrupted, walking
+    for (const b of f.beasts) {
+      const cx = FX + (b.x - 0.5) * TW, by = cyOf(b.row);
+      const a = ANIMAL_BY_ID[b.def.base];
+      if (!a) continue;
+      drawAnimalShadow(g, cx, by, 1);
+      drawAnimal(g, a, cx, by, Object.assign({
+        scale: 1, flip: true, walk: b.walk, t,
+        mood: b.flash > 0 ? 'scared' : 'angry',
+        rain: f.rain > 0.6 ? f.rain : 0,
+      }, CORRUPT_TINT));
+      // the corruption: a few dark motes coming off it
+      for (let i = 0; i < 3; i++) {
+        const k = ((t * 0.8 + i * 0.33) % 1);
+        rect(g, cx - 10 + i * 9, by - 40 - k * 18, 3, 3, i % 2 ? 'purple0' : 'night');
+      }
+      if (b.hp < b.max) hpBar(g, cx, by - 62, b.hp / b.max, 'red2');
+      if (b.slowT > 0) UI.icon(g, 'wave', cx - 6, by - 74, { color: 'ice' });
+      if (b.def.armour) UI.icon(g, 'shield', cx + 10, by - 74, { color: 'stone3' });
+    }
+
+    // shots
+    for (const s of f.shots) {
+      const y = cyOf(s.row) - 26;
+      if (s.tracer) {
+        const x0 = FX + s.x * TW, x1 = FX + (s.to - 0.5) * TW;
+        for (let x = Math.min(x0, x1); x < Math.max(x0, x1); x += 10) rect(g, x, y, 6, 3, 'ice');
+        continue;
+      }
+      if (s.burst) {
+        const rr = s.burst * TW * (0.5 + s.t * 3);
+        for (let i = 0; i < 16; i++) {
+          const a = (i / 16) * Math.PI * 2;
+          rect(g, FX + (s.x + 0.5) * TW + Math.cos(a) * rr - 3, y + Math.sin(a) * rr * 0.6 - 3,
+            6, 6, i % 2 ? 'orange' : 'gold');
+        }
+        continue;
+      }
+      if (s.ring) {
+        for (let i = 0; i < COLS; i++) rect(g, FX + i * TW + 20, y, 10, 3, 'ice');
+        continue;
+      }
+      rect(g, FX + s.x * TW, y, 10, 5, 'leaf3');
+      rect(g, FX + s.x * TW + 8, y + 1, 4, 3, 'moss');
+    }
+    for (const bee of f.bees) {
+      const cx = FX + bee.x * TW, cy = cyOf(bee.row) - 30;
+      rect(g, cx - 3, cy - 3, 7, 6, 'gold');
+      rect(g, cx - 1, cy - 3, 3, 6, 'ink');
+      rect(g, cx - 5, cy - 6 + (Math.floor(t * 30) % 2), 4, 3, 'ice');
+    }
     for (const p of f.puffs) {
-      const k = p.t / 0.6;
-      const a = (p.i / 6) * Math.PI * 2;
-      rect(g, FX + p.c * TILE + Math.cos(a) * k * 18 - 2, FY + p.r * TILE + Math.sin(a) * k * 12 - 2,
-        4, 4, k > 0.6 ? 'clay1' : 'clay3');
+      const k = p.t / 0.7;
+      const a = (p.i / 7) * Math.PI * 2;
+      const c = p.kind === 'clay' ? 'clay4' : p.kind === 'bless' ? 'gold'
+        : p.kind === 'guard' ? 'clay2' : p.kind === 'free' ? 'white' : 'clay3';
+      rect(g, cxOf(p.c) + Math.cos(a) * k * 30 - 3, cyOf(p.r) - 20 + Math.sin(a) * k * 22 - 3,
+        6, 6, k > 0.6 ? mix(P[c], P.ink, 0.4) : c);
     }
   }
 
-  /** Rain. Lots of it, which is the whole mood of the game. */
+  function hpBar(g, cx, y, k, c) {
+    rect(g, cx - 22, y, 44, 7, 'ink');
+    rect(g, cx - 20, y + 1, 40, 5, mix(P.ink, P.shadow, 0.4));
+    rect(g, cx - 20, y + 1, Math.round(40 * clamp(k, 0, 1)), 5, k < 0.3 ? 'red2' : c);
+  }
+
+  /** Rain, which is what the sky does on every island in this game. */
   function drawRain(g) {
-    const n = Math.round(30 + f.rain * 110);
+    const n = Math.round(24 + f.rain * 90);
     for (let i = 0; i < n; i++) {
-      const sp = 260 + (i % 5) * 90;
-      const x = ((i * 137 + Math.round(t * 90)) % (FW + 120)) - 60;
+      const sp = 300 + (i % 5) * 110;
+      const x = ((i * 149 + Math.round(t * 100)) % (FW + 140)) - 70;
       const y = ((i * 71 + Math.round(t * sp)) % (FH + 40)) - 20;
-      rect(g, FX + x, FY + y, 2, 7, i % 6 === 0 ? 'white' : 'ice');
-    }
-    // and splashes where it lands
-    for (let i = 0; i < Math.round(f.rain * 26); i++) {
-      const x = (i * 211 + Math.round(t * 40)) % FW;
-      const y = (i * 97 + Math.round(t * 13)) % FH;
-      if (((t * 3 + i) % 1) > 0.3) continue;
-      rect(g, FX + x, FY + y, 6, 2, 'foam');
+      rect(g, FX + x, FY + y, 2, 8, i % 6 === 0 ? 'white' : 'ice');
     }
   }
 
-  /** The golem, on his own deck, pointing. */
+  /** The golem, on his own deck, pointing at whatever you are about to do. */
   function drawKeeper(g) {
-    const gx = FX + TILE, gy = FY + FH - 8;
+    const gx = 22, gy = FY + FH + 4;
     const wet = f.rain > 0.5;
-    const pose = f.sel ? 'react' : f.dolls.length ? 'happy' : 'idle';
     drawFolk(g, 'golem', gx, gy, t, {
-      scale: 2, pose, mud: wet ? 0.9 : 0.4, wet: wet ? 1 : 0,
+      scale: 2, pose: f.sel ? 'react' : 'idle', mud: wet ? 0.9 : 0.4, wet: wet ? 1 : 0,
     });
-    // the wand, pointed at whatever the cursor is over
     const hx = gx + 22, hy = gy - 52;
     let ang = -0.4;
-    if (hoverTile) ang = Math.atan2(ty(hoverTile.r) + TILE / 2 - hy, tx(hoverTile.c) + TILE / 2 - hx);
+    if (hoverTile) ang = Math.atan2(cyOf(hoverTile.r) - 20 - hy, cxOf(hoverTile.c) - hx);
     drawWand(g, hx, hy, ang, f.sel ? 0.7 + Math.sin(t * 7) * 0.3 : 0, t, { scale: 2 });
   }
 
   /* --------------------------------------------------------------------- HUD */
 
-  /** A two-pixel frame round one tile. Used for the placement cursor. */
-  function tileFrame(g, x, y, c) {
-    rect(g, x, y, TILE, 2, c); rect(g, x, y + TILE - 2, TILE, 2, c);
-    rect(g, x, y, 2, TILE, c); rect(g, x + TILE - 2, y, 2, TILE, c);
-  }
-
   /**
-   * The top bar. Its whole job is ONE NUMBER -- seconds until the water is here -- so that
-   * number is the biggest thing on screen after the field itself.
+   * The top bar.
+   *
+   * CLAY IS THE BIGGEST THING ON IT. Every decision in the game is "can I afford that yet",
+   * so the number goes top left at heading weight, where the eye starts and where it can be
+   * read out of the corner of your vision while something is walking at you.
    */
   function drawTopBar(g) {
     UI.panel(g, 0, 0, W, HUD_H, { style: 'wood', flat: true });
-    text(g, island.name.toUpperCase(), 10, 6, 'cream', { font: 7 });
-    text(g, `${island.biome} · danger ${island.danger}`, 10, 32, 'parch1', { font: 3 });
 
-    // THE CLOCK, and it is the biggest thing up here on purpose. Everything else in this
-    // bar is a score; this is a deadline, and it is the only number the player has to
-    // arithmetic against while deciding where a doll goes.
-    const left = secondsLeft(f);
-    const frac = clamp(1 - left / f.limit, 0, 1);
-    const bx = 206, bw = 286;
-    text(g, 'THE WATER IS COMING', bx, 4, 'parch1', { font: 3 });
-    rect(g, bx, 16, bw, 16, 'deep');
-    rect(g, bx, 16, Math.round(bw * frac), 16, frac > 0.72 ? 'red1' : 'water2');
-    // a chunky lip on the leading edge, the same read as the flood edge on the field
-    rect(g, bx + Math.round(bw * frac) - 2, 16, 4, 16, 'foam');
-    for (let i = 0; i < 6; i++) {
-      const wx = bx + ((Math.round(t * 26) + i * 48) % Math.max(1, Math.round(bw * frac)));
-      rect(g, wx, 20 + (i % 3) * 4, 8, 2, 'water3');
-    }
-    UI.boxEdge(g, bx - 2, 14, bw + 4, 20, 'wood0');
-    const secs = Math.ceil(left);
-    text(g, `${secs}s`, bx + bw + 12, 12, secs <= 12 ? 'red2' : 'cream',
-      { font: 7, wave: secs <= 12 ? 1 : 0, t });
+    // clay
+    const dripping = f.event && f.event.id === 'drought';
+    disc(g, 32, 30, 15, 'clay2');
+    disc(g, 29, 26, 8, 'clay4');
+    UI.boxEdge(g, 16, 14, 32, 32, 'clay0');
+    text(g, String(f.clay), 58, 12, dripping ? 'rust' : 'cream', { font: 7 });
+    text(g, dripping ? 'CLAY · RUNNING SLOW' : 'CLAY', 58, 36, dripping ? 'rust' : 'parch1', { font: 3 });
 
-    // the ledger, three columns that do not touch
-    const cols = [
-      { x: 566, icon: 'leaf', n: f.saved.length, label: 'SAVED', c: 'leaf4' },
-      { x: 646, icon: 'wave', n: f.lost.length, label: 'LOST', c: f.lost.length ? 'red2' : 'grey2' },
-    ];
-    for (const c of cols) {
-      UI.icon(g, c.icon, c.x, 14, { color: c.c });
-      text(g, String(c.n), c.x + 22, 10, c.c, { font: 7 });
-      text(g, c.label, c.x, 34, 'parch1', { font: 3 });
+    // apples
+    const ax = 190;
+    disc(g, ax + 12, 28, 11, f.apples ? 'red2' : mix(P.red0, P.ink, 0.5));
+    rect(g, ax + 11, 15, 3, 5, 'wood1');
+    text(g, String(f.apples), ax + 30, 14, f.apples ? 'cream' : 'grey1', { font: 7 });
+    text(g, 'APPLES', ax + 30, 36, 'parch1', { font: 3 });
+
+    // the wave
+    text(g, waveText(f), 320, 10, f.inWave ? 'gold' : 'parch1', { font: 5 });
+    const w = f.waves[Math.max(0, f.wave)];
+    if (w) {
+      const totalLeft = f.queue.length + f.beasts.length;
+      rect(g, 320, 32, 240, 12, 'deep');
+      const done = w.count ? 1 - f.queue.length / w.count : 1;
+      rect(g, 320, 32, Math.round(240 * clamp(done, 0, 1)), 12, 'rust');
+      UI.boxEdge(g, 318, 30, 244, 16, 'wood0');
+      text(g, `${totalLeft} STILL COMING`, 572, 32, 'parch1', { font: 3 });
     }
+
+    // the guards and the ark
+    let gx = 700;
+    for (let r = 0; r < ROWS; r++) {
+      rect(g, gx + r * 14, 16, 11, 14, f.guards[r] ? 'clay3' : mix(P.ink, P.wood0, 0.5));
+      if (f.guards[r]) rect(g, gx + r * 14, 16, 11, 3, 'clay4');
+    }
+    text(g, 'ROW GUARDS', gx, 34, 'parch1', { font: 3 });
+    gx += 88;
+    for (let i = 0; i < f.ark.max; i++) {
+      UI.icon(g, 'heart', gx + i * 16, 16, { color: i < f.ark.hp ? 'red2' : 'shadow' });
+    }
+    text(g, 'THE ARK', gx, 34, f.ark.hp > 1 ? 'parch1' : 'red2', { font: 3 });
+
+    // the deck
     const free = berthsFree(v);
-    text(g, `${v.aboard.length}/${v.aboard.length + free}`, 722, 10, free ? 'brass3' : 'red2', { font: 7 });
-    text(g, 'BERTHS', 722, 34, free ? 'parch1' : 'red2', { font: 3 });
+    text(g, `${v.aboard.length}/${v.aboard.length + free}`, W - 12, 10,
+      free ? 'brass3' : 'red2', { font: 7, right: true });
+    text(g, 'BERTHS', W - 12, 34, free ? 'parch1' : 'red2', { font: 3, right: true });
 
-    const rem = remaining(f);
-    text(g, String(rem), W - 12, 10, rem ? 'gold' : 'leaf4', { font: 7, right: true });
-    text(g, 'STILL ASHORE', W - 12, 34, 'parch1', { font: 3, right: true });
+    text(g, island.name.toUpperCase(), 320, 52, 'cream', { font: 3 });
+    if (f.event) {
+      const ew = textW(f.event.name, { font: 5 }) + 16;
+      rect(g, 470, 48, ew, 18, mix(P[f.event.color], P.ink, 0.45));
+      UI.boxEdge(g, 470, 48, ew, 18, f.event.color);
+      text(g, f.event.name, 478, 50, 'cream', { font: 5 });
+      text(g, f.event.blurb, 478 + ew, 52, f.event.color, { font: 3 });
+    }
   }
 
   /**
-   * The tray: the doll box, the deck, and the way out.
+   * The tray: one card per beast you know.
    *
-   * Each doll shows its emblem, its name, its rule in one line, and how many charges are
-   * left this stage. The rule is on the button rather than in a tooltip on purpose -- the
-   * game is choosing between rules, and a rule you have to hover to read is a rule you will
-   * not factor in.
+   * The RULE is on the card, not in a tooltip. The whole game is choosing between rules, and
+   * a rule you have to hover to read is a rule you will not factor in while a wave is
+   * walking. The cost is the second-biggest thing on the card, greyed the moment you cannot
+   * pay it, so the affordable set is readable without arithmetic.
    */
   function drawTray(g) {
     const by = BAR_Y;
-    const bh = H - by;
-    UI.panel(g, 0, by, W, bh, { style: 'wood' });
-    dollRects = [];
-    deckRects = [];
+    UI.panel(g, 0, by, W, H - by, { style: 'wood' });
+    cardRects = [];
 
-    const box = dollBox(v);
-    const bw = 128, bhh = 46;
-    text(g, 'CLAY DOLLS', 10, by + 5, 'parch1', { font: 3 });
-    for (let i = 0; i < box.length; i++) {
-      const bx = 10 + i * (bw + 4);
-      if (bx + bw > W - 150) break;
-      const r0 = UI.rectOf(bx, by + 18, bw, bhh);
-      const left = dollCharges(f, box[i].id);
-      const on = f.sel && f.sel.kind === 'doll' && f.sel.id === box[i].id;
+    const cw = 118, ch = 78;
+    for (let i = 0; i < f.hand.length; i++) {
+      const def = f.hand[i];
+      const bx = 10 + i * (cw + 5);
+      if (bx + cw > W - 206) break;
+      const r0 = UI.rectOf(bx, by + 8, cw, ch);
+      const able = canAfford(f, def);
+      const on = f.sel && f.sel.kind === 'beast' && f.sel.id === def.id;
       const hot = UI.hover(r0, Input.mouse);
-      const d = box[i].def;
-      rect(g, r0.x, r0.y, r0.w, r0.h, on ? mix(P[d.mark], P.ink, 0.55) : left ? 'wood1' : 'wood0');
-      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? d.mark : hot ? 'brass3' : 'wood0');
-      // a pale niche for the figure to stand in. A clay doll on dark wood at 20x28 is a
-      // smudge; against parchment it is a doll.
-      rect(g, r0.x + 4, r0.y + 4, 26, r0.h - 8, left ? 'parch0' : 'shadow');
-      drawDoll(g, d, r0.x + 17, r0.y + r0.h - 5, t, { lit: on || hot, tile: TILE });
-      text(g, d.name.replace(' Doll', '').toUpperCase(), r0.x + 34, r0.y + 6,
-        left ? 'cream' : 'grey1', { font: 5 });
-      text(g, `${i + 1}`, r0.x + r0.w - 8, r0.y + 5, 'parch1', { font: 3, right: true });
-      // the charges, as pips: a number you count is slower than pips you see
-      for (let k = 0; k < Math.min(6, d.charges); k++) {
-        rect(g, r0.x + 34 + k * 7, r0.y + 24, 5, 5, k < left ? d.mark : mix(P.ink, P.wood1, 0.4));
+      rect(g, r0.x, r0.y, r0.w, r0.h, on ? 'clay1' : able ? (hot ? 'wood2' : 'wood1') : 'wood0');
+      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? 'clay4' : hot && able ? 'brass3' : 'wood0');
+      // the animal it is made of, on a pale niche so it reads against dark wood
+      rect(g, r0.x + 4, r0.y + 4, 34, 34, able ? 'parch0' : 'shadow');
+      const a = ANIMAL_BY_ID[def.base];
+      if (a) drawAnimalIcon(g, a, r0.x + 21, r0.y + 21, { size: 32, alpha: able ? 1 : 0.4 });
+      text(g, def.name.toUpperCase(), r0.x + 42, r0.y + 6, able ? 'cream' : 'grey1', { font: 3 });
+      text(g, String(def.cost), r0.x + 42, r0.y + 18, able ? 'clay4' : 'red2', { font: 7 });
+      text(g, 'CLAY', r0.x + 42 + textW(String(def.cost), { font: 7 }) + 4, r0.y + 26,
+        able ? 'parch1' : 'red2', { font: 3 });
+      // the rule, wrapped to two short lines
+      const words = def.rule.split(' ');
+      let line = '', ly = r0.y + 42;
+      for (const wd of words) {
+        const nxt = line ? `${line} ${wd}` : wd;
+        if (textW(nxt, { font: 3 }) > cw - 12) { text(g, line, r0.x + 6, ly, 'parch1', { font: 3 }); line = wd; ly += 11; }
+        else line = nxt;
+        if (ly > r0.y + ch - 12) break;
       }
-      text(g, left ? `x${left}` : 'NONE LEFT', r0.x + 34, r0.y + 33, left ? 'parch1' : 'red2', { font: 3 });
-      dollRects.push({ rect: r0, id: box[i].id });
+      if (line && ly <= r0.y + ch - 12) text(g, line, r0.x + 6, ly, 'parch1', { font: 3 });
+      text(g, String(i + 1), r0.x + r0.w - 8, r0.y + 5, 'parch1', { font: 3, right: true });
+      cardRects.push({ rect: r0, id: def.id });
     }
 
-    // the deck: an animal you can put down to use its ability
-    text(g, 'ON DECK · PUT ONE DOWN TO USE IT', 10, by + 70, 'parch1', { font: 3 });
-    const held = v.aboard || [];
-    for (let i = 0; i < held.length; i++) {
-      const a = ANIMAL_BY_ID[held[i]];
-      if (!a) continue;
-      const bx = 10 + i * 46;
-      if (bx > W - 200) break;
-      const r0 = UI.rectOf(bx, by + 82, 42, 40);
-      const on = f.sel && f.sel.kind === 'animal' && f.sel.id === held[i];
-      const ab = abilityOf(a);
-      rect(g, r0.x, r0.y, r0.w, r0.h, on ? mix(P[ab.color], P.ink, 0.5) : 'wood1');
-      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? ab.color : 'wood0');
-      drawAnimalIcon(g, a, r0.x + 21, r0.y + 15, { size: 16 });
-      text(g, ab.verb.slice(0, 5), r0.x + 21, r0.y + 27, ab.color, { font: 3, center: true });
-      deckRects.push({ rect: r0, id: held[i] });
-    }
+    // the apple, which is its own verb
+    appleRect = UI.rectOf(W - 200, by + 8, 78, 74);
+    const appleOn = f.sel && f.sel.kind === 'apple';
+    rect(g, appleRect.x, appleRect.y, appleRect.w, appleRect.h,
+      appleOn ? mix(P.red1, P.ink, 0.35) : f.apples ? 'wood1' : 'wood0');
+    UI.boxEdge(g, appleRect.x, appleRect.y, appleRect.w, appleRect.h,
+      appleOn ? 'red2' : f.apples ? 'wood0' : 'shadow');
+    disc(g, appleRect.x + 39, appleRect.y + 30, 16, f.apples ? 'red2' : mix(P.red0, P.ink, 0.5));
+    disc(g, appleRect.x + 34, appleRect.y + 25, 6, f.apples ? 'red1' : 'shadow');
+    rect(g, appleRect.x + 38, appleRect.y + 10, 3, 7, 'wood1');
+    rect(g, appleRect.x + 41, appleRect.y + 9, 6, 3, 'leaf3');
+    text(g, `x${f.apples}`, appleRect.x + 39, appleRect.y + 52, f.apples ? 'cream' : 'grey1',
+      { font: 5, center: true });
+    text(g, 'TAME  [A]', appleRect.x + 39, appleRect.y + 66, 'parch1', { font: 3, center: true });
 
-    // THE BASKET. Two apples, three at most, and each one is a whole decision -- so they
-    // get their own row rather than being buried in a menu.
-    appleRects = [];
-    const apples = basket(f);
-    const ax0 = 230;
-    text(g, 'BASKET', ax0, by + 70, 'parch1', { font: 3 });
-    for (let i = 0; i < Math.max(2, apples.length); i++) {
-      const r0 = UI.rectOf(ax0 + i * 46, by + 82, 42, 40);
-      const id = apples[i];
-      const it = id && ITEM_BY_ID[id];
-      const on = it && f.sel && f.sel.kind === 'apple' && f.sel.id === id;
-      rect(g, r0.x, r0.y, r0.w, r0.h, on ? mix(P.red1, P.ink, 0.4) : it ? 'wood1' : mix(P.wood0, P.wood1, 0.5));
-      UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? 'red2' : it ? 'wood0' : 'wood0');
-      if (it) {
-        disc(g, r0.x + 21, r0.y + 15, 8, it.color || 'red2');
-        rect(g, r0.x + 20, r0.y + 5, 2, 4, 'leaf1');
-        text(g, it.short, r0.x + 21, r0.y + 27, 'cream', { font: 3, center: true });
-        appleRects.push({ rect: r0, id });
-      } else {
-        text(g, 'EMPTY', r0.x + 21, r0.y + 16, 'wood2', { font: 3, center: true });
-      }
-    }
+    castRect = UI.rectOf(W - 116, by + 8, 106, 34);
+    UI.button(g, castRect, 'CAST OFF', { hot: UI.hover(castRect, Input.mouse), color: 'rust', font: 5 });
 
-    // whatever is selected, explained. The rule is the game; it does not belong in a
-    // tooltip you have to hover to find.
+    // what is selected, explained, and the last thing that happened
     if (f.sel) {
-      const sx0 = 430, sy0 = by + 70;
-      let title = '', rule = '', c = 'cream';
-      if (f.sel.kind === 'doll') {
-        const d = DOLL_BY_ID[f.sel.id];
-        title = d.name.toUpperCase(); rule = d.rule; c = d.mark;
-      } else if (f.sel.kind === 'apple') {
-        const it = ITEM_BY_ID[f.sel.id];
-        title = it.name.toUpperCase(); rule = it.blurb || ''; c = it.color || 'red2';
-      } else {
-        const a = ANIMAL_BY_ID[f.sel.id];
-        const ab = abilityOf(a);
-        title = `${a.name.toUpperCase()} — ${ab.verb}`; rule = ab.blurb; c = ab.color;
-      }
-      text(g, title, sx0, sy0, c, { font: 5 });
-      text(g, rule, sx0, sy0 + 16, 'parch1', { font: 3 });
-      text(g, 'CLICK THE FIELD TO PUT IT DOWN  ·  ESC TO CHANGE YOUR MIND', sx0, sy0 + 30,
-        'brass2', { font: 3 });
+      const def = f.sel.kind === 'beast' ? f.hand.find((b) => b.id === f.sel.id) : null;
+      const label = def ? `${def.name.toUpperCase()} — CLICK A TILE`
+        : 'AN APPLE — CLICK SOMETHING YOU HAVE KNOCKED DOWN';
+      text(g, label, 10, H - 26, 'gold', { font: 3 });
+      text(g, 'ESC TO CHANGE YOUR MIND  ·  RIGHT-CLICK A PLANT TO DIG IT UP', 10, H - 14,
+        'parch1', { font: 3 });
+    } else {
+      text(g, 'PICK A BEAST OR AN APPLE  ·  RIGHT-CLICK A PLANT TO DIG IT UP', 10, H - 14,
+        'parch1', { font: 3 });
     }
-
-    // the way out
-    castRect = UI.rectOf(W - 176, by + 18, 166, 46);
-    UI.button(g, castRect, 'CAST OFF', {
-      hot: UI.hover(castRect, Input.mouse), color: 'rust', font: 7,
-    });
-    text(g, remaining(f) ? `${remaining(f)} LEFT BEHIND` : 'ALL ABOARD', W - 93, by + 68,
-      remaining(f) ? 'red2' : 'leaf4', { font: 3, center: true });
-
-    // the last few things that happened
+    // the last few things that happened, down the right, clear of the apple and the button
     for (let i = 0; i < f.notes.length; i++) {
       const n = f.notes[i];
-      const a = clamp(1.6 - n.t * 0.5, 0, 1);
+      const a = clamp(1.7 - n.t * 0.55, 0, 1);
       if (a <= 0) continue;
       const prev = g.globalAlpha;
       g.globalAlpha = a;
-      text(g, n.text, W - 190, by + 82 + i * 12, n.color, { font: 3, right: true });
+      text(g, n.text, W - 10, by + 88 + i * 11, n.color, { font: 3, right: true });
       g.globalAlpha = prev;
     }
   }
 
-  /** The end card. */
+  /** What the cursor is about to do, drawn on the tile. */
+  function drawGhost(g) {
+    if (!hoverTile) return;
+    const { c, r } = hoverTile;
+    const x = tx(c), y = ty(r);
+    if (!f.sel) {
+      // a ripe tree or a dazed beast is clickable with nothing selected, so say so
+      const tree = f.trees.find((z) => z.row === r && z.col === c);
+      const daze = f.stunned.some((s) => s.row === r && Math.abs(s.col - c) < 1.2);
+      if (tree && tree.ripe) UI.boxEdge(g, x, y, TW, TH, 'gold');
+      else if (daze) UI.boxEdge(g, x, y, TW, TH, 'red2');
+      return;
+    }
+    if (f.sel.kind === 'apple') {
+      UI.boxEdge(g, x, y, TW, TH, 'red2');
+      return;
+    }
+    const def = f.hand.find((b) => b.id === f.sel.id);
+    if (!def) return;
+    const bad = plantable(f, r, c, def) || (canAfford(f, def) ? null : `${def.cost} clay`);
+    rect(g, x + 2, y + 2, TW - 4, TH - 4, bad ? mix(P.red1, P.ink, 0.55) : mix(P.clay3, P.ink, 0.6));
+    UI.boxEdge(g, x, y, TW, TH, bad ? 'red2' : 'clay4');
+    const a = ANIMAL_BY_ID[def.base];
+    if (a) {
+      const prev = g.globalAlpha;
+      g.globalAlpha = 0.6;
+      drawAnimal(g, a, cxOf(c), cyOf(r), Object.assign({ scale: 1, t }, BLESSED_TINT));
+      g.globalAlpha = prev;
+    }
+    if (bad) {
+      const lw = textW(bad.toUpperCase(), { font: 3 }) + 10;
+      wash(g, x + TW / 2 - lw / 2, y - 4, lw, 13, 'ink', 0.85);
+      text(g, bad.toUpperCase(), x + TW / 2, y - 2, 'red2', { font: 3, center: true });
+    }
+  }
+
   function drawOutro(g) {
-    wash(g, 0, 0, W, H, 'ink', clamp(outro * 1.6, 0, 0.78));
-    const pw = 470, ph = 210;
+    wash(g, 0, 0, W, H, 'ink', clamp(outro * 1.6, 0, 0.8));
+    const pw = 520, ph = 236;
     const px = (W - pw) / 2, py = (H - ph) / 2;
     UI.panel(g, px, py, pw, ph, { style: 'paper' });
-    UI.panelTitle(g, px, py, pw, f.why === 'clear' ? 'THE ISLAND IS EMPTY' : 'THE WATER CAME');
-    text(g, `${f.saved.length} ABOARD`, px + 24, py + 54, 'leaf4', { font: 7 });
-    text(g, `${f.lost.length} LOST`, px + 24, py + 82, f.lost.length ? 'red2' : 'grey2', { font: 7 });
-    let yy = py + 118;
-    for (const id of f.saved.slice(0, 8)) {
+    UI.panelTitle(g, px, py, pw, f.why === 'clear' ? 'THE LINE HELD' : 'THEY GOT ABOARD');
+    text(g, `${f.saved.length} TAMED`, px + 24, py + 52, 'leaf4', { font: 7 });
+    text(g, `${f.lost.length} TAKEN`, px + 24, py + 82, f.lost.length ? 'red2' : 'grey2', { font: 7 });
+    text(g, `${f.wave + 1} OF ${f.waves.length} WAVES`, px + 240, py + 52, 'wood0', { font: 5 });
+    text(g, `${f.tamed.length} APPLES SPENT WELL`, px + 240, py + 74, 'wood0', { font: 3 });
+    f.saved.slice(0, 12).forEach((id, i) => {
       const a = ANIMAL_BY_ID[id];
-      if (a) drawAnimalIcon(g, a, px + 30 + (f.saved.indexOf(id) % 8) * 24, yy, { size: 16 });
-    }
-    yy += 30;
-    text(g, 'CLICK TO SAIL', px + pw / 2, py + ph - 26, 'rust', { font: 7, center: true });
+      if (a) drawAnimalIcon(g, a, px + 34 + (i % 12) * 38, py + 132, { size: 32 });
+    });
+    text(g, 'CLICK TO SAIL', px + pw / 2, py + ph - 30, 'rust', { font: 7, center: true });
   }
 
   function draw(g) {
-    const sh = shake > 0 ? Math.round(Math.sin(t * 60) * 3) : 0;
-    if (!floorCv || floorRev !== (f.rev || 0)) bakeFloor();
+    const sh = shake > 0 ? Math.round(Math.sin(t * 55) * 3) : 0;
+    if (!floorCv) bakeFloor();
 
     rect(g, 0, 0, W, H, 'deep');
     drawBackdrop(g);
 
     g.save();
     g.beginPath();
-    g.rect(FX, FY, FW, FH);
+    g.rect(0, FY, W, FH);
     g.clip();
     g.translate(sh, 0);
-    if (floorCv) g.drawImage(floorCv.canvas, FX, FY - PROP_HEIGHT);
-    drawFlood(g);
+    if (floorCv) g.drawImage(floorCv.canvas, FX, FY);
+    drawArk(g);
+    // the rot, if it is happening, over its own row
+    if (f.event && f.event.id === 'rot') wash(g, FX, ty(f.eventRow), FW, TH, 'moss', 0.28);
     drawGhost(g);
+    drawTrees(g);
     drawLive(g);
     parts.draw(g);
+    if (f.event && f.event.id === 'squall') wash(g, FX, FY, FW, FH, 'water0', 0.18);
     drawRain(g);
-    drawKeeper(g);
     g.restore();
 
-    // a two-pixel border, so the field is a place and not a hole in the UI
+    drawKeeper(g);
     UI.boxEdge(g, FX - 2, FY - 2, FW + 4, FH + 4, 'wood0');
+    if (flash > 0) wash(g, FX, FY, FW, FH, 'white', flash * 0.15);
 
-    if (flash > 0) wash(g, FX, FY, FW, FH, 'white', flash * 0.18);
     drawTopBar(g);
     drawTray(g);
+    if (hintT > 0) {
+      hintT -= 1 / 60;
+      const hw = textW(hint, { font: 5 }) + 20;
+      wash(g, (W - hw) / 2, FY + FH - 30, hw, 20, 'ink', 0.85);
+      text(g, hint, W / 2, FY + FH - 26, 'red2', { font: 5, center: true });
+    }
     if (intro < 1) wash(g, 0, 0, W, H, 'ink', 1 - intro);
     if (outro >= 0) drawOutro(g);
   }
@@ -594,29 +698,30 @@ export function makeIslandScene() {
       v = args.voyage || args.run;
       island = args.island || (v && v.at);
       onDone = args.onDone;
-      f = newField(v, island, args.tag);
+      f = newLane(v, island, args.tag);
       t = 0; intro = 0; outro = -1;
-      hoverTile = null; flash = 0; shake = 0;
-      floorCv = null; floorRev = -1;
-      parts = createParticles({ limit: 220, seed: v.seed + '/field' });
+      hoverTile = null; flash = 0; shake = 0; hint = null; hintT = 0;
+      floorCv = null;
+      parts = createParticles({ limit: 240, seed: v.seed + '/lane' });
       Audio.music(island.danger >= 3 ? 'deck_tense' : 'deck');
     },
     exit() { Audio.stopMusic(0.4); },
     update, draw,
     debug() {
       return {
-        voyage: v, island, field: f,
+        voyage: v, island, lane: f, field: f,
         get sel() { return f && f.sel; },
         get hover() { return hoverTile; },
+        get lastAct() { return lastAct; },
         finish,
-        pick: (id) => pickDoll(id),
-        put: (c, r) => placeAt(f, c, r),
+        pick: (id) => pickBeast(id),
+        put: (r, c) => actAt(f, r, c),
+        at: (r, c) => ({ x: cxOf(c), y: cyOf(r) - 20 }),
         tileAt: (x, y) => tileAtPoint(x, y),
-        at: (c, r) => ({ x: tx(c) + TILE / 2, y: ty(r) + TILE / 2 }),
-        rects: { dolls: dollRects, deck: deckRects, basket: appleRects, cast: castRect },
+        rects: { cards: cardRects, apple: appleRect, cast: castRect, dolls: cardRects },
       };
     },
   };
 }
 
-void lerp; void disc; void line; void walkable; void ARK_COLS;
+void plantAt; void drawScatter;

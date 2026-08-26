@@ -93,16 +93,19 @@ switch (which) {
     voyage.at = island;
     scene = makeIslandScene();
     scene.enter({ voyage, island, onDone: () => {} }, app);
+    voyage.beasts = ['well', 'reed', 'boar', 'thorn', 'ember', 'bell', 'owl'];
+    scene.enter({ voyage, island, onDone: () => {} }, app);
     const d = scene.debug();
-    if (process.env.TIDE) d.advance(Number(process.env.TIDE));
-    if (process.env.PLACE) {
-      const [id, ix] = process.env.PLACE.split(',');
-      d.place(id, Number(ix));
+    // a real board, so the shot shows a game rather than an empty lawn
+    d.lane.clay = 1200;
+    d.lane.apples = 3;
+    for (let r = 0; r < 5; r++) {
+      d.pick('well'); d.put(r, 0);
+      d.pick('thorn'); d.put(r, 2);
+      if (r % 2) { d.pick('ember'); d.put(r, 3); }
+      d.pick('boar'); d.put(r, 6);
     }
-    if (process.env.SHOOT) {
-      const [ix, ang, pow] = process.env.SHOOT.split(',');
-      d.aimAt(Number(ix), Number(ang), Number(pow));
-    }
+    for (let i = 0; i < 60 * Number(process.env.SECS || 34); i++) scene.update(1 / 60, app, 1 / 60);
     mouse(Number(process.env.MX || 700), Number(process.env.MY || 300));
     break;
   }

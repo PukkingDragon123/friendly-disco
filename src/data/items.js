@@ -4,7 +4,7 @@
 // your way out of a level going wrong, which is why the boat's hold starts at two slots
 // and why the snake charges what he charges.
 //
-// Every item is one line of effect in game/field.js, and the effect ids are closed:
+// Every item is one line of effect, and the effect ids are closed:
 //
 //   loyal   the animal it hits is never lost again -- on this island or any other
 //   tide    pushes the water back, and the water is the clock

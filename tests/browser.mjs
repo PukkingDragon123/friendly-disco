@@ -67,7 +67,7 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.scriptId !== undefined) return 'cutscene';
-    if (d.field) return 'island';
+    if (d.lane) return 'island';
     if (d.encounter) return 'choice';
     if (d.rects && d.rects.gates) return 'garden';
     if (d.at && d.at.isles) return 'ocean';
@@ -187,49 +187,53 @@ const island = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
   return {
     island: d.island.id,
-    ashore: d.field.animals.length,
-    dolls: (d.rects.dolls || []).length,
-    secondsLeft: Math.round(d.field.limit),
+    clay: d.lane.clay,
+    cards: (d.rects.cards || []).length,
+    guards: d.lane.guards.filter(Boolean).length,
+    firstWaveIn: Math.round(d.lane.waveT),
   };
 });
 console.log('island:', JSON.stringify(island));
-if (!island.ashore) errors.push('the island had nobody on it to rescue');
-if (!island.dolls) errors.push('the tray offered no dolls to place');
+if (!island.cards) errors.push('the tray offered no beasts to plant');
+if (island.clay < 50) errors.push('not enough clay to open with');
+if (island.firstWaveIn < 8) errors.push('no real opening before the first wave');
 
-// PUT A DOLL DOWN WITH A REAL MOUSE. Two clicks -- the tray button, then a tile -- which
-// is the entire control scheme, so if this works the game is playable.
+// PLANT ONE WITH A REAL MOUSE. Two clicks -- a tray card, then a tile -- which is the
+// entire control scheme, so if this works the game is playable.
 const placed = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
-  const cr = d.field.animals.find((a) => a.state !== 'safe' && a.state !== 'lost');
-  if (!cr || !d.rects.dolls.length) return null;
-  const btn = d.rects.dolls[0];
-  const tile = d.at(cr.c | 0, cr.r | 0);
+  d.lane.clay = 400;
+  const card = d.rects.cards[0];
+  const tile = d.at(2, 1);
   const c = document.getElementById('game').getBoundingClientRect();
   const s = window.__ARK.app.scale;
   return {
-    before: d.field.dolls.length,
-    bx: c.left + (btn.rect.x + btn.rect.w / 2) * s,
-    by: c.top + (btn.rect.y + btn.rect.h / 2) * s,
+    before: d.lane.plants.length,
+    bx: c.left + (card.rect.x + card.rect.w / 2) * s,
+    by: c.top + (card.rect.y + card.rect.h / 2) * s,
     tx: c.left + tile.x * s,
     ty: c.top + tile.y * s,
   };
 });
 if (placed) {
   await page.mouse.click(placed.bx, placed.by);
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(140);
   const sel = await page.evaluate(() => JSON.stringify(window.__ARK.app.scene.debug().sel));
-  if (sel === 'null') errors.push('clicking a doll button selected nothing');
+  if (sel === 'null') errors.push('clicking a beast card selected nothing');
   await page.mouse.click(placed.tx, placed.ty);
   await page.waitForTimeout(200);
-  const after = await page.evaluate(() => window.__ARK.app.scene.debug().field.dolls.length);
-  if (after <= placed.before) errors.push('a real click on a tile put no doll down');
-  else console.log(`doll: ${placed.before} -> ${after} on the field`);
-  // and it should actually start moving animals home
-  await page.waitForTimeout(2500);
-  const homing = await page.evaluate(() => window.__ARK.app.scene.debug()
-    .field.animals.filter((a) => a.homing).length);
-  if (!homing) errors.push('a herder doll set nobody walking home');
-  else console.log(`homing: ${homing} animals heading for the ark`);
+  const after = await page.evaluate(() => window.__ARK.app.scene.debug().lane.plants.length);
+  if (after <= placed.before) errors.push('a real click on a tile planted nothing');
+  else console.log(`planted: ${placed.before} -> ${after} on the field`);
+  // and it should start shooting once something walks into its row
+  const fought = await page.evaluate(async () => {
+    const d = window.__ARK.app.scene.debug();
+    d.lane.waveT = 0.1;
+    await new Promise((r) => setTimeout(r, 4000));
+    return { beasts: d.lane.beasts.length, shots: d.lane.shots.length, wave: d.lane.wave };
+  });
+  console.log('fight:', JSON.stringify(fought));
+  if (fought.wave < 0) errors.push('the first wave never started');
 }
 const islandT = await drawTime(page);
 console.log('island draw:', JSON.stringify(islandT));

@@ -175,7 +175,38 @@ function tinted(key, tint, amt) {
   return tint ? mix(P[key] || key, P[tint] || tint, amt) : (P[key] || key);
 }
 
+/**
+ * MATERIAL, not tint.
+ *
+ * A blessed beast and a corrupted one have to be readable across the field at a glance, and
+ * mixing the animal's own colours toward clay does not do it: a pink pig blended 60% into
+ * clay is a salmon pig, and a brown wolf blended into the dark is a brown wolf. The state
+ * REPLACES the material and keeps only the shape -- which is the whole idea, because the
+ * shape is the animal's identity and the material is what has happened to it.
+ *
+ * The eye stays bright and stays different: gold in a clay beast, red in a corrupted one.
+ * It is the one pixel that says whose side this is on.
+ */
+const MATERIALS = {
+  clay: {
+    deep: 'clay0', shade: 'clay1', body: 'clay2', light: 'clay4', belly: 'clay3',
+    pat: 'clay0', eye: 'gold',
+  },
+  corrupt: {
+    deep: 'ink', shade: 'night', body: 'purple0', light: 'purple1', belly: 'deep',
+    pat: 'ink', eye: 'red2',
+  },
+};
+
 function tones(rc, o = {}) {
+  if (o.material && MATERIALS[o.material]) {
+    const M = MATERIALS[o.material];
+    return {
+      deep: P[M.deep], shade: P[M.shade], body: P[M.body],
+      light: P[M.light], belly: P[M.belly],
+      pat: mix(P[M.pat], P[M.body], 0.3), eye: M.eye,
+    };
+  }
   const t = o.tint, amt = o.tintAmt || 0.4;
   const body = tinted(rc.body || 'grey1', t, amt);
   const shade = tinted(rc.shade || 'grey0', t, amt);
@@ -682,7 +713,10 @@ const PLANS_FN = {
   quad: quadBody, bird: birdBody, serpent: serpentBody, fish: fishBody, bug: bugBody,
 };
 
-function tintKey(o) { return (o && o.tint) ? o.tint + ':' + (o.tintAmt || 0.4) : ''; }
+function tintKey(o) {
+  if (o && o.material) return 'm:' + o.material;
+  return (o && o.tint) ? o.tint + ':' + (o.tintAmt || 0.4) : '';
+}
 
 function bakeLayer(paint, o = {}) {
   const b = makeBuf(A, A);

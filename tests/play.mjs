@@ -15,8 +15,7 @@ const { SoftCanvas, writePNG } = await import('../tools/softcanvas.mjs');
 const { Input } = await import('../src/core/input.js');
 const { Juice } = await import('../src/core/juice.js');
 const { createRouter, guardScene } = await import('../src/game/router.js');
-const FD = await import('../src/game/field.js');
-const { DOLL_BY_ID } = await import('../src/data/dolls.js');
+const LA = await import('../src/game/lane.js');
 const V = await import('../src/game/voyage.js');
 const { ANIMAL_BY_ID } = await import('../src/data/animals.js');
 const { abilityOf } = await import('../src/data/abilities.js');
@@ -65,7 +64,11 @@ function centre(r) { return [Math.round(r.x + r.w / 2), Math.round(r.y + r.h / 2
 
 // Software rasterising a full frame costs far more than the game logic, so draw on a
 // 1-in-DRAW_EVERY cadence. Every path in draw() is still exercised many times a scene.
-const DRAW_EVERY = Number(process.env.DRAW_EVERY || 12);
+// 40, not 12. A lane island is ninety seconds of game time -- 5,400 frames -- and a full
+// software paint is tens of milliseconds, so one-in-twelve put a single island at half a
+// minute of wall clock. One in forty still paints every scene well over a hundred times,
+// which exercises every path in draw() many times over.
+const DRAW_EVERY = Number(process.env.DRAW_EVERY || 40);
 
 function tick(n = 1) {
   for (let i = 0; i < n; i++) {
@@ -101,7 +104,7 @@ function dbg() {
 function where() {
   const d = dbg();
   if (d.scriptId !== undefined) return 'cutscene';
-  if (d.field) return 'island';
+  if (d.lane) return 'island';
   if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
   if (d.rects && d.rects.cards && d.at && d.at.isles) return 'ocean';
@@ -181,104 +184,86 @@ function playOcean() {
 /**
  * An island, played with the mouse.
  *
- * The bot does what a person does: pick a doll off the tray, click the tile with the most
- * animals around it, repeat until the box is empty, put one carried animal down on
- * something it answers, then let the clock run and cast off. Every one of those is a real
- * click on a real rect -- if the bot can clear an island with a mouse, so can a person.
+ * The bot does what a person does: pick a beast off the tray, click a tile, repeat while
+ * the clay lasts, throw apples at anything it knocks down, and let the waves come. Every
+ * one of those is a real click on a real rect -- if the bot can hold an island with a
+ * mouse, so can a person.
  */
 function playIsland() {
   paint();
   let d0 = dbg();
-  const f = d0.field;
+  const f = d0.lane;
   snap('island');
 
-  // 1. spend every doll charge on the fattest cluster it can find
+  const pick = (id) => {
+    const cr = (dbg().rects.cards || []).find((x) => x.id === id);
+    if (!cr) return false;
+    const [bx, by] = centre(cr.rect);
+    clickAt(bx, by);
+    paint();
+    return !!dbg().sel;
+  };
+  const put = (r, c) => {
+    const p = d0.at(r, c);
+    clickAt(p.x, p.y);
+    tick(2);
+  };
+
+  // A LANE STAGE IS NINETY SECONDS OF GAME TIME, which is 5,400 frames, and a full software
+  // paint is tens of milliseconds. Painting on every iteration put one island at half a
+  // minute of wall clock and the whole harness past any sane timeout. Paint when the bot
+  // actually needs to see the tray, and tick in big chunks the rest of the time.
+  const def = (id) => f.hand.find((b) => b.id === id);
+  let planted = 0;
   let guard = 0;
-  for (const entry of (d0.rects.dolls || []).slice()) {
-    const def = DOLL_BY_ID[entry.id];
-    if (!def || def.effect !== 'lead') continue;
-    while (FD.dollCharges(f, entry.id) > 0 && guard++ < 20) {
-      paint();
-      d0 = dbg();
-      const dr = (d0.rects.dolls || []).find((x) => x.id === entry.id);
-      if (!dr) break;
-      const [bx, by] = centre(dr.rect);
-      clickAt(bx, by);
-      paint();
-      if (!d0.sel) { errors.push('island: clicking a doll button selected nothing'); break; }
-      // the tile with the most un-homed animals within reach
-      let best = null, bn = -1;
-      for (const cr of f.animals) {
-        if (cr.state === 'safe' || cr.state === 'lost' || cr.homing) continue;
-        const c = cr.c | 0, r = cr.r | 0;
-        let n = 0;
-        for (const o of f.animals) {
-          if (o.state === 'safe' || o.state === 'lost' || o.homing) continue;
-          if (Math.hypot(o.c - c - 0.5, o.r - r - 0.5) <= def.radius) n++;
-        }
-        if (n > bn) { bn = n; best = { c, r }; }
+  while (!f.over && guard++ < 300) {
+    // wells first, then a thorn and a wall in each row
+    const wells = f.plants.filter((p) => p.def.kind === 'gen').length;
+    let want = null, wr = 0, wc = 0;
+    if (wells < 4 && f.clay >= 50) {
+      for (let r = 0; r < LA.ROWS; r++) if (!LA.plantable(f, r, 0, def('well'))) { want = 'well'; wr = r; wc = 0; break; }
+    }
+    if (!want && f.clay >= 100) {
+      for (let r = 0; r < LA.ROWS && !want; r++) {
+        if (f.plants.some((p) => p.row === r && p.def.kind === 'shoot')) continue;
+        for (let c = 1; c <= 3; c++) if (!LA.plantable(f, r, c, def('thorn'))) { want = 'thorn'; wr = r; wc = c; break; }
       }
-      if (!best) break;
-      const before = f.dolls.length;
-      const p = d0.at(best.c, best.r);
-      clickAt(p.x, p.y);
-      tick(3);
-      paint();
-      if (f.dolls.length === before) {
+    }
+    if (!want && f.clay >= 50) {
+      for (let r = 0; r < LA.ROWS && !want; r++) {
+        if (f.plants.some((p) => p.row === r && p.def.kind === 'wall')) continue;
+        for (let c = 7; c >= 5; c--) if (!LA.plantable(f, r, c, def('boar'))) { want = 'boar'; wr = r; wc = c; break; }
+      }
+    }
+    if (want) {
+      const before = f.plants.length;
+      if (!pick(want)) { errors.push('island: clicking a beast card selected nothing'); break; }
+      put(wr, wc);
+      if (f.plants.length > before) planted++;
+      else {
         if (process.env.WHY) {
-          console.log('    WHY: doll', entry.id, 'at', JSON.stringify(best),
-            'charges', FD.dollCharges(f, entry.id), 'sel', JSON.stringify(dbg().sel));
+          console.log('    WHY: plant', want, 'at', wr, wc, 'clay', f.clay,
+            'sel', JSON.stringify(dbg().sel), 'plantable', LA.plantable(f, wr, wc),
+            'lastAct', JSON.stringify(dbg().lastAct), 'hover', JSON.stringify(dbg().hover));
         }
-        errors.push('island: clicking a tile with a doll selected put nothing down');
+        errors.push('island: clicking a tile with a beast selected planted nothing');
         break;
       }
+      continue;
     }
+    // a ripe apple, then an apple thrown at anything dazed
+    const ripe = f.trees.find((tr) => tr.ripe);
+    if (ripe) { put(ripe.row, ripe.col); continue; }
+    if (f.stunned.length && f.apples > 0) {
+      const st = f.stunned[0];
+      put(st.row, Math.round(st.col));
+      continue;
+    }
+    tick(60);
   }
 
-  // 2. put one carried animal down, and check its ability actually fired
+  if (planted === 0) errors.push('island: the bot never managed to plant anything');
   paint();
-  d0 = dbg();
-  const deck = (d0.rects.deck || []).slice();
-  for (const entry of deck) {
-    const a = ANIMAL_BY_ID[entry.id];
-    if (!a) continue;
-    const ab = abilityOf(a).id;
-    if (ab !== 'smash' && ab !== 'graze' && ab !== 'rally') continue;
-    const [rx, ry] = centre(entry.rect);
-    clickAt(rx, ry);
-    paint();
-    const held = f.voyage.aboard.length;
-    // somewhere in the middle of the field, on open ground
-    let put = null;
-    for (const cr of f.animals) {
-      if (cr.state === 'safe' || cr.state === 'lost') continue;
-      put = { c: cr.c | 0, r: cr.r | 0 };
-      break;
-    }
-    if (!put) break;
-    const p = d0.at(put.c, put.r);
-    clickAt(p.x, p.y);
-    tick(3);
-    paint();
-    if (f.voyage.aboard.length !== held - 1) {
-      errors.push('island: putting a carried animal down did not spend it');
-    }
-    break;
-  }
-
-  // 3. let the water come, then cast off
-  let spin = 0;
-  while (!f.over && spin++ < 3000) tick(1);
-  paint();
-  // Only a complaint if the bot actually HAD dolls to spend. An empty doll box and nobody
-  // saved is the economy working, not a bug -- which is exactly what the crafting loop is
-  // there to fix.
-  // Only a complaint if the bot had dolls to spend AND somewhere to put the animals. An
-  // empty doll box, or an ark with no berth left, and nobody saved is the economy working:
-  // that is what the workshop and the garden are for.
-  if (f.dolls.length > 0 && f.saved.length === 0 && f.startBerths > 0) {
-    errors.push('island: dolls were placed, berths were free, and still nobody was saved');
-  }
   const cast = dbg().rects && dbg().rects.cast;
   if (cast) {
     const [cx, cy] = centre(cast);
@@ -287,11 +272,10 @@ function playIsland() {
     paint();
     snap('island-done');
   }
-  for (let i = 0; i < 3 && where() === 'island'; i++) {
+  for (let i = 0; i < 4 && where() === 'island'; i++) {
     const c3 = dbg().rects && dbg().rects.cast;
     if (c3) { const [ax, ay] = centre(c3); clickAt(ax, ay); }
-    tick(20);
-    paint();
+    tick(60);
   }
   return true;
 }

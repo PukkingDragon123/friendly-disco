@@ -20,8 +20,7 @@
 
 import { makeRng, randomSeedString } from '../core/rng.js';
 import { ANIMAL_BY_ID, STARTER_STOCK } from '../data/animals.js';
-import { STARTER_DOLLS, DOLL_BY_ID, payFor } from '../data/dolls.js';
-import { yieldFor, addMats } from '../data/materials.js';
+import { STARTER_BEASTS, UPGRADES as BEAST_UPGRADES } from '../data/beasts.js';
 import { rollLeg, ISLAND_BY_ID, CHERUBIM } from '../data/islands.js';
 
 export const LEGS_PER_CHAPTER = 4;
@@ -143,43 +142,34 @@ export function spreadStock(list, n) {
 
 /* -------------------------------------------------------------------- state */
 
-/* ------------------------------------------------------- clay, dolls and recipes */
+/* ------------------------------------------------------------ beast upgrades */
 
 /**
- * What the deck produced on a crossing.
+ * Buy a beast's one upgrade.
  *
- * Called once per leg, not per island: the yield is for the CROSSING, so a leg you sailed
- * with a full deck pays whether the island went well or badly. That matters -- it means a
- * disastrous rescue still leaves you with something to plan the next one with, which is
- * the difference between a run that recovers and a run that spirals.
+ * One per beast, permanent for the run, and deliberately not a tree: a tree is a second
+ * game to learn on top of the first, and one line is a decision you can make in four
+ * seconds between waves.
  */
-export function harvest(v) {
-  const got = yieldFor(v.aboard, ANIMAL_BY_ID);
-  addMats(v.mats, got);
-  return got;
+export function buyBeastUpgrade(v, id) {
+  const up = BEAST_UPGRADES[id];
+  if (!up) return { ok: false, why: 'no such upgrade' };
+  if ((v.beasts || []).indexOf(id) < 0) return { ok: false, why: 'you have not tamed one' };
+  if ((v.beastUpgrades || []).indexOf(id) >= 0) return { ok: false, why: 'already done' };
+  if (v.money < up.cost) return { ok: false, why: `$${up.cost}` };
+  v.money -= up.cost;
+  v.beastUpgrades = v.beastUpgrades || [];
+  v.beastUpgrades.push(id);
+  say(v, `${up.name} — ${up.blurb}`, 'clay4');
+  return { ok: true, up };
 }
 
-/** Spend the bill from data/dolls.js and add one doll to the box. */
-export function craftDoll(v, id) {
-  if (!v.recipes.includes(id)) return { ok: false, why: 'you do not know the shape' };
-  const d = DOLL_BY_ID[id];
-  if (!d) return { ok: false, why: 'no such doll' };
-  if (!payFor(d, v.mats)) return { ok: false, why: 'not enough to make it' };
-  v.dolls[id] = (v.dolls[id] || 0) + 1;
-  return { ok: true, doll: d };
-}
-
-/** Noah teaches one. Returns false if it was already known. */
-export function learnRecipe(v, id) {
-  if (!DOLL_BY_ID[id] || v.recipes.includes(id)) return false;
-  v.recipes.push(id);
-  return true;
-}
-
-/** Every doll the player knows and how many are in the box. */
-export function dollBox(v) {
-  return v.recipes.map((id) => ({ id, def: DOLL_BY_ID[id], have: v.dolls[id] || 0 }))
-    .filter((r) => r.def);
+/** Every beast you know, with whether its upgrade is bought and what it would cost. */
+export function beastBox(v) {
+  return (v.beasts || []).map((id) => ({
+    id, up: BEAST_UPGRADES[id] || null,
+    bought: (v.beastUpgrades || []).indexOf(id) >= 0,
+  }));
 }
 
 export function newVoyage(seed) {
@@ -211,15 +201,13 @@ export function newVoyage(seed) {
     gates: [],              // NPC ids the Cherubim have opened
     summoned: [],           // NPCs currently in Eden
 
-    // --- clay, dolls and recipes
+    // --- the blessed clay beasts you can plant, and their one upgrade each
     //
-    // `mats` is what the deck has produced, `dolls` is how many of each you have made,
-    // and `recipes` is which ones you know how to make. The two starting dolls are known
-    // from the first island; the rest are taught by Noah, which is what makes finding him
-    // worth a leg of the voyage.
-    mats: { clay: 4 },
-    dolls: { herd: 2, bridge: 1 },
-    recipes: STARTER_DOLLS.slice(),
+    // Three to start. Everything else is TAMED: you knock a corrupted animal down on an
+    // island, throw an apple in the window before it wanders off, and the shape it teaches
+    // is yours for the run (see data/corrupted.js).
+    beasts: STARTER_BEASTS.slice(),
+    beastUpgrades: [],
 
     // --- the golem
     slots: { hold: null, wear: null, consume: null },
@@ -304,14 +292,6 @@ export function sailTo(v, island) {
 /** Leave the current island and set up the next set of choices. */
 export function departIsland(v) {
   v.at = null;
-  // THE CROSSING PAYS. Whatever is on the deck produces on the way out, which is what
-  // turns the animals you saved on the last island into the dolls you herd the next one
-  // with. It happens here, once per leg, whether the island went well or badly -- a
-  // disastrous rescue still leaves you something to plan with, and that is the difference
-  // between a run that recovers and a run that spirals.
-  const got = harvest(v);
-  const names = Object.keys(got).filter((k) => got[k]);
-  if (names.length) say(v, `The crossing yields ${names.map((k) => `${got[k]} ${k}`).join(', ')}.`, 'clay4');
   v.leg++;
   if (v.leg > LEGS_PER_CHAPTER) {
     v.leg = 1;

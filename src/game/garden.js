@@ -16,8 +16,8 @@
 import { ITEM_BY_ID, itemsFrom } from '../data/items.js';
 import { GEAR_BY_ID, gearFrom } from '../data/gear.js';
 import { NPC_BY_ID, rollGates, dealSize } from '../data/npcs.js';
-import { DOLLS, DOLL_BY_ID, costText } from '../data/dolls.js';
-import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say, learnRecipe,
+import { BEAST_BY_ID, UPGRADES as BEAST_UPGRADES } from '../data/beasts.js';
+import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say, buyBeastUpgrade,
 } from './voyage.js';
 import { QUESTS, currentQuest, questDone, progressOf } from '../data/quests.js';
 import { priceMod, gatesOpen } from './choices.js';
@@ -87,22 +87,21 @@ export function rollDeal(v, rng, npc) {
     stock = UPGRADE_IDS
       .filter((u) => tierCost(v, u) !== null)
       .map((u) => ({ kind: 'upgrade', id: u, price: priceOf(v, tierCost(v, u)) }));
-    // NOAH ALSO TEACHES SHAPES. He is the only one who knows how the other dolls are
-    // made, which is what makes finding him worth a leg of the voyage rather than just
-    // another shop. A recipe is cheap in coin and enormous in what it opens up, so it is
-    // priced like a favour and not like a relic.
-    for (const d of DOLLS) {
-      if (!d.unlock || v.recipes.indexOf(d.id) >= 0) continue;
-      stock.push({ kind: 'recipe', id: d.id, price: priceOf(v, 6) });
+    // NOAH ALSO WORKS ON YOUR BEASTS. He is the only one who will, which is what makes
+    // finding him worth a leg of the voyage rather than just another shop: one upgrade per
+    // beast, permanent for the run, and you can only buy it for something you have tamed.
+    for (const id of (v.beasts || [])) {
+      const up = BEAST_UPGRADES[id];
+      if (!up || (v.beastUpgrades || []).indexOf(id) >= 0) continue;
+      stock.push({ kind: 'beastup', id, price: priceOf(v, up.cost) });
     }
   }
   const out = [];
   const rest = stock.slice();
-  // ONE RECIPE, GUARANTEED, whenever he has one left to teach. Rolled fairly against ten
-  // upgrades a recipe turned up about a fifth of the time, which made the doll box a matter
-  // of luck rather than a thing you sail toward. Noah is the only source of shapes, so the
-  // trip to him has to be worth taking.
-  const recipeIx = rest.findIndex((o) => o.kind === 'recipe');
+  // ONE PIECE OF BEAST WORK, GUARANTEED, whenever he has one to offer. Rolled fairly
+  // against ten boat upgrades it turned up about a fifth of the time, which made the whole
+  // tower side of the run a matter of luck rather than a thing you sail toward.
+  const recipeIx = rest.findIndex((o) => o.kind === 'beastup');
   if (recipeIx >= 0) {
     out.push(rest[recipeIx]);
     rest.splice(recipeIx, 1);
@@ -146,11 +145,12 @@ export function describeOffer(offer) {
       icon: u.icon, kind: 'upgrade', tag: 'THE BOAT',
     };
   }
-  if (offer.kind === 'recipe') {
-    const d = DOLL_BY_ID[offer.id];
-    return d && {
-      name: d.name, blurb: d.rule, sub: `MADE FROM ${costText(d).toUpperCase()}`,
-      color: d.mark, icon: 'shell', kind: 'recipe', tag: 'A SHAPE HE KNOWS',
+  if (offer.kind === 'beastup') {
+    const up = BEAST_UPGRADES[offer.id];
+    const b = BEAST_BY_ID[offer.id];
+    return up && b && {
+      name: up.name, blurb: up.blurb, sub: `YOUR ${b.name.toUpperCase()}, FOR GOOD`,
+      color: 'clay4', icon: 'paw', kind: 'beastup', tag: 'WORK ON A BEAST',
     };
   }
   return null;
@@ -166,7 +166,7 @@ export function buyOffer(v, npcId, offer) {
   let ok = false;
   let displaced = null;
   if (offer.kind === 'item') ok = addItem(v, offer.id);
-  else if (offer.kind === 'recipe') ok = learnRecipe(v, offer.id);
+  else if (offer.kind === 'beastup') ok = buyBeastUpgrade(v, offer.id).ok;
   else if (offer.kind === 'gear') {
     const relic = GEAR_BY_ID[offer.id];
     if (relic) { displaced = equip(v, relic); ok = true; }

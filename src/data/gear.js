@@ -18,10 +18,10 @@
 //   basket      +item slots      game/voyage.js holdSize()
 //   beds        +garden slots    game/voyage.js gardenSize()
 //   coin        +$ per sale      game/voyage.js sellPrice()
-//   reach       a wider circle on every clay doll                      game/field.js
-//   patience    the flood takes longer to cross the island              game/field.js
-//   dry         an animal the water reaches is washed back, once        game/field.js
-//   sure        one loss an island simply does not happen               game/field.js
+//   reach       every beast's range and radius grows                   game/lane.js
+//   patience    waves take longer to arrive                            game/lane.js
+//   dry         the ark survives one extra breach                      game/lane.js
+//   sure        one thing that reaches the ark is turned back           game/lane.js
 //
 // A relic whose bonus key is not in that list does nothing, and the tests fail on it.
 

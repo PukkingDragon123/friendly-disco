@@ -42,9 +42,8 @@ const M = {};
     ['islands', '../src/data/islands.js'], ['voyage', '../src/game/voyage.js'],
     ['boatart', '../src/render/boat.js'], ['islandart', '../src/render/islandart.js'],
     ['folk', '../src/render/folk.js'], ['items', '../src/data/items.js'],
-    ['field', '../src/game/field.js'], ['tiles', '../src/render/tiles.js'],
-    ['dolls', '../src/data/dolls.js'], ['monsters', '../src/data/monsters.js'],
-    ['dollart', '../src/render/dollart.js'], ['materials', '../src/data/materials.js'],
+    ['lane', '../src/game/lane.js'], ['tiles', '../src/render/tiles.js'],
+    ['beasts', '../src/data/beasts.js'], ['corrupted', '../src/data/corrupted.js'],
     ['gear', '../src/data/gear.js'], ['quests', '../src/data/quests.js'],
     ['npcs', '../src/data/npcs.js'], ['garden', '../src/game/garden.js'],
     ['choicedata', '../src/data/choices.js'], ['choices', '../src/game/choices.js'],
@@ -361,217 +360,269 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
   }
 }
 
-/* ------------------------------------------------------------------- field */
+/* -------------------------------------------------------------------- the lane */
 
-if (section('field') && M.field && M.voyage && M.islands && M.dolls) {
-  const FD = M.field;
+if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
+  const LA = M.lane;
   const V = M.voyage;
   const { ISLANDS, CHERUBIM } = M.islands;
-  const { T, walkable } = M.tiles;
-  const { DOLL_BY_ID } = M.dolls;
+  const { BEAST_BY_ID, UPGRADES, resolveBeast } = M.beasts;
+  const { CORRUPTED, tableFor, wavesFor } = M.corrupted;
 
   /**
-   * The greedy shepherd, tile edition: stand a herder on the biggest cluster of animals,
-   * repeat while charges last, then let the clock run. Not a good player -- a PREDICTABLE
-   * one, which is what a balance test needs.
+   * A competent player, so the lane game is balanced against something that plays it
+   * properly: wells at the back, walls at the front, thorns between, reeds on the water,
+   * and an apple thrown at anything it knocks down.
    */
-  function autoField(v, island, tag) {
-    const f = FD.newField(v, island, tag);
-    for (const id of Object.keys(v.dolls)) {
-      let guard = 0;
-      while (FD.dollCharges(f, id) > 0 && guard++ < 8) {
-        // whichever tile has the most animals within the doll's radius
-        const d = DOLL_BY_ID[id];
-        let best = null, bn = 0;
-        for (const cr of f.animals) {
-          if (cr.state === 'safe' || cr.state === 'lost') continue;
-          const c = cr.c | 0, r = cr.r | 0;
-          if (FD.canPlaceDoll(f, d, c, r)) continue;
-          let n = 0;
-          for (const o of f.animals) {
-            if (o.state === 'safe' || o.state === 'lost') continue;
-            if (Math.hypot(o.c - c - 0.5, o.r - r - 0.5) <= d.radius) n++;
+  function autoLane(v, island, tag) {
+    const f = LA.newLane(v, island, tag);
+    let steps = 0;
+    while (!f.over && steps++ < 40000) {
+      LA.update(f, 1 / 30);
+      for (const tr of f.trees) if (tr.ripe) LA.harvest(f, tr.row, tr.col);
+      for (let guard = 0; guard < 3; guard++) {
+        let did = false;
+        if (f.hand.some((b) => b.id === 'reed') && f.clay >= 25) {
+          for (const r of f.waterRows) {
+            for (let c = 6; c >= 2 && !did; c--) if (LA.plant(f, 'reed', r, c).ok) did = true;
+            if (did) break;
           }
-          if (n > bn) { bn = n; best = { c, r }; }
         }
-        if (!best) break;
-        if (!FD.placeDoll(f, id, best.c, best.r).ok) break;
+        const wells = f.plants.filter((p) => p.def.kind === 'gen').length;
+        if (!did && wells < 4 && f.clay >= 50) {
+          for (let r = 0; r < LA.ROWS && !did; r++) if (LA.plant(f, 'well', r, 0).ok) did = true;
+        }
+        if (!did && f.clay >= 100) {
+          for (let r = 0; r < LA.ROWS && !did; r++) {
+            if (f.plants.some((p) => p.row === r && p.def.kind === 'shoot')) continue;
+            for (let c = 1; c <= 3 && !did; c++) if (LA.plant(f, 'thorn', r, c).ok) did = true;
+          }
+        }
+        if (!did && f.clay >= 50) {
+          for (let r = 0; r < LA.ROWS && !did; r++) {
+            if (f.plants.some((p) => p.row === r && p.def.kind === 'wall')) continue;
+            for (let c = 7; c >= 5 && !did; c--) if (LA.plant(f, 'boar', r, c).ok) did = true;
+          }
+        }
+        if (!did) break;
+      }
+      if (f.stunned.length && f.apples > 0) {
+        const st = f.stunned[0];
+        LA.tame(f, st.row, Math.round(st.col));
       }
     }
-    let steps = 0;
-    while (!f.over && steps++ < 6000) FD.update(f, 1 / 30);
     return f;
   }
 
-  // --- the grid is legal on every island
+  // --- the board is legal on every island
   for (const island of ISLANDS.concat([CHERUBIM])) {
-    const v = V.newVoyage('FLD-' + island.id);
-    const f = FD.newField(v, island, 'g');
-    let deckBad = 0, gangBad = 0;
-    for (let r = 0; r < FD.ROWS; r++) {
-      for (let c = 0; c < FD.ARK_COLS; c++) if (f.grid[r * FD.COLS + c] !== T.DECK) deckBad++;
-      // the gangway column is never blocked: the last step home must always exist
-      if (!walkable(f.grid[r * FD.COLS + FD.ARK_COLS])) gangBad++;
+    const v = V.newVoyage('LN-' + island.id);
+    const f = LA.newLane(v, island, 'g');
+    ok(f.clay >= 50, `${island.id}: enough clay to open with`, String(f.clay));
+    ok(f.waveT > 8, `${island.id}: a real opening before the first wave`, f.waveT.toFixed(1));
+    ok(f.guards.length === LA.ROWS && f.guards.every(Boolean),
+      `${island.id}: a guard in every row`);
+    ok(f.hand.length >= 3, `${island.id}: at least three beasts to plant`, String(f.hand.length));
+
+    // Every row must be plantable with SOMETHING in the hand, or a lane is a free road to
+    // the ark. A water row is not open to a well -- but it is open to a reed, and the reed
+    // is a starter for exactly this reason.
+    let dead = 0;
+    for (let r = 0; r < LA.ROWS; r++) {
+      const any = f.hand.some((b) => !LA.plantable(f, r, 0, b));
+      if (!any) dead++;
     }
-    ok(deckBad === 0, `${island.id}: the ark's columns are deck`, String(deckBad));
-    ok(gangBad === 0, `${island.id}: the gangway column is walkable`, String(gangBad));
+    ok(dead === 0, `${island.id}: every row can be defended from the back`, String(dead));
+    ok(f.hand.some((b) => b.kind === 'pad'), `${island.id}: a reed is always in the hand`);
 
-    let off = 0, onBlock = 0;
-    for (const cr of f.animals) {
-      if (cr.c < FD.ARK_COLS + 1 || cr.c > FD.COLS || cr.r < 0 || cr.r > FD.ROWS) off++;
-      if (!walkable(f.grid[(cr.r | 0) * FD.COLS + (cr.c | 0)])) onBlock++;
+    // and a water row always has a way to be used
+    for (const r of f.waterRows) {
+      ok(f.terrain[r * LA.COLS] === LA.L.WATER, `${island.id}: row ${r} really is water`);
     }
-    ok(off === 0, `${island.id}: nobody starts off the island`, String(off));
-    ok(onBlock === 0, `${island.id}: nobody starts inside a rock`, String(onBlock));
-    ok(f.animals.length >= 9, `${island.id}: enough ashore to have to choose`, String(f.animals.length));
-
-    // and every one of them can actually get home
-    FD.computeFlow(f);
-    let stranded = 0;
-    for (const cr of f.animals) if (f.flow[(cr.r | 0) * FD.COLS + (cr.c | 0)] < 0) stranded++;
-    ok(stranded === 0, `${island.id}: every animal has a route to the ark`, String(stranded));
-
-    ok(f.floodCols === 0, `${island.id}: the water starts off the far shore`);
-    ok(FD.secondsLeft(f) > 30, `${island.id}: there is time to do something`,
-      FD.secondsLeft(f).toFixed(1));
+    ok(f.waterRows.length <= 2, `${island.id}: never more than two water rows`);
+    ok(f.trees.length <= 4, `${island.id}: a sane number of apple trees`);
   }
 
-  // --- a full stage plays, saves somebody, and ends
-  let totalSaved = 0, totalLost = 0;
+  // --- a stage plays out and resolves
+  let held = 0, tamedTotal = 0;
   for (const island of ISLANDS) {
-    const v = V.newVoyage('FPLAY-' + island.id);
-    v.dolls = { herd: 4, bridge: 2 };
-    const before = v.aboard.length;
-    const f = autoField(v, island, 'p');
-    const res = FD.result(f);
+    const v = V.newVoyage('LP-' + island.id);
+    const f = autoLane(v, island, 'p');
     ok(f.over, `${island.id}: the stage ends`);
-    ok(res.saved.length > 0, `${island.id}: the greedy shepherd saves somebody`,
-      JSON.stringify({ saved: res.saved.length, lost: res.lost.length, why: res.why }));
-    ok(v.aboard.length >= before, `${island.id}: the deck never shrinks from a rescue`);
+    ok(f.why === 'clear' || f.why === 'overrun', `${island.id}: it ends for a reason`, f.why);
+    ok(f.t > 30, `${island.id}: and it lasts long enough to be a game`, f.t.toFixed(0) + 's');
     ok(v.aboard.length <= V.capacity(v), `${island.id}: never more aboard than there are pens`);
-    ok(res.saved.length + res.lost.length === f.animals.length,
-      `${island.id}: every animal on the field is accounted for`,
-      `${res.saved.length}+${res.lost.length} vs ${f.animals.length}`);
-    totalSaved += res.saved.length;
-    totalLost += res.lost.length;
+    if (f.why === 'clear') held++;
+    tamedTotal += f.tamed.length;
   }
-  ok(totalSaved >= 11, 'a greedy pass saves at least one an island', String(totalSaved));
-  ok(totalLost > 0, 'and the water still gets some', String(totalLost));
-  console.log(`  greedy shepherd across eleven islands: ${totalSaved} saved, ${totalLost} lost`);
+  ok(held >= 3, 'a competent opening holds several islands', String(held));
+  ok(held <= ISLANDS.length - 2, 'and it does not hold all of them', String(held));
+  ok(tamedTotal > 10, 'and tames a useful number along the way', String(tamedTotal));
+  console.log(`  competent player: ${held}/${ISLANDS.length} islands held, ${tamedTotal} tamed`);
 
-  // --- the flood is the clock, and it takes what it reaches
+  // --- clay is the gate, and it is honest
   {
-    const v = V.newVoyage('FTIDE');
-    const f = FD.newField(v, ISLANDS[0], 't');
-    const n0 = FD.remaining(f);
+    const v = V.newVoyage('LCLAY');
+    const f = LA.newLane(v, ISLANDS[0], 'c');
+    f.clay = 0;
+    ok(!LA.plant(f, 'well', 2, 0).ok, 'nothing plants for free');
+    f.clay = 50;
+    ok(LA.plant(f, 'well', 2, 0).ok, 'and it does at the price on the card');
+    ok(f.clay === 0, 'and the price comes out of the purse');
+    ok(!LA.plant(f, 'well', 2, 0).ok, 'the same tile cannot take a second');
+    const before = f.clay;
+    LA.uproot(f, 2, 0);
+    ok(f.clay > before, 'digging one up gives some of it back');
+    ok(f.clay < before + 50, 'but not all of it, so it is a correction and not an undo');
+  }
+
+  // --- water needs a reed
+  {
+    const v = V.newVoyage('LWET');
+    v.beasts = ['well', 'reed', 'thorn'];
+    const f = LA.newLane(v, ISLANDS[0], 'w');
+    for (let c = 0; c < LA.COLS; c++) f.terrain[1 * LA.COLS + c] = LA.L.WATER;
+    f.clay = 500;
+    const dry = LA.plant(f, 'thorn', 1, 3);
+    ok(!dry.ok && /reed/.test(dry.why), 'a thorn will not stand in water', dry.why);
+    ok(LA.plant(f, 'reed', 1, 3).ok, 'a reed will');
+    ok(LA.plant(f, 'thorn', 1, 3).ok === false, 'and the tile is taken now');
+    ok(LA.plant(f, 'reed', 1, 4).ok, 'another reed goes down beside it');
+    ok(LA.plant(f, 'thorn', 1, 4).ok === false, 'the reed occupies its own tile');
+  }
+
+  // --- a wall stops a walker, and a walker eats a wall
+  {
+    const v = V.newVoyage('LWALL');
+    const f = LA.newLane(v, ISLANDS[0], 'x');
+    f.clay = 500;
+    ok(LA.plant(f, 'boar', 2, 6).ok, 'a wall goes down');
+    const p = LA.plantAt(f, 2, 6);
+    f.beasts.push({
+      def: M.corrupted.CORRUPT_BY_ID.c_boar, row: 2, x: 8,
+      hp: 999, max: 999, slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0,
+    });
+    for (let i = 0; i < 60 * 8; i++) LA.update(f, 1 / 60);
+    const b = f.beasts[0];
+    ok(b && b.x > 6.5, 'the walker is stopped at the wall', b && b.x.toFixed(2));
+    ok(p.hp < p.max, 'and the wall is taking damage', `${Math.round(p.hp)}/${p.max}`);
+  }
+
+  // --- a thorn kills things, and a felled beast is tameable rather than dead
+  {
+    const v = V.newVoyage('LKILL');
+    const f = LA.newLane(v, ISLANDS[0], 'k');
+    f.clay = 500;
+    f.apples = 2;
+    LA.plant(f, 'thorn', 2, 0);
+    f.beasts.push({
+      def: M.corrupted.CORRUPT_BY_ID.c_boar, row: 2, x: 7,
+      hp: 40, max: 40, slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0,
+    });
     let guard = 0;
-    while (!f.over && guard++ < 6000) FD.update(f, 1 / 30);
-    ok(f.over, 'the stage ends on its own');
-    ok(FD.remaining(f) < n0, 'the water took somebody', `${n0} -> ${FD.remaining(f)}`);
-    ok(f.lost.length > 0, 'and they are on the ledger');
+    while (f.beasts.length && guard++ < 60 * 20) LA.update(f, 1 / 60);
+    ok(f.stunned.length === 1, 'a felled beast stands there dazed rather than dying');
+    const s = f.stunned[0];
+    const knew = (v.beasts || []).length;
+    const res = LA.tame(f, s.row, Math.round(s.col));
+    ok(res.ok, 'an apple tames it', JSON.stringify(res));
+    ok(v.aboard.indexOf('boar') >= 0, 'and it is aboard');
+    ok((v.beasts || []).length >= knew, 'and the shape it teaches is remembered');
+    ok(f.apples === 1, 'and the apple is spent');
   }
 
-  // --- a doll cannot be spent twice, or stacked on itself
+  // --- the dazed window closes
   {
-    const v = V.newVoyage('FDOLL');
-    v.dolls = { herd: 99 };
-    const f = FD.newField(v, ISLANDS[0], 'd');
-    const cap = DOLL_BY_ID.herd.charges;
-    let placed = 0;
-    for (let c = FD.ARK_COLS + 3; c < FD.COLS - 1 && placed < cap + 4; c++) {
-      if (FD.placeDoll(f, 'herd', c, 5).ok) placed++;
+    const v = V.newVoyage('LWIND');
+    const f = LA.newLane(v, ISLANDS[0], 'd');
+    f.stunned.push({
+      def: M.corrupted.CORRUPT_BY_ID.c_boar, baseId: 'boar',
+      a: M.animals.ANIMAL_BY_ID.boar, row: 2, col: 4, t: 0, life: 8,
+    });
+    for (let i = 0; i < 60 * 10; i++) LA.update(f, 1 / 60);
+    ok(f.stunned.length === 0, 'a dazed beast wanders off if you leave it');
+  }
+
+  // --- a row guard is a one-shot save that still hands you the animal
+  {
+    const v = V.newVoyage('LGUARD');
+    const f = LA.newLane(v, ISLANDS[0], 'g2');
+    f.beasts.push({
+      def: M.corrupted.CORRUPT_BY_ID.c_hound, row: 0, x: 0.2,
+      hp: 40, max: 40, slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0,
+    });
+    const hp0 = f.ark.hp;
+    for (let i = 0; i < 60 * 4; i++) LA.update(f, 1 / 60);
+    ok(f.guards[0] === false, 'the row guard is spent');
+    ok(f.ark.hp === hp0, 'and the ark is untouched');
+    ok(f.stunned.length === 1, 'and the beast it stopped is there to be tamed');
+  }
+
+  // --- and once the guard is gone, a breach costs an animal off the deck
+  {
+    const v = V.newVoyage('LBREACH');
+    const f = LA.newLane(v, ISLANDS[0], 'b2');
+    f.guards[0] = false;
+    f.spare = 0;
+    const deck0 = v.aboard.length;
+    f.beasts.push({
+      def: M.corrupted.CORRUPT_BY_ID.c_hound, row: 0, x: 0.2,
+      hp: 40, max: 40, slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0,
+    });
+    for (let i = 0; i < 60 * 4; i++) LA.update(f, 1 / 60);
+    ok(f.ark.hp < f.ark.max, 'the ark takes the hit');
+    ok(v.aboard.length === deck0 - 1, 'and it costs an animal off the deck');
+  }
+
+  // --- gear reaches the lane
+  {
+    const plain = LA.newLane(V.newVoyage('LG'), ISLANDS[0], 'g3');
+    const v2 = V.newVoyage('LG');
+    V.equip(v2, { id: 'fk_pat', name: 'Fake', slot: 'hold', bonus: { patience: 0.05 } });
+    const pat = LA.newLane(v2, ISLANDS[0], 'g3');
+    ok(pat.waves[0].lead > plain.waves[0].lead, 'patience buys time before the first wave');
+    const v3 = V.newVoyage('LG');
+    V.equip(v3, { id: 'fk_dry', name: 'Fake', slot: 'wear', bonus: { dry: true } });
+    const dry = LA.newLane(v3, ISLANDS[0], 'g3');
+    ok(dry.ark.max > plain.ark.max, 'dry buys the ark another breach');
+  }
+
+  // --- the data itself
+  for (const b of M.beasts.BEASTS) {
+    ok(typeof b.cost === 'number' && b.cost >= 0, `beast ${b.id} has a cost`);
+    ok(M.animals.ANIMAL_BY_ID[b.base], `beast ${b.id} is made of a real animal`, b.base);
+    ok(['gen', 'shoot', 'wall', 'aoe', 'slow', 'spawn', 'pad'].indexOf(b.kind) >= 0,
+      `beast ${b.id} has a known kind`, b.kind);
+    ok(b.rule && b.rule.length < 60, `beast ${b.id} states its rule in one line`);
+  }
+  for (const c of CORRUPTED) {
+    ok(M.animals.ANIMAL_BY_ID[c.base], `corrupted ${c.id} is a real animal`, c.base);
+    ok(BEAST_BY_ID[c.gives], `corrupted ${c.id} teaches a real beast`, c.gives);
+    ok(c.walk > 0 && c.walk < 2, `corrupted ${c.id} walks at a sane speed`, String(c.walk));
+  }
+  {
+    // every beast has exactly one upgrade, and it changes something
+    for (const b of M.beasts.BEASTS) {
+      const up = UPGRADES[b.id];
+      ok(up, `beast ${b.id} has an upgrade`);
+      if (!up) continue;
+      const base = resolveBeast(b.id, []);
+      const better = resolveBeast(b.id, [b.id]);
+      ok(JSON.stringify(base) !== JSON.stringify(better), `${b.id}'s upgrade changes it`);
     }
-    ok(placed === cap, 'a stage allows exactly the doll\'s charges', `${placed} vs ${cap}`);
-    ok(FD.dollCharges(f, 'herd') === 0, 'and then there are none left');
-    const again = FD.placeDoll(f, 'herd', FD.ARK_COLS + 4, 5);
-    ok(!again.ok, 'placing one more is refused', again.why);
   }
-
-  // --- a bridge doll opens water, and the flow field notices
   {
-    const v = V.newVoyage('FBRIDGE');
-    v.dolls = { bridge: 4 };
-    const f = FD.newField(v, ISLANDS[0], 'b');
-    // put a river in by hand, so the test does not depend on the roll
-    for (let r = 0; r < FD.ROWS; r++) f.grid[r * FD.COLS + 12] = T.WATER;
-    FD.touch(f);
-    FD.computeFlow(f);
-    ok(f.flow[5 * FD.COLS + 18] < 0, 'a full-height river cuts the island in two');
-    ok(FD.placeDoll(f, 'bridge', 12, 5).ok, 'a bridge doll goes in the water');
-    FD.computeFlow(f);
-    ok(f.flow[5 * FD.COLS + 18] >= 0, 'and the far side is reachable again');
-  }
-
-  // --- a ram doll breaks what is in the way
-  {
-    const v = V.newVoyage('FRAM');
-    v.dolls = { ram: 2 };
-    v.recipes = ['ram'];
-    const f = FD.newField(v, ISLANDS[0], 'r');
-    f.grid[5 * FD.COLS + 14] = T.ROCK;
-    FD.touch(f);
-    ok(FD.placeDoll(f, 'ram', 14, 5).ok, 'a ram doll goes down');
-    ok(walkable(f.grid[5 * FD.COLS + 14]), 'and the rock is gone');
-  }
-
-  // --- a loyal animal is not taken, which is the whole promise of the apple
-  {
-    const v = V.newVoyage('FLOYAL');
-    const f = FD.newField(v, ISLANDS[0], 'l');
-    const cr = f.animals[0];
-    cr.loyal = true;
-    const c0 = cr.c;
-    let guard = 0;
-    while (cr.state !== 'lost' && cr.loyal && guard++ < 6000) FD.update(f, 1 / 30);
-    ok(!cr.loyal || cr.state !== 'lost', 'a loyal animal spends its reprieve before it dies');
-    ok(cr.c <= c0 + 0.001 || cr.state === 'safe' || f.over,
-      'and the reprieve moves it toward the ark');
-  }
-
-  // --- gear reaches the field
-  {
-    const v = V.newVoyage('FGEAR');
-    const f0 = FD.newField(v, ISLANDS[0], 'g0');
-    const base = f0.limit;
-    const v2 = V.newVoyage('FGEAR');
-    V.equip(v2, { id: 'fake_pat', name: 'Fake', slot: 'hold', bonus: { patience: 0.05 } });
-    const f2 = FD.newField(v2, ISLANDS[0], 'g0');
-    ok(f2.limit > base, 'patience buys time', `${base} -> ${f2.limit}`);
-    const v3 = V.newVoyage('FGEAR');
-    V.equip(v3, { id: 'fake_reach', name: 'Fake', slot: 'hold', bonus: { reach: 0.5 } });
-    const f3 = FD.newField(v3, ISLANDS[0], 'g0');
-    ok(FD.radiusOf(f3, DOLL_BY_ID.herd) > DOLL_BY_ID.herd.radius, 'reach widens a doll');
-  }
-
-  // --- monsters land, and a wolf doll settles them
-  {
-    const v = V.newVoyage('FMON');
-    v.dolls = { wolf: 2 };
-    v.recipes = ['wolf'];
-    const f = FD.newField(v, ISLANDS[3], 'm');
-    f.strikeIn = 0.01;
-    let guard = 0;
-    while (f.monsters.length === 0 && guard++ < 600) FD.update(f, 1 / 30);
-    ok(f.monsters.length > 0, 'the storm drops something', String(f.monsters.length));
-    const mo = f.monsters[0];
-    FD.placeDoll(f, 'wolf', mo.c | 0, mo.r | 0);
-    FD.update(f, 1 / 30);
-    ok(mo.calm === true, 'and a wolf doll settles it');
-  }
-
-  // --- materials come off the deck, and dolls come out of materials
-  {
-    const v = V.newVoyage('FMAT');
-    const got = V.harvest(v);
-    ok(Object.keys(got).length > 0, 'a crossing yields something', JSON.stringify(got));
-    ok(v.mats.clay >= 2, 'and the golem always sheds clay');
-    const before = v.dolls.herd || 0;
-    v.mats.clay = 20;
-    ok(V.craftDoll(v, 'herd').ok, 'a known doll can be made');
-    ok((v.dolls.herd || 0) === before + 1, 'and it lands in the box');
-    ok(!V.craftDoll(v, 'beacon').ok, 'an unknown recipe cannot');
-    ok(V.learnRecipe(v, 'beacon'), 'Noah can teach it');
-    ok(!V.learnRecipe(v, 'beacon'), 'but only once');
+    // wave one is always the slow ones, on every island
+    for (const island of ISLANDS) {
+      const t0 = tableFor(island, 0, 5);
+      ok(t0.every((c) => c.walk <= 0.5), `${island.id}: wave one is the slow ones`);
+      const tN = tableFor(island, 4, 5);
+      ok(tN.length >= t0.length, `${island.id}: the table widens as it goes`);
+    }
+    const w = wavesFor(ISLANDS[0], M.rng.makeRng('w'));
+    ok(w.length === 5, 'five waves');
+    ok(w[w.length - 1].big, 'and the last one is the big one');
+    ok(w[0].lead >= 16, 'with a real opening in front of the first');
   }
 }
 
@@ -630,19 +681,18 @@ if (section('garden') && M.garden && M.gear && M.quests && M.npcs) {
     else if (key === 'sail') ok(V.floodPerLeg(v1) < base.sail, 'sail moves the tide');
     else if (key === 'coin') ok(V.sellPrice(v1, v1.aboard[0]) > base.coin, 'coin moves a price');
     else if (key === 'reach') {
-      const f1 = M.field.newField(v1, M.islands.ISLANDS[0], 'x');
-      ok(M.field.radiusOf(f1, M.dolls.DOLL_BY_ID.herd) > M.dolls.DOLL_BY_ID.herd.radius,
-        'reach widens every doll');
+      const f1 = M.lane.newLane(v1, M.islands.ISLANDS[0], 'x');
+      ok(f1.reach > 0, 'reach reaches the lane');
     } else if (key === 'patience') {
-      const f1 = M.field.newField(v1, M.islands.ISLANDS[0], 'x');
-      const plain = M.field.newField(V.newVoyage('BON-plain'), M.islands.ISLANDS[0], 'x');
-      ok(f1.limit > plain.limit, 'patience buys time before the flood');
+      const f1 = M.lane.newLane(v1, M.islands.ISLANDS[0], 'x');
+      const plain = M.lane.newLane(V.newVoyage('BON-plain'), M.islands.ISLANDS[0], 'x');
+      ok(f1.waves[0].lead > plain.waves[0].lead, 'patience buys time before the waves');
     } else if (key === 'dry') {
-      const f1 = M.field.newField(v1, M.islands.ISLANDS[0], 'x');
-      ok(f1.dry === true, 'dry reaches the field');
+      const f1 = M.lane.newLane(v1, M.islands.ISLANDS[0], 'x');
+      ok(f1.ark.max > 2, 'dry buys the ark another breach');
     } else if (key === 'sure') {
-      const f1 = M.field.newField(v1, M.islands.ISLANDS[0], 'x');
-      ok(f1.sure === true && f1.spare >= 1, 'sure reaches the field as a spare');
+      const f1 = M.lane.newLane(v1, M.islands.ISLANDS[0], 'x');
+      ok(f1.spare >= 1, 'sure reaches the lane as a spare');
     }
   }
 
@@ -868,7 +918,7 @@ if (section('choices') && M.choices && M.choicedata) {
 
     v1 = mk();
     CH.applyOption(v1, CHOICE_BY_ID.whale, 0);            // the whale
-    const f1 = M.field.newField(v1, M.islands.ISLANDS[0], 'w');
+    const f1 = M.lane.newLane(v1, M.islands.ISLANDS[0], 'w');
     ok(f1.spare >= 1, 'the whale shadows you onto the island');
   }
 

@@ -27,6 +27,7 @@
 //   berths  n         more pens, permanently
 //   stat    {k:n}     nudges the ledger the quests read
 //   flag    name      sets a flag other content reads
+//   meet    npcId     that person is in the garden from now on
 
 const C = (id, o) => Object.assign({ id, weight: 10 }, o);
 
@@ -38,7 +39,7 @@ export const FLAGS = {
   dove: 'The dove flies ahead. The flood gains less on every crossing.',
   shepherd: 'The old shepherd owes you. He turns up when it is worst.',
   charted: 'You have his charts. Islands read one step less dangerous.',
-  sworn: 'You swore at the gate. The Cherubim opens a fourth door.',
+  sworn: 'You swore at the gate. Everything in the garden is a coin cheaper.',
   greedy: 'You took the gold. The garden grows slower for it.',
 };
 
@@ -316,6 +317,109 @@ export const CHOICES = [
       },
     ],
   }),
+
+  /* ------------------------------------------------------ meeting the cast
+
+  Three introductions, one per person who trades in the garden. They are marked
+  `unmet`, so each can only turn up while you have not met that person yet, and they
+  are weighted up hard: the garden is empty until you have been out and met somebody,
+  which is the whole point of moving them out of it.
+  */
+
+  C('snake_in_the_branches', {
+    title: 'SOMETHING IN THE BRANCHES',
+    who: 'snake',
+    unmet: 'snake',
+    weight: 9,
+    lines: [
+      'Half a tree is above the water and there is a snake wound round the top of it.',
+      'It is holding an apple in its mouth. It has clearly been waiting for somebody.',
+    ],
+    options: [
+      {
+        label: 'TAKE THE APPLE',
+        blurb: 'It is not going to explain what the apple is for.',
+        cost: 'whatever an apple costs',
+        effects: [{ meet: 'snake' }, { item: 'green_apple' }, { stat: { rescued: 1 } }],
+        outcome: 'It drops into the boat, coils on the rail, and says it will see you in the garden.',
+      },
+      {
+        label: 'TAKE THE SNAKE AND LEAVE THE APPLE',
+        blurb: 'One of the two is worth having.',
+        cost: 'the apple',
+        effects: [{ meet: 'snake' }, { money: 4 }],
+        outcome: 'It says that was the correct answer and it is disappointed in you.',
+      },
+      {
+        label: 'ROW PAST THE TREE',
+        blurb: 'You know how this story goes.',
+        cost: 'a shop you will not have',
+        effects: [{ money: 6 }, { stat: { drowned: 1 } }],
+        outcome: 'It watches you all the way to the horizon without blinking.',
+      },
+    ],
+  }),
+
+  C('adam_and_the_ditch', {
+    title: 'A MAN DIGGING A DITCH IN A FLOOD',
+    who: 'adam',
+    unmet: 'adam',
+    weight: 9,
+    lines: [
+      'He is up to his knees in it, cutting a channel with a mattock he made himself.',
+      'He says the water has to go somewhere and it may as well go where he put it.',
+    ],
+    options: [
+      {
+        label: 'DIG WITH HIM UNTIL IT DRAINS',
+        blurb: 'You do not get tired. He does.',
+        cost: 'half a day of the flood',
+        effects: [{ meet: 'adam' }, { tide: 1 }, { berths: 2 }],
+        outcome: 'It drains. He looks at your hands and asks who made you.',
+      },
+      {
+        label: 'CARRY HIM AND HIS TOOLS OFF',
+        blurb: 'The ditch is lost. He is not.',
+        cost: 'the ditch',
+        effects: [{ meet: 'adam' }, { gear: 'pitched_apron' }],
+        outcome: 'He will not look back at it. He gives you the apron off his own shoulders.',
+      },
+      {
+        label: 'BUY THE TOOL AND GO',
+        blurb: 'A tool now against a workshop later.',
+        cost: 'the man',
+        effects: [{ money: -6 }, { gear: 'long_crook' }, { flag: 'robbed' }],
+        outcome: 'He takes the coins and goes back to digging in the rain with his hands.',
+      },
+    ],
+  }),
+
+  C('eve_under_the_tree', {
+    title: 'A WOMAN SITTING WITH ANIMALS',
+    who: 'eve',
+    unmet: 'eve',
+    weight: 9,
+    lines: [
+      'She is under the last tree on the ridge with about forty animals sitting round her.',
+      'None of them are tied. None of them are leaving. She is in no hurry whatsoever.',
+    ],
+    options: [
+      {
+        label: 'SIT DOWN FOR A WHILE',
+        blurb: 'The animals will not come until you do.',
+        cost: 'the tide',
+        effects: [{ meet: 'eve' }, { tide: 1 }, { loyal: 2 }, { flag: 'kind' }],
+        outcome: 'Two of yours come and sit against your leg. They stay that way.',
+      },
+      {
+        label: 'ASK HER TO COME NOW',
+        blurb: 'She will, and she will bring two of them.',
+        cost: 'nothing yet',
+        effects: [{ meet: 'eve' }, { animal: 'wild' }, { animal: 'wild' }],
+        outcome: 'She picks two without looking and says the rest know their way to high ground.',
+      },
+    ],
+  }),
 ];
 
 export const CHOICE_BY_ID = Object.freeze(
@@ -326,4 +430,5 @@ export const CHOICE_BY_ID = Object.freeze(
 export const EFFECT_KEYS = [
   'money', 'hull', 'tide', 'item', 'gear', 'animal', 'lose', 'loyal', 'beds', 'berths',
   'stat', 'flag',
+  'meet',
 ];

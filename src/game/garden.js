@@ -15,12 +15,12 @@
 
 import { ITEM_BY_ID, itemsFrom } from '../data/items.js';
 import { GEAR_BY_ID, gearFrom } from '../data/gear.js';
-import { NPC_BY_ID, rollGates, dealSize } from '../data/npcs.js';
+import { NPC_BY_ID, dealSize } from '../data/npcs.js';
 import { BEAST_BY_ID, UPGRADES as BEAST_UPGRADES } from '../data/beasts.js';
 import { BOAT_UPGRADES, UPGRADE_IDS, tierCost, buyUpgrade, addItem, equip, say, buyBeastUpgrade,
 } from './voyage.js';
 import { QUESTS, currentQuest, questDone, progressOf } from '../data/quests.js';
-import { priceMod, gatesOpen } from './choices.js';
+import { priceMod } from './choices.js';
 
 /** How many times you have to sit with an animal before it will not leave you. */
 export const PETS_FOR_LOYALTY = 3;
@@ -28,35 +28,47 @@ export const PETS_FOR_LOYALTY = 3;
 /* ------------------------------------------------------------------- arriving */
 
 /**
- * Set the garden up for this visit: which three gates are on offer, and what everybody
- * already summoned has on their blanket today. Rolled from the seed and the visit number
- * so a reload cannot reroll a bad shop.
+ * Set the garden up for this visit: what everybody you have met has on their blanket
+ * today. Rolled from the seed and the visit number so a reload cannot reroll a bad shop.
+ *
+ * THERE IS NO GATE LOTTERY ANY MORE. Three doors in a wall handed out the cast by chance
+ * in the one place where nothing happens; the cast is met out on the water now, through
+ * encounters marked `unmet`, and the Cherubim's only errand is Noah.
  */
 export function enterGarden(v) {
   v.visits = (v.visits || 0) + 1;
   const rng = v.rng.fork(`eden/${v.visits}`);
-  v.gateOffer = rollGates(rng, v, gatesOpen(v)).map((n) => n.id);
+  v.gateOffer = [];
   v.deals = {};
   for (const id of v.summoned) v.deals[id] = rollDeal(v, rng.fork(id), NPC_BY_ID[id]);
   v.pets = v.pets || {};
   return v;
 }
 
-/** Free, once per visit. Whoever comes through stays for the rest of the run. */
-export function openGate(v, npcId) {
-  if (!npcId || v.summoned.indexOf(npcId) >= 0) return false;
-  if (!v.gateOffer || v.gateOffer.indexOf(npcId) < 0) return false;
+/**
+ * Somebody joins the garden for the rest of the run: the Cherubim calling Noah through
+ * the great gate, or an encounter out on the water introducing one of the others.
+ */
+export function summon(v, npcId) {
   const npc = NPC_BY_ID[npcId];
-  if (!npc) return false;
+  if (!npc || !npcId) return false;
+  v.summoned = v.summoned || [];
+  if (v.summoned.indexOf(npcId) >= 0) return false;
   v.summoned.push(npcId);
+  v.gates = v.gates || [];
   v.gates.push(npcId);
-  v.gateOffer = [];                      // one gate a visit: that is the whole decision
   const rng = v.rng.fork(`deal/${npcId}/${v.visits}`);
   v.deals = v.deals || {};
   v.deals[npcId] = rollDeal(v, rng, npc);
   say(v, `${npc.name} came through the gate.`, npc.color);
   return true;
 }
+
+/** What the Cherubim is for. Free, and he will only ever do it once. */
+export function callNoah(v) { return summon(v, 'noah'); }
+
+/** Has the Cherubim already done his one errand? */
+export function noahCalled(v) { return (v.summoned || []).indexOf('noah') >= 0; }
 
 /* ---------------------------------------------------------------------- deals */
 

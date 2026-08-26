@@ -19,6 +19,7 @@
 import { ANIMAL_BY_ID, ANIMALS } from '../data/animals.js';
 import { CHOICES, CHOICE_BY_ID, FLAGS } from '../data/choices.js';
 import { GEAR_BY_ID } from '../data/gear.js';
+import { NPC_BY_ID } from '../data/npcs.js';
 import {
   takeAboard, berthsFree, isLoyal, makeLoyal, addItem, equip, lose, say,
   damageHull, repairHull, floodPerLeg,
@@ -31,6 +32,7 @@ export function priceMod(v) {
   let n = 0;
   if (v.flags.robbed) n += 2;
   if (v.flags.kind) n -= 1;
+  if (v.flags.sworn) n -= 1;             // an oath at the gate is worth a coin a deal
   return n;
 }
 
@@ -42,9 +44,6 @@ export function dangerMod(v) { return v.flags.charted ? -1 : 0; }
 
 /** The whale: one animal a rescue is pulled back out of deep water. */
 export function spareMod(v) { return v.flags.whale ? 1 : 0; }
-
-/** Whether the Cherubim will open a fourth door. */
-export function gatesOpen(v) { return v.flags.sworn ? 4 : 3; }
 
 /** The gold you took: the garden is slower to grow for it. */
 export function bedMod(v) { return (v.bonusBeds || 0) - (v.flags.greedy ? 4 : 0); }
@@ -68,7 +67,10 @@ export function rollEncounter(v, island) {
   for (const c of CHOICES) {
     if (seen.indexOf(c.id) >= 0) continue;
     if (c.needs && !v.flags[c.needs]) continue;
-    const w = c.needs ? c.weight * 3 : c.weight;
+    // an introduction is pointless once you have been introduced
+    if (c.unmet && (v.summoned || []).indexOf(c.unmet) >= 0) continue;
+    // and it is weighted UP, because meeting the cast is most of the story
+    const w = c.unmet ? c.weight * 4 : c.needs ? c.weight * 3 : c.weight;
     for (let i = 0; i < w; i++) pool.push(c);
   }
   if (!pool.length) return null;
@@ -178,6 +180,19 @@ export function applyOption(v, enc, ix) {
           v.flags[val] = true;
           told.push(FLAGS[val] || val);
           break;
+        // MEETING SOMEBODY. The garden used to hand out its own cast through three doors
+        // in a wall, which meant the people in the story arrived by lottery in the one
+        // place nothing happens. They are met OUT THERE now -- on the water, on the
+        // islands -- and the garden is where you find them again.
+        case 'meet': {
+          const npc = NPC_BY_ID[val];
+          if (!npc) break;
+          v.summoned = v.summoned || [];
+          if (v.summoned.indexOf(val) >= 0) { told.push(`${npc.name} again`); break; }
+          v.summoned.push(val);
+          told.push(`${npc.name} will be in the garden`);
+          break;
+        }
         default: break;
       }
     }

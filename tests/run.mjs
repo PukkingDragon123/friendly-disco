@@ -717,25 +717,40 @@ if (section('garden') && M.garden && M.gear && M.quests && M.npcs) {
     ok(palOk(n.color), `${n.id} colour is a palette key`, n.color);
   }
   {
+    // THE GREAT GATE. No lottery: the Cherubim's one errand is Noah, and everybody else
+    // is met out on the water.
     const v1 = V.newVoyage('GATE');
     G.enterGarden(v1);
-    ok(v1.gateOffer.length === 3, 'three gates on the first visit', String(v1.gateOffer.length));
-    ok(new Set(v1.gateOffer).size === 3, 'and no two of them are the same person');
-    const first = v1.gateOffer[0];
-    ok(G.openGate(v1, first), 'a gate opens');
-    ok(v1.summoned.indexOf(first) >= 0, 'and somebody came through');
-    ok(v1.gateOffer.length === 0, 'and the other two shut: one a visit');
-    ok(G.openGate(v1, v1.gateOffer[0]) === false, 'so a second gate cannot be opened');
-    ok(((v1.deals || {})[first] || []).length >= 1, 'and they brought something to sell');
-    // never offered twice across the whole run
-    let sawTwice = false;
-    for (let i = 0; i < 8; i++) {
-      G.enterGarden(v1);
-      for (const id of v1.gateOffer) if (v1.summoned.indexOf(id) >= 0) sawTwice = true;
-      if (v1.gateOffer.length) G.openGate(v1, v1.gateOffer[0]);
+    ok(v1.gateOffer.length === 0, 'no gate lottery any more', String(v1.gateOffer.length));
+    ok(G.noahCalled(v1) === false, 'and Noah is not in the garden to start with');
+    ok(G.callNoah(v1), 'the Cherubim calls him');
+    ok(v1.summoned.indexOf('noah') >= 0, 'and he comes through');
+    ok(G.noahCalled(v1), 'and the errand is done');
+    ok(G.callNoah(v1) === false, 'so he cannot be called twice');
+    ok(((v1.deals || {}).noah || []).length >= 1, 'and he brought something to sell');
+    ok(G.summon(v1, 'snake'), 'somebody met on the water joins too');
+    ok(G.summon(v1, 'snake') === false, 'but only once');
+    ok(((v1.deals || {}).snake || []).length >= 1, 'and lays out a blanket of their own');
+  }
+  {
+    // the three introductions: each can only turn up while you have not met them
+    const unmet = M.choicedata.CHOICES.filter((c) => c.unmet);
+    ok(unmet.length === 3, 'three people are met out on the water', String(unmet.length));
+    for (const c of unmet) {
+      ok(!!M.npcs.NPC_BY_ID[c.unmet], `${c.id} introduces somebody real`, c.unmet);
+      const meets = c.options.some((o) => (o.effects || []).some((e) => e.meet === c.unmet));
+      ok(meets, `${c.id} has an option that actually meets them`);
+      const v2 = V.newVoyage('MEET/' + c.id);
+      v2.summoned.push(c.unmet);
+      let seen = false;
+      for (let i = 0; i < 40; i++) {
+        v2.stats.legs = i * 3;
+        v2.lastEncounter = 0;
+        const e = M.choices.rollEncounter(v2, { id: 'x', biome: 'grassland' });
+        if (e && e.id === c.id) seen = true;
+      }
+      ok(!seen, `${c.id} never turns up once you have met them`);
     }
-    ok(!sawTwice, 'nobody already in the garden is offered again');
-    ok(v1.summoned.length === 4, 'all four can eventually be summoned', String(v1.summoned.length));
   }
 
   // --- buying
@@ -901,7 +916,7 @@ if (section('choices') && M.choices && M.choicedata) {
     v1 = mk();
     CH.applyOption(v1, CHOICE_BY_ID.gate_oath, 0);        // loyal + a flag
     ok(v1.loyal.length === 2, 'loyal makes two of them loyal');
-    ok(CH.gatesOpen(v1) === 4, 'and swearing opens a fourth door');
+    ok(CH.priceMod(v1) === -1, 'and swearing knocks a coin off every deal');
 
     v1 = mk();
     CH.applyOption(v1, CHOICE_BY_ID.the_kind_word, 0);    // an item

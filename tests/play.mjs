@@ -307,8 +307,8 @@ function playChoice() {
 }
 
 /**
- * The garden. Stow what the boat is carrying, open a gate if one is on offer, buy
- * whatever we can afford, then back to sea.
+ * The garden. Stow what the boat is carrying, have the Cherubim call Noah, buy whatever
+ * we can afford off whoever is standing about, then back to sea through the gate.
  */
 function playEden() {
   paint();
@@ -335,16 +335,45 @@ function playEden() {
     if (v.eden.length === before) break;
   }
 
-  // open a gate if the Cherubim are offering
+  // TALK TO THE KEEPER, and have him call Noah. There is no gate lottery any more: the
+  // Cherubim's one errand is Noah, and everybody else is met out on the water.
   paint();
-  const gates = (dbg().rects && dbg().rects.gates) || [];
-  if (gates.length) {
-    const [gx, gy] = centre(gates[0].rect);
-    clickAt(gx, gy);
+  const cher = dbg().rects && dbg().rects.cherub;
+  if (!cher) errors.push('eden: nobody keeping the gate');
+  else {
+    const [chx, chy] = centre(cher);
+    clickAt(chx, chy);
+    tick(6);
+    paint();
+    snap('eden-keeper');
+    if (dbg().mode !== 'talk') errors.push('eden: the Cherubim will not talk');
+    const call = dbg().rects && dbg().rects.call;
+    if (call) {
+      const [cx3, cy3] = centre(call);
+      clickAt(cx3, cy3);
+      tick(4);
+      paint();
+      if ((v.summoned || []).indexOf('noah') < 0) errors.push('eden: Noah was not called');
+    }
+    for (let i = 0; i < 6 && dbg().mode === 'talk'; i++) {
+      const back = dbg().rects && dbg().rects.back;
+      if (back) { const [bx2, by2] = centre(back); clickAt(bx2, by2); }
+      else clickAt(20, 520);
+      tick(4);
+      paint();
+    }
+    if (dbg().mode === 'talk') errors.push('eden: could not leave the Cherubim');
+  }
+
+  // then buy something off whoever is standing about
+  paint();
+  const folk = (dbg().rects && dbg().rects.npcs) || [];
+  if (folk.length) {
+    const [nx, ny] = centre(folk[0].rect);
+    clickAt(nx, ny);
     tick(6);
     paint();
     snap('eden-deal');
-    // buy the first thing we can afford, by its own card
     const money0 = v.money;
     const cards = (dbg().rects && dbg().rects.deal && dbg().rects.deal.cards) || [];
     for (const c of cards) {
@@ -356,9 +385,6 @@ function playEden() {
       if (v.money !== money0) break;
     }
     if (VERBOSE && v.money !== money0) console.log(`    bought something for $${money0 - v.money}`);
-    // leave the deal, by its own button
-    tick(4);
-    paint();
     for (let i = 0; i < 6 && dbg().mode === 'talk'; i++) {
       const back = dbg().rects && dbg().rects.back;
       if (back) { const [bx2, by2] = centre(back); clickAt(bx2, by2); }

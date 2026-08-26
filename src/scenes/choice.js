@@ -19,6 +19,8 @@ import { createParticles } from '../core/particles.js';
 import * as UI from '../render/uikit.js';
 import { drawFolkPortrait, FOLK_IDS } from '../render/folk.js';
 import { drawIslandFar } from '../render/islandart.js';
+import { drawBoat } from '../render/boat.js';
+import { drawFolk } from '../render/folk.js';
 import { applyOption } from '../game/choices.js';
 
 const FOLK_FOR = { shepherd: 'noah', god: 'cherub', angel: 'cherub' };
@@ -84,20 +86,20 @@ export function makeChoiceScene() {
     // whoever is telling you about it
     const who = FOLK_FOR[enc.who] || enc.who;
     if (FOLK_IDS.indexOf(who) >= 0) {
-      drawFolkPortrait(g, who, 22, 176, 132, 168, t, {});
-      text(g, String(enc.who).toUpperCase(), 88, 350, 'parch1', { font: 5, center: true });
+      drawFolkPortrait(g, who, 20, 150, 150, 196, t, {});
+      text(g, String(enc.who).toUpperCase(), 95, 352, 'parch1', { font: 5, center: true });
     }
 
     // the options
     cardRects = [];
     const n = enc.options.length;
-    const cw = Math.min(232, Math.floor((W - 230) / n) - 10);
-    const ch = 148;
-    const totalW = n * cw + (n - 1) * 12;
-    const startX = 200 + Math.round((W - 210 - totalW) / 2);
-    const cy = 150;
+    const cw = Math.min(252, Math.floor((W - 220) / n) - 12);
+    const ch = 218;
+    const totalW = n * cw + (n - 1) * 14;
+    const startX = 190 + Math.round((W - 200 - totalW) / 2);
+    const cy = 148;
     enc.options.forEach((opt, i) => {
-      const cx = startX + i * (cw + 12);
+      const cx = startX + i * (cw + 14);
       const lift = Math.round((1 - Ease.outCubic(clamp(intro * 1.5 - i * 0.12, 0, 1))) * 26);
       const r = UI.rectOf(cx, cy + lift, cw, ch);
       cardRects[i] = r;
@@ -117,26 +119,45 @@ export function makeChoiceScene() {
           { font: 7, center: true });
       });
       UI.divider(g, r.x + 8, r.y + 36, cw - 16, { color: 'parch0', light: 'cream' });
-      wrap(opt.blurb, cw - 20, { font: 3 }).slice(0, 4).forEach((l, j) => {
-        text(g, l, r.x + 10, r.y + 44 + j * 9, 'wood1', { font: 3 });
+      wrap(opt.blurb, cw - 24, { font: 5 }).slice(0, 5).forEach((l, j) => {
+        text(g, l, r.x + 12, r.y + 46 + j * 13, 'wood1', { font: 5 });
       });
-      // the cost, said out loud, straight under the blurb
-      const blurbRows = Math.min(4, wrap(opt.blurb, cw - 20, { font: 3 }).length);
-      const costY = r.y + 46 + blurbRows * 9 + 6;
-      text(g, 'IT COSTS', r.x + 10, costY, 'red0', { font: 3 });
-      wrap(opt.cost || 'nothing', cw - 20, { font: 5 }).slice(0, 2).forEach((l, j) => {
-        text(g, l, r.x + 10, costY + 10 + j * 11, 'rust', { font: 5 });
+      // the cost, said out loud, on its own rule at the foot of the card
+      rect(g, r.x + 10, r.y + ch - 52, cw - 20, 1, 'parch0');
+      text(g, 'IT COSTS', r.x + 12, r.y + ch - 46, 'red0', { font: 3 });
+      wrap(opt.cost || 'nothing', cw - 24, { font: 7 }).slice(0, 2).forEach((l, j) => {
+        text(g, l, r.x + 12, r.y + ch - 36 + j * 14, 'rust', { font: 7 });
       });
       if (dim) wash(g, r.x, r.y, cw, ch, 'ink', 0.55);
       if (chosen) {
-        UI.ribbon(g, r.x + 8, r.y + ch - 16, cw - 16, 'TAKEN', { color: 'gold', font: 5, h: 13 });
+        UI.ribbon(g, r.x + 8, r.y + ch - 14, cw - 16, 'TAKEN', { color: 'gold', font: 5, h: 13 });
       }
     });
 
+    // THE FOREGROUND. The bottom third of this screen was open water with nothing on it,
+    // which reads as a screen somebody stopped laying out. It is the deck you are standing
+    // on: the ark on the right, the golem at the rail, and a swell in front of both.
+    const SWELL = 388;                       // where the open water starts
+    for (let i = 0; i < 90; i++) {
+      const f = (i % 12) / 11;
+      const sy = SWELL + f * f * (H - SWELL - 6);
+      const sx = ((i * 149) + Math.floor(t * (7 + f * 26))) % (W + 80) - 40;
+      const len = 5 + Math.round(f * 16);
+      rect(g, sx, sy, len, 1 + Math.round(f), f < 0.4 ? 'water2' : 'foam');
+      if (i % 4 === 0) rect(g, sx + len, sy + 1 + Math.round(f), 3, 1, 'water3');
+    }
+    wash(g, 0, SWELL, W, H - SWELL, 'water0', 0.2);
+    rect(g, 0, SWELL, W, 2, 'water3');
+    drawBoat(g, 786, H + 4, t, {
+      tiers: v.tiers, damage: 0, scale: 3, speed: 0.2, wake: false,
+    });
+    // on the deck, not beside it: the deck of a 3x boat is twenty-four pixels up
+    drawFolk(g, 'golem', 786 - 74, H - 20, t, { scale: 1, mud: 0.4, sparkle: 0.2 });
+
     // what actually happened
     if (taken >= 0) {
-      const ow = 640, oh = 62;
-      const ox = Math.round((W - ow) / 2), oy = H - oh - 52;
+      const ow = 600, oh = 62;
+      const ox = 40, oy = H - oh - 68;
       const ok = Ease.outCubic(clamp(outT * 2.2, 0, 1));
       wash(g, ox, oy, ow, oh, 'ink', 0.8 * ok);
       frame(g, ox, oy, ow, oh, 'brass1');
@@ -152,7 +173,7 @@ export function makeChoiceScene() {
         text(g, bit, tx + 5, oy + oh - 13, 'brass3', { font: 3 });
         tx += bw + 4;
       });
-      goRect = UI.rectOf(W / 2 - 90, H - 44, 180, 28);
+      goRect = UI.rectOf(W / 2 - 100, H - 40, 200, 30);
       UI.button(g, goRect, 'GO ASHORE', {
         state: UI.hover(goRect, Input.mouse) ? 'hover' : 'idle', color: 'wood2',
         icon: 'boat', font: 5,

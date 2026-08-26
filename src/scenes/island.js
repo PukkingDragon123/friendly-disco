@@ -22,6 +22,8 @@ import * as UI from '../render/uikit.js';
 import { drawAnimal, drawAnimalIcon, drawAnimalShadow } from '../render/sprites.js';
 import { drawFolk, drawWand } from '../render/folk.js';
 import { drawScatter, drawPatches } from '../render/tiles.js';
+import { drawPlant } from '../render/flora.js';
+import { FLORA_BIOME } from '../render/islandart.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { berthsFree } from '../game/voyage.js';
 import {
@@ -42,6 +44,9 @@ const BAR_Y = FY + FH + 4;                  // the tray
 // The state REPLACES the material and keeps only the shape (see render/sprites.js). A
 // blessed beast is clay with a gold eye, a corrupted one is bruised dark with a red one,
 // and both are the same animal you will recognise when you tame it.
+/** Where the field's own furniture goes: the same place every time, on any machine. */
+function ihash(n) { const v = Math.sin(n * 78.233 + 12.9898) * 43758.5453; return v - Math.floor(v); }
+
 const CORRUPT_TINT = { material: 'corrupt' };
 const BLESSED_TINT = { material: 'clay' };
 
@@ -96,6 +101,25 @@ export function makeIslandScene() {
     // the grid, faint. Enough to plant against, not enough to look at.
     for (let c = 1; c < COLS; c++) rect(g, c * TW, 0, 1, FH, mix(P.ink, P[G.mid], 0.72));
     for (let r = 1; r < ROWS; r++) rect(g, 0, r * TH, FW, 1, mix(P.ink, P[G.mid], 0.72));
+
+    // UNDERGROWTH, along the row seams. It goes at the FOOT of each row and nowhere else:
+    // a lane you cannot read is a lane you cannot play, so the plants live on the lines
+    // between rows where nothing ever stands, and the middle of every tile stays clear.
+    const fb = FLORA_BIOME[island.biome] || 'grassland';
+    for (let r = 0; r < ROWS; r++) {
+      if (f.terrain[r * COLS] === L.WATER) continue;
+      for (let i = 0; i < 22; i++) {
+        const hx = ihash(r * 31 + i * 7);
+        const x = Math.round(hx * FW);
+        const cc = Math.floor(x / TW);
+        const k = f.terrain[r * COLS + cc];
+        if (k === L.ROCK || k === L.TREE) continue;
+        const y = r * TH + TH - 1 + (i % 3 === 0 ? -3 : 0);
+        const kk = ihash(r * 13 + i * 3);
+        drawPlant(g, x, y, kk < 0.6 ? 'grass' : kk < 0.82 ? 'tuft' : 'flower',
+          { biome: fb, v: i % 4, bend: 0 });
+      }
+    }
     // rocks and trees, which are part of the floor because they never move
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
@@ -666,6 +690,14 @@ export function makeIslandScene() {
     g.clip();
     g.translate(sh, 0);
     if (floorCv) g.drawImage(floorCv.canvas, FX, FY);
+    // a handful of live plants over the baked ones, so the field breathes
+    for (let i = 0; i < 20; i++) {
+      const x = FX + Math.round(ihash(i * 17) * FW);
+      const r = i % ROWS;
+      if (f.terrain[r * COLS] === L.WATER) continue;
+      drawPlant(g, x, FY + r * TH + TH - 2, i % 4 === 0 ? 'tuft' : 'grass',
+        { biome: FLORA_BIOME[island.biome] || 'grassland', v: i % 4, t });
+    }
     drawArk(g);
     // the rot, if it is happening, over its own row
     if (f.event && f.event.id === 'rot') wash(g, FX, ty(f.eventRow), FW, TH, 'moss', 0.28);

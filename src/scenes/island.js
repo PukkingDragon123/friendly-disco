@@ -8,11 +8,18 @@
 //   ROWS are banded in alternating tone, so a beast's row is never in doubt.
 //   HEALTH sits over anything damaged, and only over things that are damaged.
 //   THE DAZED get a ring and a bouncing apple prompt, because that window is the game.
+//   MOTES of clay carry the number they pay, ringed, and visibly sink when you ignore them.
+//   THE CHAMPION takes over the wave counter: name, health, and what its aura is doing.
+//
+// AND THE TRAY IS TWO ROWS NOW. One row with the rule printed on every card was the better
+// design right up to the moment a run knew eleven beasts and six of them were off the edge
+// of the screen: a rule you can read on a card you cannot see is worth nothing. So twelve
+// compact slots, and the rule moves to a plaque that follows the cursor.
 //
 // The floor is baked once into a single canvas -- lawn, water, rocks, trees, the ark's hull
 // -- and blitted as one call. Everything that moves is a blit of something that was baked.
 
-import { W, H, rect, text, textW, wash, clamp, disc, makeCanvas } from '../core/pixel.js';
+import { W, H, rect, text, textW, wash, clamp, disc, ellipse, makeCanvas } from '../core/pixel.js';
 import { P, mix } from '../core/palette.js';
 import { Input } from '../core/input.js';
 import { approach } from '../core/juice.js';
@@ -28,7 +35,7 @@ import { ANIMAL_BY_ID } from '../data/animals.js';
 import { berthsFree } from '../game/voyage.js';
 import {
   newLane, update as tickLane, actAt, select, uproot, plantable, plantAt, canAfford,
-  endLane, result, waveText, COLS, ROWS, L,
+  endLane, result, waveText, callWave, callable, takeMote, COLS, ROWS, L,
 } from '../game/lane.js';
 
 /* -------------------------------------------------------------------- layout */
@@ -57,7 +64,8 @@ export function makeIslandScene() {
   let parts = null;
   let hoverTile = null;
   let flash = 0, shake = 0;
-  let cardRects = [], appleRect = null, castRect = null;
+  let cardRects = [], appleRect = null, castRect = null, callRect = null;
+  let tipCard = null;
   let floorCv = null;
 
   /* ------------------------------------------------------------- the floor bake */
@@ -192,6 +200,37 @@ export function makeIslandScene() {
     Audio.sfx('click');
   }
 
+  /** Where a mote is drawn: floating over its tile, sinking back as its clock runs out. */
+  function moteAt2(m) {
+    const k = m.t / m.life;
+    const bob = Math.sin(t * 3 + m.col * 2) * 3;
+    return { x: FX + m.col * TW + TW / 2, y: cyOf(m.row) - 30 + bob + k * k * 22, k };
+  }
+
+  /** A click in pixel space: the nearest mote within a comfortable thumb of it. */
+  function grabAt(mx, my) {
+    let best = null, bd = 30;
+    for (const m of f.motes) {
+      const q = moteAt2(m);
+      const dd = Math.hypot(q.x - mx, q.y - my);
+      if (dd < bd) { bd = dd; best = m; }
+    }
+    if (!best) return false;
+    const res = takeMote(f, best);
+    if (res.ok) {
+      Audio.sfx('coin');
+      parts.burst('spark', moteAt2(best).x, moteAt2(best).y, { count: 6 });
+      flash = 0.12;
+    }
+    return res.ok;
+  }
+
+  function doCall() {
+    const res = callWave(f);
+    if (res.ok) { Audio.sfx('fanfare'); shake = 0.15; }
+    else { Audio.sfx('error'); if (res.why) note(res.why); }
+  }
+
   function update(dt) {
     t += dt;
     intro = approach(intro, 1, 2.6, dt);
@@ -221,6 +260,7 @@ export function makeIslandScene() {
       if (Input.pressed('Digit' + (i + 1))) pickBeast(f.hand[i].id);
     }
     if (Input.pressed('KeyA')) { select(f, { kind: 'apple' }); Audio.sfx('click'); }
+    if (Input.pressed('KeyC')) doCall();
     if (Input.pressed('Escape')) select(f, null);
     if (Input.pressed('Space') || Input.pressed('Enter')) { finish(); return; }
 
@@ -232,6 +272,13 @@ export function makeIslandScene() {
     }
     if (!m.pressed) return;
 
+    // A MOTE IS CLICKED WHERE IT IS DRAWN, not on the tile under it. It floats above the
+    // ground line and drifts, and a hit test that rounded it to a tile would refuse clicks
+    // that visibly landed on the thing -- which is the fastest way to teach a player that
+    // grabbing clay does not work.
+    const grabbed = grabAt(m.x, m.y);
+    if (grabbed) return;
+
     for (const cr of cardRects) if (UI.hover(cr.rect, m)) { pickBeast(cr.id); return; }
     if (appleRect && UI.hover(appleRect, m)) {
       if (f.apples > 0) { select(f, { kind: 'apple' }); Audio.sfx('click'); }
@@ -239,6 +286,7 @@ export function makeIslandScene() {
       return;
     }
     if (castRect && UI.hover(castRect, m)) { finish(); return; }
+    if (callRect && UI.hover(callRect, m)) { doCall(); return; }
 
     if (hoverTile) {
       const res = actAt(f, hoverTile.r, hoverTile.c);
@@ -334,6 +382,63 @@ export function makeIslandScene() {
     }
   }
 
+  /**
+   * CLAY LYING ON THE FIELD.
+   *
+   * It has to read as a thing you take rather than a thing that is happening: a lump with a
+   * lit top, a halo that tightens as its clock runs down, and a visible SINK in the last
+   * third so a mote you lost is something you watched rather than something you were told.
+   */
+  function drawMotes(g) {
+    for (const m of f.motes) {
+      const q = moteAt2(m);
+      const late = q.k > 0.66;
+      const prev = g.globalAlpha;
+      if (late) g.globalAlpha = clamp(1 - (q.k - 0.66) * 2.4, 0.2, 1);
+      // A HARD DARK EDGE, then the clay, then a lit top. The first version was three clay
+      // discs and it read as a potato on grass: every sprite in this game has an ink
+      // contour for exactly this reason and a thing you are meant to click needs it most.
+      disc(g, q.x, q.y, 11, 'ink');
+      disc(g, q.x, q.y, 9, 'clay2');
+      disc(g, q.x - 1, q.y - 2, 6, 'clay4');
+      rect(g, q.x - 4, q.y - 6, 4, 2, 'cream');
+      rect(g, q.x - 4, q.y + 6, 8, 2, 'clay0');
+      // a tight ring of sparks, turning. Wide scattered dots read as confetti; a ring at
+      // thirteen pixels reads as one object with a halo.
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + t * 1.8;
+        rect(g, q.x + Math.cos(a) * 14 - 1, q.y + Math.sin(a) * 10 - 1, 2, 2,
+          late ? 'rust' : 'gold');
+      }
+      // and the number, because the whole point of grabbing it is what it pays
+      text(g, `+${m.amount}`, q.x, q.y - 24, late ? 'rust' : 'gold', { font: 3, center: true });
+      g.globalAlpha = prev;
+    }
+  }
+
+  /**
+   * THE CHAMPION'S BAR — inside the top bar, in the space the wave counter was using.
+   *
+   * IT CANNOT GO OVER THE FIELD. Drawn across the top of the board, which is where a boss
+   * bar wants to live, it covered the whole first row: five lanes and one of them behind a
+   * panel. And when a champion is on the field it IS the wave, so the wave counter has
+   * nothing left to say -- the bar takes its place and nothing is hidden.
+   */
+  function drawBossBar(g, b) {
+    text(g, b.def.name, 320, 8, 'cream', { font: 5 });
+    const iw = 240;
+    rect(g, 320, 28, iw, 14, 'deep');
+    rect(g, 320, 28, Math.round(iw * clamp(b.hp / b.max, 0, 1)), 14, b.rage ? 'red1' : 'red2');
+    if (b.shell > 0) {
+      rect(g, 320, 28, Math.round(iw * clamp(b.shell / b.shellMax, 0, 1)), 6, 'stone3');
+    }
+    UI.boxEdge(g, 318, 26, iw + 4, 18, 'wood0');
+    const AURA = { haste: 'THE REST RUN', heal: 'THE REST MEND', crust: 'THE REST ARE CAKED' };
+    text(g, b.rage ? 'IT IS FURIOUS' : (AURA[b.def.aura] || ''), 572, 30,
+      b.rage ? 'red2' : 'purple1', { font: 3 });
+    text(g, `${Math.max(0, Math.round(b.hp))} LEFT OF IT`, 572, 42, 'parch1', { font: 3 });
+  }
+
   /** Everything alive, back to front by row. */
   function drawLive(g) {
     // plants first: they are behind the walkers that come at them
@@ -382,6 +487,18 @@ export function makeIslandScene() {
       const cx = FX + (b.x - 0.5) * TW, by = cyOf(b.row);
       const a = ANIMAL_BY_ID[b.def.base];
       if (!a) continue;
+      // A CHAMPION IS THE SAME SIZE AS EVERYTHING ELSE, because the art is one resolution
+      // and a boss drawn at three-pixel pixels is a lie about the game. Its presence is
+      // built out of everything else instead: a heavier shadow, a ring turning in the mud,
+      // a crown, and a bar across the top of the field.
+      if (b.boss) {
+        ellipse(g, cx, by + 1, 32, 9, 'ink');
+        for (let i = 0; i < 12; i++) {
+          const ang = (i / 12) * Math.PI * 2 + t * 0.6;
+          rect(g, cx + Math.cos(ang) * 40 - 2, by - 10 + Math.sin(ang) * 13 - 2, 4, 4,
+            i % 3 ? 'purple0' : 'red1');
+        }
+      }
       drawAnimalShadow(g, cx, by, 1);
       drawAnimal(g, a, cx, by, Object.assign({
         scale: 1, flip: true, walk: b.walk, t,
@@ -393,9 +510,40 @@ export function makeIslandScene() {
         const k = ((t * 0.8 + i * 0.33) % 1);
         rect(g, cx - 10 + i * 9, by - 40 - k * 18, 3, 3, i % 2 ? 'purple0' : 'night');
       }
-      if (b.hp < b.max) hpBar(g, cx, by - 62, b.hp / b.max, 'red2');
+      // THE CRUST IS ITS OWN BAR, above the health one and in stone. Two bars is one more
+      // than a lane game wants, but a shell you cannot see is a shooter that looks broken.
+      // UNDER the health bar, not over it: the top row's sprite reaches above the field and
+      // a bar at by-72 was behind the HUD for every walker in row one.
+      if (b.shell > 0) hpBar(g, cx, by - 53, b.shell / b.shellMax, 'stone3');
+      // and no bar over the champion's head: it wears a crown up there and its health is
+      // already the widest thing in the HUD.
+      if (b.hp < b.max && !b.boss) hpBar(g, cx, by - 62, b.hp / b.max, 'red2');
+      // ENRAGED: it steams, and the ground under it lights up. With eleven things walking
+      // the player has to be able to see WHICH one just got faster.
+      if (b.rage) {
+        for (let i = 0; i < 4; i++) {
+          const k = ((t * 1.6 + i * 0.25) % 1);
+          rect(g, cx - 12 + i * 8, by - 46 - k * 22, 3, 3, k > 0.6 ? 'rust' : 'red2');
+        }
+        ellipse(g, cx, by - 2, 20, 5, 'red0');
+      }
       if (b.slowT > 0) UI.icon(g, 'wave', cx - 6, by - 74, { color: 'ice' });
-      if (b.def.armour) UI.icon(g, 'shield', cx + 10, by - 74, { color: 'stone3' });
+      if (b.def.armour && b.shell <= 0) UI.icon(g, 'shield', cx + 10, by - 74, { color: 'stone3' });
+      if (b.boss) {
+        // A DIADEM, sitting ON the head rather than floating over it. Version one hung
+        // three thin spikes eighty pixels up and read as a fence in the grass behind.
+        // and OVER THE HEAD, which is on the left: every corrupted beast is drawn flipped,
+        // so a crown centred on the sprite box sits on the animal's shoulders.
+        const hx = cx - 16, hy = by - 62;
+        rect(g, hx - 16, hy + 8, 32, 4, 'ink');
+        rect(g, hx - 14, hy + 8, 28, 3, 'gold');
+        for (let i = 0; i < 3; i++) {
+          const px0 = hx - 12 + i * 10, hh = i === 1 ? 12 : 8;
+          rect(g, px0 - 1, hy + 8 - hh - 2, 6, hh + 2, 'ink');
+          rect(g, px0, hy + 8 - hh, 4, hh, 'gold');
+          rect(g, px0, hy + 8 - hh, 4, 3, 'cream');
+        }
+      }
     }
 
     // shots
@@ -412,6 +560,17 @@ export function makeIslandScene() {
           const a = (i / 16) * Math.PI * 2;
           rect(g, FX + (s.x + 0.5) * TW + Math.cos(a) * rr - 3, y + Math.sin(a) * rr * 0.6 - 3,
             6, 6, i % 2 ? 'orange' : 'gold');
+        }
+        continue;
+      }
+      if (s.lob) {
+        // A THROWN CLOD, on an arc. It says which plant is being hit from a distance, which
+        // is the one thing about a thrower the player cannot otherwise work out.
+        const x0 = FX + s.x * TW, x1 = FX + s.to * TW + TW / 2;
+        for (let i = 0; i <= 6; i++) {
+          const k = i / 6;
+          rect(g, x0 + (x1 - x0) * k - 3, y - Math.sin(k * Math.PI) * 26 - 3, 6, 6,
+            i % 2 ? 'wood1' : 'moss');
         }
         continue;
       }
@@ -495,10 +654,12 @@ export function makeIslandScene() {
     text(g, String(f.apples), ax + 30, 14, f.apples ? 'cream' : 'grey1', { font: 7 });
     text(g, 'APPLES', ax + 30, 36, 'parch1', { font: 3 });
 
-    // the wave
-    text(g, waveText(f), 320, 10, f.inWave ? 'gold' : 'parch1', { font: 5 });
+    // the wave -- or the champion, which replaces it while it is standing
+    const boss = f.beasts.find((z) => z.boss);
+    if (boss) drawBossBar(g, boss);
+    else text(g, waveText(f), 320, 10, f.inWave ? 'gold' : 'parch1', { font: 5 });
     const w = f.waves[Math.max(0, f.wave)];
-    if (w) {
+    if (w && !boss) {
       const totalLeft = f.queue.length + f.beasts.length;
       rect(g, 320, 32, 240, 12, 'deep');
       const done = w.count ? 1 - f.queue.length / w.count : 1;
@@ -537,24 +698,31 @@ export function makeIslandScene() {
   }
 
   /**
-   * The tray: one card per beast you know.
+   * The tray: one card per beast you know, in two rows of six.
    *
-   * The RULE is on the card, not in a tooltip. The whole game is choosing between rules, and
-   * a rule you have to hover to read is a rule you will not factor in while a wave is
-   * walking. The cost is the second-biggest thing on the card, greyed the moment you cannot
-   * pay it, so the affordable set is readable without arithmetic.
+   * IT USED TO BE ONE ROW WITH THE RULE PRINTED ON EVERY CARD, and that was the better
+   * design right up to the moment a run knew eleven beasts. Five fitted. The other six were
+   * off the edge of the tray -- taming something taught you a shape you then could not
+   * plant -- and a rule you can read on a card you cannot see is worth nothing.
+   *
+   * So: twelve compact slots, each carrying the three things you scan for mid-wave (what
+   * animal, what it costs, which key), and the RULE moves to a plaque over the tray that
+   * shows for whatever you are hovering or holding. The rule is still never more than a
+   * mouse-move away, and now every beast you own is on the screen.
    */
   function drawTray(g) {
     const by = BAR_Y;
     UI.panel(g, 0, by, W, H - by, { style: 'wood' });
     cardRects = [];
+    tipCard = null;
 
-    const cw = 118, ch = 78;
-    for (let i = 0; i < f.hand.length; i++) {
+    const cw = 121, ch = 54, gap = 4;
+    const perRow = 6;
+    for (let i = 0; i < f.hand.length && i < perRow * 2; i++) {
       const def = f.hand[i];
-      const bx = 10 + i * (cw + 5);
-      if (bx + cw > W - 206) break;
-      const r0 = UI.rectOf(bx, by + 8, cw, ch);
+      const bx = 10 + (i % perRow) * cw;
+      const cy = by + 6 + Math.floor(i / perRow) * (ch + gap);
+      const r0 = UI.rectOf(bx, cy, cw - 5, ch);
       const able = canAfford(f, def);
       const on = f.sel && f.sel.kind === 'beast' && f.sel.id === def.id;
       const hot = UI.hover(r0, Input.mouse);
@@ -568,22 +736,17 @@ export function makeIslandScene() {
       text(g, String(def.cost), r0.x + 42, r0.y + 18, able ? 'clay4' : 'red2', { font: 7 });
       text(g, 'CLAY', r0.x + 42 + textW(String(def.cost), { font: 7 }) + 4, r0.y + 26,
         able ? 'parch1' : 'red2', { font: 3 });
-      // the rule, wrapped to two short lines
-      const words = def.rule.split(' ');
-      let line = '', ly = r0.y + 42;
-      for (const wd of words) {
-        const nxt = line ? `${line} ${wd}` : wd;
-        if (textW(nxt, { font: 3 }) > cw - 12) { text(g, line, r0.x + 6, ly, 'parch1', { font: 3 }); line = wd; ly += 11; }
-        else line = nxt;
-        if (ly > r0.y + ch - 12) break;
-      }
-      if (line && ly <= r0.y + ch - 12) text(g, line, r0.x + 6, ly, 'parch1', { font: 3 });
-      text(g, String(i + 1), r0.x + r0.w - 8, r0.y + 5, 'parch1', { font: 3, right: true });
+      if (def.upgraded) text(g, 'IMPROVED', r0.x + 42, r0.y + 40, 'gold', { font: 3 });
+      if (i < 9) text(g, String(i + 1), r0.x + r0.w - 6, r0.y + 4, 'parch1', { font: 3, right: true });
       cardRects.push({ rect: r0, id: def.id });
+      // the plaque follows the CURSOR, not the selection: while you are holding a beast
+      // over the field the ghost on the tile is already telling you what it is, and a
+      // plaque hanging over the bottom lane would be covering the row you are aiming at.
+      if (hot || (on && Input.mouse.y >= by)) tipCard = def;
     }
 
     // the apple, which is its own verb
-    appleRect = UI.rectOf(W - 200, by + 8, 78, 74);
+    appleRect = UI.rectOf(W - 200, by + 6, 78, 74);
     const appleOn = f.sel && f.sel.kind === 'apple';
     rect(g, appleRect.x, appleRect.y, appleRect.w, appleRect.h,
       appleOn ? mix(P.red1, P.ink, 0.35) : f.apples ? 'wood1' : 'wood0');
@@ -593,35 +756,80 @@ export function makeIslandScene() {
     disc(g, appleRect.x + 34, appleRect.y + 25, 6, f.apples ? 'red1' : 'shadow');
     rect(g, appleRect.x + 38, appleRect.y + 10, 3, 7, 'wood1');
     rect(g, appleRect.x + 41, appleRect.y + 9, 6, 3, 'leaf3');
-    text(g, `x${f.apples}`, appleRect.x + 39, appleRect.y + 52, f.apples ? 'cream' : 'grey1',
+    text(g, `x${f.apples}`, appleRect.x + 39, appleRect.y + 50, f.apples ? 'cream' : 'grey1',
       { font: 5, center: true });
-    text(g, 'TAME  [A]', appleRect.x + 39, appleRect.y + 66, 'parch1', { font: 3, center: true });
+    text(g, 'TAME  [A]', appleRect.x + 39, appleRect.y + 64, 'parch1', { font: 3, center: true });
 
-    castRect = UI.rectOf(W - 116, by + 8, 106, 34);
+    castRect = UI.rectOf(W - 116, by + 6, 106, 32);
     UI.button(g, castRect, 'CAST OFF', { hot: UI.hover(castRect, Input.mouse), color: 'rust', font: 5 });
 
-    // what is selected, explained, and the last thing that happened
-    if (f.sel) {
-      const def = f.sel.kind === 'beast' ? f.hand.find((b) => b.id === f.sel.id) : null;
-      const label = def ? `${def.name.toUpperCase()} — CLICK A TILE`
-        : 'AN APPLE — CLICK SOMETHING YOU HAVE KNOCKED DOWN';
-      text(g, label, 10, H - 26, 'gold', { font: 3 });
-      text(g, 'ESC TO CHANGE YOUR MIND  ·  RIGHT-CLICK A PLANT TO DIG IT UP', 10, H - 14,
-        'parch1', { font: 3 });
+    // CALL THEM ON. The button that sells a breather you were not going to use, and the
+    // price is printed on it so the trade is a number rather than a feeling.
+    const pay = callable(f);
+    callRect = UI.rectOf(W - 116, by + 42, 106, 34);
+    if (pay) {
+      const hot = UI.hover(callRect, Input.mouse);
+      rect(g, callRect.x, callRect.y, callRect.w, callRect.h, hot ? 'brass3' : 'brass2');
+      rect(g, callRect.x, callRect.y, callRect.w, 3, 'gold');
+      UI.boxEdge(g, callRect.x, callRect.y, callRect.w, callRect.h, 'wood0');
+      text(g, 'CALL THEM ON', callRect.x + callRect.w / 2, callRect.y + 7, 'ink',
+        { font: 3, center: true });
+      text(g, `+${pay} CLAY  [C]`, callRect.x + callRect.w / 2, callRect.y + 20, 'ink',
+        { font: 3, center: true });
     } else {
-      text(g, 'PICK A BEAST OR AN APPLE  ·  RIGHT-CLICK A PLANT TO DIG IT UP', 10, H - 14,
-        'parch1', { font: 3 });
+      rect(g, callRect.x, callRect.y, callRect.w, callRect.h, 'wood0');
+      UI.boxEdge(g, callRect.x, callRect.y, callRect.w, callRect.h, 'shadow');
+      text(g, f.inWave ? 'THEY ARE COMING' : 'NOTHING TO CALL',
+        callRect.x + callRect.w / 2, callRect.y + 12, 'grey1', { font: 3, center: true });
     }
-    // the last few things that happened, down the right, clear of the apple and the button
-    for (let i = 0; i < f.notes.length; i++) {
+
+    // the standing line, along the very bottom of the tray under both rows of cards
+    text(g, f.sel ? 'CLICK A TILE  ·  ESC TO CHANGE YOUR MIND  ·  RIGHT-CLICK TO DIG ONE UP'
+      : 'PICK A BEAST OR AN APPLE  ·  GRAB THE CLAY BEFORE IT SINKS  ·  [C] CALLS THEM ON',
+      10, H - 9, f.sel ? 'gold' : 'parch1', { font: 3 });
+
+    // The last few things that happened, down the right under the buttons -- and CUT TO
+    // THE COLUMN. An event's note is a whole sentence, and right-aligned at full length it
+    // ran back across the second row of cards and sat on top of the card names.
+    for (let i = 0; i < Math.min(4, f.notes.length); i++) {
       const n = f.notes[i];
       const a = clamp(1.7 - n.t * 0.55, 0, 1);
       if (a <= 0) continue;
       const prev = g.globalAlpha;
       g.globalAlpha = a;
-      text(g, n.text, W - 10, by + 88 + i * 11, n.color, { font: 3, right: true });
+      text(g, fit(n.text, 200), W - 10, by + 82 + i * 11, n.color, { font: 3, right: true });
       g.globalAlpha = prev;
     }
+  }
+
+  /** As much of a line as fits in `w`, and a mark to say there was more. */
+  function fit(str, w) {
+    if (textW(str, { font: 3 }) <= w) return str;
+    let out = str;
+    while (out.length > 4 && textW(out + '...', { font: 3 }) > w) out = out.slice(0, -1);
+    return out + '...';
+  }
+
+  /**
+   * The plaque over the tray: what the thing under your cursor DOES.
+   *
+   * It sits in the last band of the field rather than in the tray, because the tray is full
+   * and because this is the one moment the player is not watching the lanes anyway -- they
+   * are choosing. It disappears the instant the cursor leaves the card.
+   */
+  function drawTip(g) {
+    const sel = f.sel && f.sel.kind === 'apple' && Input.mouse.y >= BAR_Y;
+    const def = tipCard;
+    if (!def && !sel) return;
+    const title = sel ? 'AN APPLE' : `${def.name.toUpperCase()} — ${def.cost} CLAY`;
+    const rule = sel ? 'THROW IT AT ANYTHING YOU HAVE KNOCKED DOWN TO KEEP IT FOR GOOD.'
+      : def.rule.toUpperCase();
+    const tw = Math.max(textW(title, { font: 5 }), textW(rule, { font: 3 })) + 20;
+    const tx0 = clamp(10, 10, W - tw - 10);
+    wash(g, tx0, BAR_Y - 40, tw, 38, 'ink', 0.86);
+    UI.boxEdge(g, tx0, BAR_Y - 40, tw, 38, sel ? 'red2' : 'clay4');
+    text(g, title, tx0 + 10, BAR_Y - 36, sel ? 'red2' : 'gold', { font: 5 });
+    text(g, rule, tx0 + 10, BAR_Y - 18, 'parch1', { font: 3 });
   }
 
   /** What the cursor is about to do, drawn on the tile. */
@@ -704,6 +912,7 @@ export function makeIslandScene() {
     drawGhost(g);
     drawTrees(g);
     drawLive(g);
+    drawMotes(g);
     parts.draw(g);
     if (f.event && f.event.id === 'squall') wash(g, FX, FY, FW, FH, 'water0', 0.18);
     drawRain(g);
@@ -715,6 +924,7 @@ export function makeIslandScene() {
 
     drawTopBar(g);
     drawTray(g);
+    drawTip(g);
     if (hintT > 0) {
       hintT -= 1 / 60;
       const hw = textW(hint, { font: 5 }) + 20;
@@ -750,7 +960,12 @@ export function makeIslandScene() {
         put: (r, c) => actAt(f, r, c),
         at: (r, c) => ({ x: cxOf(c), y: cyOf(r) - 20 }),
         tileAt: (x, y) => tileAtPoint(x, y),
-        rects: { cards: cardRects, apple: appleRect, cast: castRect, dolls: cardRects },
+        rects: {
+          cards: cardRects, apple: appleRect, cast: castRect, call: callRect, dolls: cardRects,
+        },
+        motes: () => f.motes.map((m) => Object.assign({ mote: m }, moteAt2(m))),
+        grab: (x, y) => grabAt(x, y),
+        call: () => doCall(),
       };
     },
   };

@@ -399,6 +399,7 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     let steps = 0;
     while (!f.over && steps++ < 40000) {
       LA.update(f, 1 / 30);
+      while (f.motes.length) LA.takeMote(f, f.motes[0]);   // nobody walks past loose clay
       for (const tr of f.trees) if (tr.ripe) LA.harvest(f, tr.row, tr.col);
       for (let guard = 0; guard < 3; guard++) {
         let did = false;
@@ -418,6 +419,12 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
             for (let c = 1; c <= 3 && !did; c++) if (LA.plant(f, 'thorn', r, c).ok) did = true;
           }
         }
+        if (!did && f.clay >= 150 && f.hand.some((b) => b.id === 'maul')) {
+          for (let r = 0; r < LA.ROWS && !did; r++) {
+            if (f.plants.some((p) => p.row === r && p.def.pierce)) continue;
+            for (let c = 1; c <= 3 && !did; c++) if (LA.plant(f, 'maul', r, c).ok) did = true;
+          }
+        }
         if (!did && f.clay >= 50) {
           for (let r = 0; r < LA.ROWS && !did; r++) {
             if (f.plants.some((p) => p.row === r && p.def.kind === 'wall')) continue;
@@ -426,6 +433,18 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
         }
         if (!did) break;
       }
+      const extras = [['tide', 200], ['ember', 175], ['owl', 240], ['bell', 200], ['hive', 240]];
+      for (const [id, need] of extras) {
+        if (f.clay < need || !f.hand.some((b) => b.id === id)) continue;
+        let did = false;
+        for (let r = 0; r < LA.ROWS && !did; r++) {
+          if (f.plants.some((p) => p.row === r && p.def.id === id)) continue;
+          for (let c = 2; c <= 5 && !did; c++) if (LA.plant(f, id, r, c).ok) did = true;
+        }
+        if (did) break;
+      }
+      // a breather it has nothing left to spend on is a breather worth selling
+      if (f.clay >= 300 && LA.callable(f)) LA.callWave(f);
       if (f.stunned.length && f.apples > 0) {
         const st = f.stunned[0];
         LA.tame(f, st.row, Math.round(st.col));
@@ -440,8 +459,16 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     const f = LA.newLane(v, island, 'g');
     ok(f.clay >= 50, `${island.id}: enough clay to open with`, String(f.clay));
     ok(f.waveT > 8, `${island.id}: a real opening before the first wave`, f.waveT.toFixed(1));
-    ok(f.guards.length === LA.ROWS && f.guards.every(Boolean),
-      `${island.id}: a guard in every row`);
+    // GUARDS. Every row had one, which is why a dangerous island played like a safe one;
+    // now the bad ones open with a hole or two. Three is the floor, and a hole is never on
+    // water -- an unguarded water row before you have paid for a reed is a free road in.
+    const guarded = f.guards.filter(Boolean).length;
+    ok(f.guards.length === LA.ROWS, `${island.id}: a guard slot per row`);
+    ok(guarded >= LA.ROWS - 2, `${island.id}: at least three rows guarded`, String(guarded));
+    ok((island.danger || 0) >= 3 || guarded === LA.ROWS,
+      `${island.id}: a safe island keeps all five`, String(guarded));
+    ok(f.waterRows.every((r) => f.guards[r]),
+      `${island.id}: no water row is left unguarded`, f.waterRows.join(','));
     ok(f.hand.length >= 3, `${island.id}: at least three beasts to plant`, String(f.hand.length));
 
     // Every row must be plantable with SOMETHING in the hand, or a lane is a free road to
@@ -494,6 +521,141 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     LA.uproot(f, 2, 0);
     ok(f.clay > before, 'digging one up gives some of it back');
     ok(f.clay < before + 50, 'but not all of it, so it is a correction and not an undo');
+  }
+
+  // --- MOTES: clay you pick up, and the reason the drip could come down
+  {
+    const v = V.newVoyage('LMOTE');
+    const f = LA.newLane(v, ISLANDS[0], 'm');
+    let seen = 0;
+    for (let i = 0; i < 30 * 40; i++) { LA.update(f, 1 / 30); seen += f.motes.length ? 1 : 0; }
+    ok(seen > 0, 'the ground throws up clay on its own', String(seen));
+
+    f.motes.length = 0;
+    f.motes.push({ row: 2, col: 4, t: 0, life: 9, amount: 20 });
+    ok(LA.moteAt(f, 2, 4), 'a mote is found on its own tile');
+    ok(!LA.moteAt(f, 0, 0), 'and not two rows away');
+    const purse = f.clay;
+    const got = LA.takeMote(f, f.motes[0]);
+    ok(got.ok && f.clay === purse + 20, 'taking one pays what it says', String(f.clay - purse));
+    ok(f.motes.length === 0, 'and it is gone from the field');
+    ok(f.grabbed === 1, 'and the fight counts it');
+
+    // it sinks back if you leave it
+    f.motes.push({ row: 1, col: 2, t: 0, life: 9, amount: 20 });
+    for (let i = 0; i < 30 * 10; i++) LA.update(f, 1 / 30);
+    ok(!f.motes.some((m) => m.row === 1 && m.col === 2), 'an ignored mote sinks back');
+
+    // A CLICK ON A MOTE IS NEVER A PLANT. It is on a clock and the beast is not.
+    f.clay = 500;
+    f.motes.length = 0;
+    f.motes.push({ row: 3, col: 5, t: 0, life: 9, amount: 20 });
+    const before = f.plants.length;
+    const act = LA.actAt(f, 3, 5);
+    ok(act.ok && act.mote, 'clicking a mote takes the clay');
+    ok(f.plants.length === before, 'and does not plant anything on top of it');
+  }
+
+  // --- CALLING THEM ON: the breather you sell back
+  {
+    const v = V.newVoyage('LCALL');
+    const f = LA.newLane(v, ISLANDS[0], 'k');
+    ok(LA.callable(f) > 0, 'the first breather can be sold', String(LA.callable(f)));
+    const purse = f.clay, wave = f.wave;
+    const res = LA.callWave(f);
+    ok(res.ok && f.clay > purse, 'and it pays on the spot', String(f.clay - purse));
+    ok(f.called === 1, 'and the fight remembers you did it');
+    for (let i = 0; i < 30; i++) LA.update(f, 1 / 30);
+    ok(f.wave > wave, 'and the wave actually comes early', `${wave} -> ${f.wave}`);
+    ok(!LA.callWave(f).ok, 'you cannot call one that is already walking');
+    ok(LA.callable(f) === 0, 'and the button knows it');
+  }
+
+  // --- THE CHAMPION
+  {
+    const { championFor, CHAMPIONS } = M.corrupted;
+    for (const island of ISLANDS) {
+      const w = wavesFor(island, V.newVoyage('CH').rng || { range: () => 1 });
+      ok(w[w.length - 1].champion, `${island.id}: the last wave brings a champion`);
+      ok(w.length >= 5, `${island.id}: at least five waves`, String(w.length));
+    }
+    ok(CHAMPIONS.every((c) => c.aura && c.gives && BEAST_BY_ID[c.gives] && c.boss),
+      'every champion has an aura and teaches a real beast');
+    ok(championFor({ danger: 4 }).hp > championFor({ danger: 1 }).hp,
+      'a dangerous island ends with a worse one');
+
+    const v = V.newVoyage('LBOSS');
+    const island = ISLANDS.find((i) => i.danger >= 2) || ISLANDS[0];
+    const f = LA.newLane(v, island, 'b');
+    // walk the whole stage without planting anything: the boss must turn up and get in
+    let steps = 0, sawBoss = false;
+    while (!f.over && steps++ < 40000) {
+      LA.update(f, 1 / 30);
+      if (f.beasts.some((b) => b.boss)) sawBoss = true;
+    }
+    ok(sawBoss || f.why === 'overrun', `${island.id}: the champion arrives, or the ark fell first`);
+  }
+
+  // --- THE CRUST, AND WHAT GETS THROUGH IT
+  {
+    const v = V.newVoyage('LCRUST');
+    const f = LA.newLane(v, ISLANDS[0], 'x');
+    const pang = CORRUPTED.find((c) => c.kind === 'shield');
+    ok(pang && pang.shell > 0, 'something out there wears a crust');
+    const mk = () => ({
+      def: pang, row: 2, x: 6, hp: pang.hp, max: pang.hp,
+      shell: pang.shell, shellMax: pang.shell, slowT: 0, walk: 0, hitT: 0, flash: 0, rage: false,
+    });
+    const a = mk();
+    f.beasts = [a];
+    LA._internals.hurtFor(f, a, 40, false);
+    ok(a.hp === pang.hp && a.shell < pang.shell, 'a plain hit only takes the crust off');
+    const b = mk();
+    LA._internals.hurtFor(f, b, 40, true);
+    ok(b.hp < pang.hp && b.shell === pang.shell, 'a piercing hit goes straight through it');
+    const maul = BEAST_BY_ID.maul;
+    ok(maul && maul.pierce, 'and there is a beast that does that');
+    const tide = BEAST_BY_ID.tide;
+    ok(tide && tide.knock > 0, 'and one that shoves what it hits');
+  }
+
+  // --- ENRAGE: nearly dead is the dangerous part
+  {
+    const v = V.newVoyage('LRAGE');
+    const f = LA.newLane(v, ISLANDS[0], 'r');
+    const def = CORRUPTED[0];
+    const walk = (hp) => {
+      f.beasts = [{
+        def, row: 2, x: 6, hp, max: def.hp, shell: 0, shellMax: 0,
+        slowT: 0, walk: 0, hitT: 0, flash: 0, rage: false,
+      }];
+      const x0 = f.beasts[0].x;
+      for (let i = 0; i < 30; i++) LA.update(f, 1 / 30);
+      return x0 - f.beasts[0].x;
+    };
+    const whole = walk(def.hp);
+    const hurt = walk(def.hp * 0.2);
+    ok(hurt > whole * 1.2, 'a beast under a third of its health moves faster',
+      `${whole.toFixed(2)} -> ${hurt.toFixed(2)}`);
+    ok(f.beasts[0].rage, 'and it is marked, so the field can show it');
+  }
+
+  // --- THE TIDE: nothing can stand on the field for ever
+  {
+    const v = V.newVoyage('LTIDE');
+    const f = LA.newLane(v, ISLANDS[0], 't');
+    // put the fight at its end with one unkillable-looking thing left standing
+    f.wave = f.waves.length - 1;
+    f.queue.length = 0;
+    f.inWave = false;
+    f.beasts = [{
+      def: CORRUPTED[0], row: 2, x: 8.9, hp: 90, max: 90, shell: 0, shellMax: 0,
+      slowT: 0, walk: 0, hitT: 0, flash: 0, rage: false,
+    }];
+    f.plants = [];
+    let steps = 0;
+    while (!f.over && steps++ < 30 * 400) LA.update(f, 1 / 30);
+    ok(f.over, 'a stalled last wave is resolved by the water', f.why + ' at ' + f.t.toFixed(0) + 's');
   }
 
   // --- water needs a reed

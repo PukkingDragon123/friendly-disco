@@ -264,6 +264,10 @@ if (island.firstWaveIn < 8) errors.push('no real opening before the first wave')
 const placed = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
   d.lane.clay = 400;
+  // AND CLEAR THE LOOSE CLAY FIRST. A mote outranks a plant on purpose, so one sitting on
+  // the tile this test aims at would eat the click and the test would be right to fail --
+  // about the wrong thing. The mote's own click is checked below.
+  d.lane.motes.length = 0;
   const card = d.rects.cards[0];
   const tile = d.at(2, 1);
   const c = document.getElementById('game').getBoundingClientRect();
@@ -296,6 +300,57 @@ if (placed) {
   console.log('fight:', JSON.stringify(fought));
   if (fought.wave < 0) errors.push('the first wave never started');
 }
+// GRAB A MOTE WITH A REAL MOUSE, at the pixel it is drawn at rather than on its tile.
+const mote = await page.evaluate(() => {
+  const d = window.__ARK.app.scene.debug();
+  d.lane.motes.length = 0;
+  d.lane.motes.push({ row: 3, col: 6, t: 0, life: 9, amount: 20 });
+  const q = d.motes()[0];
+  const c = document.getElementById('game').getBoundingClientRect();
+  const s = window.__ARK.app.scale;
+  return { clay: d.lane.clay, x: c.left + q.x * s, y: c.top + q.y * s };
+});
+if (mote) {
+  await page.mouse.click(mote.x, mote.y);
+  await page.waitForTimeout(160);
+  const paid = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return { clay: d.lane.clay, left: d.lane.motes.length, grabbed: d.lane.grabbed };
+  });
+  console.log('mote:', JSON.stringify(paid));
+  if (paid.clay <= mote.clay) errors.push('clicking a clay mote paid nothing');
+  if (paid.left) errors.push('the mote was still on the field after being clicked');
+}
+
+// CALL THE NEXT WAVE ON EARLY, which is the other new verb on this screen.
+const called = await page.evaluate(() => {
+  const d = window.__ARK.app.scene.debug();
+  const f = d.lane;
+  // put the fight in a breather so the button is live
+  f.inWave = false;
+  f.queue.length = 0;
+  f.beasts.length = 0;
+  f.wave = 0;
+  f.waveT = 12;
+  const c = document.getElementById('game').getBoundingClientRect();
+  const s = window.__ARK.app.scale;
+  const r = d.rects.call;
+  return r ? { clay: f.clay, wave: f.wave,
+    x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s } : null;
+});
+if (!called) errors.push('there is no way to call the next wave on');
+else {
+  await page.mouse.click(called.x, called.y);
+  await page.waitForTimeout(400);
+  const now = await page.evaluate(() => {
+    const f = window.__ARK.app.scene.debug().lane;
+    return { clay: f.clay, wave: f.wave, called: f.called };
+  });
+  console.log('called:', JSON.stringify(now));
+  if (!now.called) errors.push('the call button did not bring the wave on');
+  if (now.clay <= called.clay) errors.push('calling a wave on early paid nothing');
+}
+
 const islandT = await drawTime(page);
 console.log('island draw:', JSON.stringify(islandT));
 if (islandT && islandT.drawMs > 16.6) errors.push(`island draw ${islandT.drawMs}ms exceeds a 60fps frame`);

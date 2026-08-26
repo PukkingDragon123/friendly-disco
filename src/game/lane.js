@@ -13,11 +13,22 @@
 // boat, and available as a blessed clay beast on the next island. Nothing you fight is
 // something you wanted dead, which is the whole shape of the game:
 //
-//   CLAY is the mana. It drips, and the wells you plant make more of it.
+//   CLAY is the mana. It drips, the wells you plant make more of it, and MOTES of it come
+//     up out of the churned ground for you to grab before they sink back.
 //   BLESSED BEASTS are the towers. Each does exactly one thing (see data/beasts.js).
 //   CORRUPTED BEASTS are the waves, and every one is an animal you are trying to collect.
 //   APPLES are how you collect them, and some islands grow them.
 //   THE ARK has three lives. A beast that reaches it takes one of them AND one animal.
+//
+// WHAT MADE THE FIGHTS GOOD, on the third pass. The waves were arithmetic you could do
+// once and then repeat: the same table, thicker, and a stage whose last thirty seconds were
+// its first thirty seconds louder. Five things changed that, and they are all in here:
+//
+//   MOTES        clay you pick up with your hands, so the economy is played, not watched
+//   CALLING      you may bring the next wave on early and be paid for the time you skipped
+//   ENRAGE       anything under a third of its health speeds up and hits harder
+//   THE CRUST    a shell that soaks everything until something that ignores armour is on it
+//   THE CHAMPION every island ends with one animal that has a name and an aura
 //
 // THREE THINGS DELIBERATELY LEFT OUT. There is no unit selection or movement: a planted
 // beast stays where you put it, so a field of them is a plan. There is no fog: every wave's
@@ -28,7 +39,7 @@
 import { makeRng } from '../core/rng.js';
 import { clamp } from '../core/pixel.js';
 import { BEAST_BY_ID, resolveBeast, STARTER_BEASTS } from '../data/beasts.js';
-import { CORRUPT_BY_ID, tableFor, wavesFor, EVENTS } from '../data/corrupted.js';
+import { CORRUPT_BY_ID, tableFor, wavesFor, EVENTS, championFor } from '../data/corrupted.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
 import { takeAboard, lose, say, berthsFree, isLoyal, relicBonus, relicFlag } from './voyage.js';
 
@@ -111,6 +122,21 @@ function generate(f) {
     f.terrain[idx(r, c)] = L.TREE;
     f.trees.push({ row: r, col: c, ripe: i === 0, t: rng.range(0, 6) });
   }
+
+  // WHICH ROWS BEGIN WITH NO GUARD. A guard is one free mistake per row, and five free
+  // mistakes is a large part of why a dangerous island played like a safe one -- you could
+  // lose a row to something you had never seen before and pay nothing for it. So the bad
+  // islands open with one or two rows uncovered.
+  //
+  // NEVER A WATER ROW. A water row with no guard, before you have paid for a reed, is not
+  // difficulty -- it is a door, opened by a coin flip on the map. And the HUD shows the
+  // holes from the first second, so it is information rather than an ambush.
+  const holes = d >= 4 ? 2 : d >= 3 ? 1 : 0;
+  const dry = [];
+  for (let r = 0; r < ROWS; r++) if (f.waterRows.indexOf(r) < 0) dry.push(r);
+  for (let i = 0; i < holes && dry.length > 2; i++) {
+    f.guards[dry.splice(rng.int(dry.length), 1)[0]] = false;
+  }
 }
 
 /* ---------------------------------------------------------------------- setup */
@@ -129,7 +155,11 @@ export function newLane(v, island, tag) {
     // THE ECONOMY. A drip so a bad opening is recoverable, and wells for everything else.
     // 75 to start is a well and a wall, or one thorn and nothing -- which is the decision
     // the first twenty seconds is about.
-    clay: 75, clayAcc: 0, clayDrip: 6,
+    // and a lower drip than it had, because MOTES are the other half of it now: the ground
+    // throws clay up where the flood churned it and it sinks back in nine seconds, so the
+    // difference between a player and a spectator is about one extra plant a wave.
+    clay: 75, clayAcc: 0, clayDrip: 5,
+    motes: [], moteIn: 5, moteEvery: 7.5, moteAmount: 20, grabbed: 0, missed: 0,
     apples: 1,
 
     waves: wavesFor(island, rng),
@@ -146,8 +176,11 @@ export function newLane(v, island, tag) {
     // something to tame.
     guards: new Array(ROWS).fill(true),
     ark: { hp: 2, max: 2 },
+    // THE CHAMPION, walked in behind the last wave. See data/corrupted.js.
+    champion: championFor(island), boss: null, bossDown: false, called: 0,
     saved: [], lost: [], tamed: [],
     event: null, eventT: 0, eventIn: 22 + rng.range(0, 10),
+    tideT: 0, drowning: false,
     pads: new Set(),
     notes: [], sel: null,
     over: false, why: null,
@@ -234,6 +267,95 @@ export function uproot(f, r, c) {
   return { ok: true };
 }
 
+/* ---------------------------------------------------------------------- motes */
+
+/**
+ * CLAY YOU PICK UP.
+ *
+ * The drip alone means the economy plays itself: you read a number, you spend it, and
+ * nothing you do with your hands makes it bigger. So the churned ground throws motes of
+ * clay up across the field, and they sink back in nine seconds. Catching them is the one
+ * thing in the game that competes with the fight for your attention -- which is exactly
+ * what a lane defence is short of, and the reason the waves could get so much heavier.
+ *
+ * They land ANYWHERE, water included: a mote is floating clay, not a plant, and a mote you
+ * cannot reach would only teach you to stop looking.
+ */
+function dropMote(f, amount) {
+  const r = f.rng2.int(ROWS);
+  const c = f.rng2.int(COLS);
+  if (f.terrain[idx(r, c)] === L.ROCK) return null;
+  const m = {
+    row: r, col: c + f.rng2.range(-0.18, 0.18),
+    t: 0, life: 9, amount: amount || f.moteAmount,
+  };
+  f.motes.push(m);
+  return m;
+}
+
+function tickMotes(f, dt) {
+  for (let i = f.motes.length - 1; i >= 0; i--) {
+    const m = f.motes[i];
+    m.t += dt;
+    if (m.t < m.life) continue;
+    f.motes.splice(i, 1);
+    f.missed++;
+    if (f.missed === 3) note(f, 'CLAY IS SINKING BACK UNPICKED', 'rust');
+  }
+  f.moteIn -= dt;
+  if (f.moteIn > 0) return;
+  // faster while a wave is actually on the field, so the busiest moment is also the richest
+  f.moteIn = f.moteEvery * (f.inWave ? 0.72 : 1) * f.rng2.range(0.75, 1.3);
+  dropMote(f);
+}
+
+/** The mote nearest this tile, if one is close enough to have been aimed at. */
+export function moteAt(f, r, c, rad) {
+  let best = null, bd = rad || 0.75;
+  for (const m of f.motes) {
+    const dd = Math.hypot(m.col - c, m.row - r);
+    if (dd < bd) { bd = dd; best = m; }
+  }
+  return best;
+}
+
+export function takeMote(f, m) {
+  const i = f.motes.indexOf(m);
+  if (i < 0) return { ok: false, why: 'gone' };
+  f.motes.splice(i, 1);
+  f.clay += m.amount;
+  f.grabbed++;
+  note(f, `+${m.amount} CLAY`, 'clay4');
+  for (let k = 0; k < 3; k++) f.puffs.push({ r: m.row, c: m.col, t: 0, i: k, kind: 'clay' });
+  return { ok: true, mote: true, clay: m.amount };
+}
+
+/* ------------------------------------------------------------- calling them on */
+
+/**
+ * BRING THE NEXT WAVE ON EARLY, AND BE PAID FOR THE TIME YOU DID NOT USE.
+ *
+ * The best thing in the fight and the cheapest to build. A breather you have already spent
+ * is dead air -- you have planted everything you can pay for and you are watching a number
+ * count down -- so trade it: four clay a second, banked the instant you press it.
+ *
+ * It is a difficulty dial the player holds. Call every wave and the island is savage and
+ * pays for a board you could not otherwise have built; call none and it plays as it always
+ * did. Nothing else in the game lets you choose that, and it costs one button.
+ */
+export function callWave(f) {
+  if (f.over) return { ok: false, why: 'no' };
+  if (f.inWave) return { ok: false, why: 'they are already coming' };
+  if (f.wave + 1 >= f.waves.length) return { ok: false, why: 'that was the last of them' };
+  if (f.waveT < 1.5) return { ok: false, why: 'they are already at the shore' };
+  const bonus = Math.round(f.waveT * 4);
+  f.clay += bonus;
+  f.called++;
+  f.waveT = 0.01;
+  note(f, `CALLED ON EARLY — +${bonus} CLAY`, 'gold');
+  return { ok: true, clay: bonus };
+}
+
 /* --------------------------------------------------------------------- apples */
 
 /** Pick a ripe tree. */
@@ -295,6 +417,11 @@ export function tame(f, r, c) {
 /** What a click on the field does, given what is selected. */
 export function actAt(f, r, c) {
   if (f.over) return { ok: false, why: 'no' };
+  // A MOTE OUTRANKS EVERYTHING, selection or not. It is on a nine-second clock and the
+  // thing you were about to plant is not; and a click that plants a boar where you were
+  // grabbing clay is the kind of misfire that makes a player stop grabbing.
+  const m = moteAt(f, r, c);
+  if (m) return takeMote(f, m);
   // a ripe tree is always worth a click, selection or not
   const tree = f.trees.find((x) => x.row === r && x.col === c);
   if (tree && tree.ripe) return harvest(f, r, c);
@@ -335,8 +462,10 @@ function tick(f, dt) {
 
   tickEvent(f, dt);
   tickClay(f, dt);
+  tickMotes(f, dt);
   tickTrees(f, dt);
   tickWaves(f, dt);
+  tickTide(f, dt);
   tickBeasts(f, dt);
   tickPlants(f, dt);
   tickShots(f, dt);
@@ -383,6 +512,14 @@ function tickWaves(f, dt) {
       const def = table[f.rng2.int(table.length)];
       f.queue.push({ def, at: all ? 0 : i * w.gap, row: f.rng2.int(ROWS) });
     }
+    // THE CHAMPION WALKS IN BEHIND ITS OWN WAVE, not in front of it and not alone: at 45%
+    // of the way through the queue there is still an escort on the field, so the boss is a
+    // problem you have to solve while busy. Down the middle row, which is never water --
+    // the fight should arrive where you can see it coming.
+    if (w.champion && f.champion) {
+      f.queue.push({ def: f.champion, at: all ? 0 : w.count * w.gap * 0.45, row: 2, boss: true });
+      f.queue.sort((a, b) => a.at - b.at);
+    }
     f.queueT = 0;
     note(f, w.big ? 'THE LAST OF THEM · EVERYTHING AT ONCE' : `WAVE ${f.wave + 1} OF ${f.waves.length}`,
       w.big ? 'red2' : 'gold');
@@ -391,7 +528,7 @@ function tickWaves(f, dt) {
   f.queueT += dt;
   while (f.queue.length && f.queue[0].at <= f.queueT) {
     const s = f.queue.shift();
-    spawn(f, s.def, s.row);
+    spawn(f, s.def, s.row, s.boss);
   }
   if (!f.queue.length) {
     f.inWave = false;
@@ -402,15 +539,21 @@ function tickWaves(f, dt) {
   }
 }
 
-function spawn(f, def, row) {
+function spawn(f, def, row, boss) {
   const n = def.kind === 'flock' ? 3 : 1;
   for (let i = 0; i < n; i++) {
     f.beasts.push({
-      def, row: clamp(row + (i - 1) * (n > 1 ? 1 : 0), 0, ROWS - 1),
+      def, boss: !!boss || !!def.boss,
+      row: clamp(row + (i - 1) * (n > 1 ? 1 : 0), 0, ROWS - 1),
       x: COLS + 0.4 + i * 0.5,
       hp: def.hp, max: def.hp,
-      slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0,
+      shell: def.shell || 0, shellMax: def.shell || 0,
+      slowT: 0, leapt: false, dug: 0, walk: 0, hitT: 0, flash: 0, rage: false,
     });
+  }
+  if (boss || def.boss) {
+    note(f, `${def.name} — ${(def.blurb || '').toUpperCase()}`, 'red2');
+    f.bossSeen = true;
   }
 }
 
@@ -434,11 +577,53 @@ function tickEvent(f, dt) {
   f.eventRow = f.rng.int(ROWS);
   note(f, `${e.name} — ${e.blurb.toUpperCase()}`, e.color);
   if (e.id === 'harvest') for (const tr of f.trees) { tr.ripe = true; tr.t = 0; }
+  // a shower of it, all at once, in the middle of whatever else you were doing
+  if (e.id === 'give') for (let i = 0; i < 7; i++) dropMote(f, f.moteAmount + 5);
+}
+
+/* ---------------------------------------------------------------------- the tide
+
+THE WATER FINISHES WHAT YOU STARTED, and it exists because a lane game can deadlock.
+
+Two things in here buy time rather than deal damage -- the champion's heal aura and the
+tide walrus's shove -- and a board built out of both can reach a state where nothing dies
+and nothing advances: six clay a second of healing against four of chip damage, on
+something being pushed back a tile every two seconds. The stage then runs for ever, which
+is worse than losing it.
+
+So once the last of them is on the field, a clock starts, and after a minute the flood
+starts taking them: a percentage of their own health a second, through crust and armour
+alike, rising as it goes. In the normal case you never see it -- the fight is long over.
+When you do see it, it is the right answer for this game in particular: it is a story
+about water, and the water was always going to win the argument.
+*/
+
+function tickTide(f, dt) {
+  const lastOut = f.wave >= f.waves.length - 1 && !f.queue.length && !f.inWave;
+  if (!lastOut || !f.beasts.length) { f.tideT = 0; f.drowning = false; return; }
+  f.tideT += dt;
+  if (f.tideT < 60) return;
+  if (!f.drowning) {
+    f.drowning = true;
+    note(f, 'THE WATER IS RISING — IT IS TAKING THEM', 'water3');
+  }
+  const k = 0.02 * (1 + (f.tideT - 60) / 45);
+  for (const b of f.beasts) {
+    b.hp -= b.max * k * dt;
+    b.shell = 0;
+  }
 }
 
 /* -------------------------------------------------------------------- the walkers */
 
 function tickBeasts(f, dt) {
+  // THE BOSS SETS THE WEATHER for everything else on the field: its aura is read once here
+  // and then applies to every other walker, which is what makes killing it first a plan
+  // rather than a preference.
+  f.boss = f.beasts.find((b) => b.boss) || null;
+  f.aura = f.boss ? f.boss.def.aura : null;
+  const howl = f.event && f.event.id === 'howl' ? 1.3 : 1;
+
   for (let i = f.beasts.length - 1; i >= 0; i--) {
     const b = f.beasts[i];
     b.flash = Math.max(0, b.flash - dt * 4);
@@ -446,20 +631,54 @@ function tickBeasts(f, dt) {
 
     if (b.hp <= 0) { fell(f, b); f.beasts.splice(i, 1); continue; }
 
+    // ENRAGE. Under a third of its health anything walking speeds up and hits harder, and
+    // this one line did more for the fights than any new enemy: a wave you have nearly
+    // beaten is now the most dangerous part of it, "nearly dead" stops being safe, and
+    // chip damage spread across a row is a worse plan than finishing one thing.
+    const wasRaging = b.rage;
+    b.rage = b.hp <= b.max * 0.34 && !b.shell;
+    if (b.rage && !wasRaging && b.boss) note(f, `${b.def.name} IS FURIOUS`, 'red2');
+
     // the caller heals what is around it, which is the one thing that makes a wave a
     // priority problem rather than a queue
-    if (b.def.kind === 'caller') {
+    if (b.def.kind === 'caller' || (b.boss && f.aura === 'heal')) {
+      // A BOSS CALLS FURTHER THAN A BELLOWER BUT NOT ACROSS THE WHOLE FIELD. At field-wide
+      // range and nine a second nothing at the front ever finished dying and the stage
+      // stopped being a fight and became a wait.
+      const rad = b.boss ? 5 : 1.6;
       for (const o of f.beasts) {
-        if (o === b || Math.hypot(o.x - b.x, o.row - b.row) > 1.6) continue;
-        o.hp = Math.min(o.max, o.hp + 12 * dt);
+        if (o === b || Math.hypot(o.x - b.x, o.row - b.row) > rad) continue;
+        o.hp = Math.min(o.max, o.hp + (b.boss ? 6 : 12) * dt);
       }
     }
 
     const col = Math.floor(b.x);
     const onWater = inGrid(b.row, col) && f.terrain[idx(b.row, col)] === L.WATER;
-    let sp = b.def.walk;
-    if (b.slowT > 0) sp *= b.slowT > 0 ? (b.slowFactor || 0.5) : 1;
+    let sp = b.def.walk * howl;
+    if (b.slowT > 0) sp *= b.slowFactor || 0.5;
     if (onWater && b.def.kind !== 'swim') sp *= 0.5;
+    if (b.rage) sp *= 1.45;
+    if (f.aura === 'haste' && !b.boss) sp *= 1.33;
+    const bite = b.def.hit * (b.rage ? 1.3 : 1);
+
+    // THE HURLER never closes. It stops two and a half tiles short and throws silt, which
+    // is the answer to the board that answered everything else: a wall in front of a wall
+    // does nothing about something that was never going to touch it.
+    // ON THE FIELD FIRST. Its reach is long enough to find a wall in the last column from
+    // outside the board, and a thrower you can barely see is a thrower the player cannot
+    // understand -- so it walks in before it starts throwing.
+    if (b.def.reach && b.x < COLS - 0.4) {
+      const far = reachTarget(f, b);
+      if (far) {
+        bites(f, far, bite * 0.8 * dt);
+        b.hitT += dt;
+        if (b.hitT > 1.1) {
+          b.hitT = 0;
+          f.shots.push({ row: b.row, x: b.x - 0.5, to: far.col, lob: true, t: 0 });
+        }
+        continue;
+      }
+    }
 
     // what is in the way
     const blocker = blockerFor(f, b);
@@ -475,19 +694,12 @@ function tickBeasts(f, dt) {
         b.x -= 1.05;
         continue;
       }
-      blocker.hp -= b.def.hit * dt;
-      blocker.flash = 0.25;
+      bites(f, blocker, bite * dt);
       b.hitT += dt;
       // a thistle bites back. It is the answer to anything with a lot of health and a slow
       // walk, because those are exactly the things that stand there chewing.
       if (blocker.def.spike) {
-        b.hp -= blocker.def.spike * dt;
-        b.flash = 0.2;
-      }
-      if (blocker.hp <= 0) {
-        f.plants.splice(f.plants.indexOf(blocker), 1);
-        if (blocker.def.kind === 'pad') f.pads.delete(idx(blocker.row, blocker.col));
-        note(f, `${blocker.def.name.toUpperCase()} IS GONE`, 'red2');
+        hurt(f, b, blocker.def.spike * dt, true);
       }
       continue;
     }
@@ -497,6 +709,30 @@ function tickBeasts(f, dt) {
 
     if (b.x <= -0.35) { breach(f, b); f.beasts.splice(i, 1); }
   }
+}
+
+/** Damage a plant, and clear it away if that finished it. */
+function bites(f, p, dmg) {
+  p.hp -= dmg;
+  p.flash = 0.25;
+  if (p.hp > 0) return;
+  const i = f.plants.indexOf(p);
+  if (i < 0) return;
+  f.plants.splice(i, 1);
+  if (p.def.kind === 'pad') f.pads.delete(idx(p.row, p.col));
+  note(f, `${p.def.name.toUpperCase()} IS GONE`, 'red2');
+}
+
+/** The nearest plant a thrower can reach without walking into it. */
+function reachTarget(f, b) {
+  let best = null;
+  for (const p of f.plants) {
+    if (p.row !== b.row || p.def.kind === 'pad') continue;
+    const gap = (b.x - 0.5) - p.col;
+    if (gap <= 0.55 || gap > b.def.reach) continue;
+    if (!best || p.col > best.col) best = p;
+  }
+  return best;
 }
 
 /** The first plant in this beast's row that it has to get through. */
@@ -521,11 +757,17 @@ function blockerFor(f, b) {
 function fell(f, b) {
   const a = ANIMAL_BY_ID[b.def.base];
   f.stunned.push({
-    def: b.def, baseId: b.def.base, a,
+    def: b.def, baseId: b.def.base, a, boss: !!b.boss,
     row: b.row, col: clamp(b.x - 0.5, 0, COLS - 1),
-    t: 0, life: 8,
+    // A CHAMPION WAITS LONGER. You put everything you had into that and there is a
+    // fair chance you have no apple in hand at the moment it goes down -- fourteen
+    // seconds is time to run to a tree and back, which is a better last minute than
+    // watching the prize wander off.
+    t: 0, life: b.boss ? 14 : 8,
   });
-  note(f, `${b.def.name.toUpperCase()} IS DOWN — THROW AN APPLE`, 'gold');
+  if (b.boss) f.bossDown = true;
+  note(f, b.boss ? `${b.def.name} IS DOWN — AN APPLE, NOW`
+    : `${b.def.name.toUpperCase()} IS DOWN — THROW AN APPLE`, 'gold');
   for (let i = 0; i < 6; i++) f.puffs.push({ r: b.row, c: b.x - 0.5, t: 0, i, kind: 'free' });
 }
 
@@ -541,6 +783,13 @@ function tickStunned(f, dt) {
 
 /** Something reached the ark. */
 function breach(f, b) {
+  // A GUARD DOES NOT STOP A CHAMPION. It breaks on it and the thing keeps walking, because
+  // a boss that a one-shot row plug deletes is not a boss, it is a formality.
+  if (b.boss && f.guards[b.row]) {
+    f.guards[b.row] = false;
+    note(f, 'THE GUARD BROKE ON IT AND IT WALKED ON', 'red2');
+    for (let i = 0; i < 8; i++) f.puffs.push({ r: b.row, c: 0, t: 0, i, kind: 'guard' });
+  }
   if (f.guards[b.row]) {
     f.guards[b.row] = false;
     fell(f, b);
@@ -611,12 +860,12 @@ function tickPlants(f, dt) {
         // the owl takes the one at the BACK, instantly, with a tracer. A projectile that
         // has to fly past everything to reach the far one would be hit by the near one.
         const far = ahead.reduce((a, b) => (b.x > a.x ? b : a), ahead[0]);
-        hurt(f, far, p.def.damage);
+        hurt(f, far, p.def.damage, p.def.pierce);
         f.shots.push({ row: p.row, x: p.col + 0.4, to: far.x, tracer: true, t: 0 });
       } else {
         f.shots.push({
           row: p.row, x: p.col + 0.5, vx: p.def.speed / 96,
-          dmg: p.def.damage, t: 0,
+          dmg: p.def.damage, pierce: !!p.def.pierce, t: 0,
         });
       }
       continue;
@@ -626,7 +875,13 @@ function tickPlants(f, dt) {
       const near = f.beasts.filter((b) => Math.hypot(b.x - 0.5 - p.col, b.row - p.row) <= rad);
       if (!near.length) { p.cd = 0; continue; }
       p.cd = p.def.rate;
-      for (const b of near) hurt(f, b, p.def.damage);
+      for (const b of near) {
+        hurt(f, b, p.def.damage, p.def.pierce);
+        // KNOCKBACK, which is the only thing on the board that buys time rather than
+        // spending it. A champion shrugs most of it off -- a boss you can shove back for
+        // ever is a boss you never have to solve.
+        if (p.def.knock) b.x = Math.min(COLS + 0.6, b.x + p.def.knock * (b.boss ? 0.3 : 1));
+      }
       f.shots.push({ row: p.row, x: p.col, burst: rad, t: 0 });
       continue;
     }
@@ -648,8 +903,31 @@ function tickPlants(f, dt) {
   }
 }
 
-function hurt(f, b, dmg) {
-  const real = Math.max(1, dmg - (b.def.armour || 0));
+/**
+ * Damage a walker.
+ *
+ * THE CRUST IS A SECOND HEALTH BAR THAT ARMOUR ALREADY REDUCED, which is why it needs its
+ * own answer rather than a bigger number: thirty damage a shot against nine armour and a
+ * hundred and thirty of crust is eight seconds of shooting before you have touched the
+ * animal. `pierce` -- the maul, and anything with a spike on it -- ignores both.
+ */
+function hurt(f, b, dmg, pierce) {
+  if (pierce) {
+    b.hp -= dmg;
+    b.flash = 0.3;
+    return;
+  }
+  const armour = (b.def.armour || 0) + (f.aura === 'crust' && !b.boss ? 5 : 0);
+  const real = Math.max(1, dmg - armour);
+  if (b.shell > 0) {
+    b.shell -= real;
+    b.flash = 0.25;
+    if (b.shell <= 0) {
+      b.shell = 0;
+      note(f, `THE CRUST IS OFF THE ${b.def.name.toUpperCase()}`, 'gold');
+    }
+    return;
+  }
   b.hp -= real;
   b.flash = 0.25;
 }
@@ -658,6 +936,7 @@ function tickShots(f, dt) {
   for (let i = f.shots.length - 1; i >= 0; i--) {
     const s = f.shots[i];
     s.t += dt;
+    if (s.lob) { if (s.t > 0.45) f.shots.splice(i, 1); continue; }
     if (s.tracer || s.burst || s.ring) { if (s.t > 0.2) f.shots.splice(i, 1); continue; }
     s.x += s.vx * dt;
     if (s.x > COLS + 0.5) { f.shots.splice(i, 1); continue; }
@@ -666,7 +945,7 @@ function tickShots(f, dt) {
       if (b.row !== s.row) continue;
       if (Math.abs(b.x - 0.5 - s.x) < 0.45) { hit = b; break; }
     }
-    if (hit) { hurt(f, hit, s.dmg); f.shots.splice(i, 1); }
+    if (hit) { hurt(f, hit, s.dmg, s.pierce); f.shots.splice(i, 1); }
   }
 }
 
@@ -683,7 +962,7 @@ function tickBees(f, dt) {
     const a = Math.atan2(best.row - bee.row, best.x - 0.5 - bee.x);
     bee.x += Math.cos(a) * 4.2 * dt;
     bee.row += Math.sin(a) * 4.2 * dt;
-    if (bd < 0.3) { hurt(f, best, bee.dmg); f.bees.splice(i, 1); }
+    if (bd < 0.3) { hurt(f, best, bee.dmg, false); f.bees.splice(i, 1); }
   }
 }
 
@@ -715,18 +994,32 @@ export function result(f) {
     island: f.island.id,
     saved: f.saved.slice(), lost: f.lost.slice(), tamed: f.tamed.slice(),
     why: f.why, seconds: f.t, waves: f.wave + 1,
+    boss: f.bossDown, called: f.called, grabbed: f.grabbed,
   };
 }
 
 export function waveText(f) {
-  if (f.wave < 0) return 'THE FIRST OF THEM IS COMING';
+  if (f.drowning) return 'THE WATER IS RISING';
+  if (f.wave < 0) return `THE FIRST OF THEM IN ${Math.ceil(f.waveT)}s`;
   if (f.wave >= f.waves.length) return 'THAT WAS THE LAST';
   const w = f.waves[f.wave];
-  if (f.inWave) return w.big ? 'THE LAST OF THEM' : `WAVE ${f.wave + 1} OF ${f.waves.length}`;
+  if (f.inWave) {
+    if (f.boss) return `${f.champion.name} IS ON THE FIELD`;
+    return w.big ? 'THE LAST OF THEM — AND SOMETHING WITH A NAME'
+      : `WAVE ${f.wave + 1} OF ${f.waves.length}`;
+  }
+  const nxt = f.waves[f.wave + 1];
+  if (nxt && nxt.champion) return `THE LAST OF THEM IN ${Math.ceil(f.waveT)}s`;
   return `WAVE ${f.wave + 2} IN ${Math.ceil(f.waveT)}s`;
+}
+
+/** Can the next wave be brought on early, and what would that pay? */
+export function callable(f) {
+  if (f.over || f.inWave || f.wave + 1 >= f.waves.length || f.waveT < 1.5) return 0;
+  return Math.round(f.waveT * 4);
 }
 
 export function threat(f) { return f.beasts.length; }
 export function berths(f) { return berthsFree(f.voyage); }
 
-export const _internals = { idx, inGrid, blockerFor };
+export const _internals = { idx, inGrid, blockerFor, hurtFor: hurt, reachTarget };

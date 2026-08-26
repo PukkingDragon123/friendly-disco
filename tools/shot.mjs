@@ -17,6 +17,7 @@ const scale = Number(process.argv[5] || 2);
 
 const { W: SW, H: SH } = await import('../src/core/pixel.js');
 const cv = new SoftCanvas(SW, SH);
+globalThis.__shotCanvas = cv;   // so tools/zoom.mjs can crop what was drawn
 const g = cv.getContext('2d');
 
 const { Input } = await import('../src/core/input.js');
@@ -94,7 +95,10 @@ switch (which) {
     voyage.at = island;
     scene = makeIslandScene();
     scene.enter({ voyage, island, onDone: () => {} }, app);
-    voyage.beasts = ['well', 'reed', 'boar', 'thorn', 'ember', 'bell', 'owl'];
+    // ALLB=1 shows the tray a late run actually has: eleven beasts, two rows of cards
+    voyage.beasts = process.env.ALLB
+      ? (await import('../src/data/beasts.js')).BEAST_IDS.slice()
+      : ['well', 'reed', 'boar', 'thorn', 'ember', 'bell', 'owl'];
     scene.enter({ voyage, island, onDone: () => {} }, app);
     const d = scene.debug();
     // a real board, so the shot shows a game rather than an empty lawn
@@ -107,6 +111,30 @@ switch (which) {
       d.pick('boar'); d.put(r, 6);
     }
     for (let i = 0; i < 60 * Number(process.env.SECS || 34); i++) scene.update(1 / 60, app, 1 / 60);
+    // BOSS=1 walks the island's champion on, so the plate, the crown and the bar can be
+    // looked at without playing six waves to get to them
+    if (process.env.BOSS) {
+      const C = await import('../src/data/corrupted.js');
+      d.lane.beasts.push({
+        def: C.championFor(island), boss: true, row: 2, x: 5.4,
+        hp: 520, max: 880, shell: 0, shellMax: 0,
+        slowT: 0, leapt: false, dug: 0, walk: 0.3, hitT: 0, flash: 0, rage: false,
+      });
+      d.lane.beasts.push({
+        def: C.CORRUPT_BY_ID.c_pang, row: 0, x: 6.6, hp: 70, max: 70,
+        shell: 80, shellMax: 130, slowT: 0, dug: 0, walk: 0, hitT: 0, flash: 0, rage: false,
+      });
+      d.lane.beasts.push({
+        def: C.CORRUPT_BY_ID.c_hound, row: 4, x: 4.2, hp: 15, max: 55,
+        shell: 0, shellMax: 0, slowT: 0, dug: 0, walk: 0, hitT: 0, flash: 0, rage: true,
+      });
+      d.lane.event = null;                 // review the art, not the weather
+      d.lane.motes.length = 0;
+      d.lane.motes.push({ row: 4, col: 4, t: 1, life: 9, amount: 20 });
+      d.lane.motes.push({ row: 0, col: 5, t: 7.6, life: 9, amount: 20 });
+      d.lane.motes.push({ row: 2, col: 1, t: 4, life: 9, amount: 20 });
+      scene.update(1 / 60, app, 1 / 60);
+    }
     mouse(Number(process.env.MX || 700), Number(process.env.MY || 300));
     break;
   }
@@ -566,6 +594,8 @@ switch (which) {
     console.error('unknown scene', which);
     process.exit(2);
 }
+
+globalThis.__shotScene = scene;   // so tools/zoom.mjs and probes can ask what was drawn
 
 for (let i = 0; i < frames; i++) {
   app.frame = i;

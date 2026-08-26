@@ -21,6 +21,9 @@
 //   spawn   sends out little chasers                   (the pressure)
 //   pad     lets you plant on water                    (the geometry)
 //
+// Two of them carry a second word because the fight grew something they had to answer:
+// `pierce` ignores armour and crust, and `knock` shoves whatever it hits back down the row.
+//
 // Costs are in CLAY, which is the mana. They are tuned in fifties like Plants vs Zombies
 // because the arithmetic has to be doable in your head while something is walking at you.
 
@@ -79,6 +82,18 @@ export const BEASTS = [
     blurb: 'Keeps bees. The bees are not friendly to anybody else.',
     rule: 'Sends out a bee that chases the nearest beast.',
   },
+  {
+    id: 'maul', name: 'Maul Rhino', base: 'rhino', kind: 'shoot',
+    cost: 150, hp: 120, rate: 1.0, damage: 26, speed: 300, pierce: true, tier: 2,
+    blurb: 'Does not care what you are wearing.',
+    rule: 'Hits the first thing in its row and IGNORES armour.',
+  },
+  {
+    id: 'tide', name: 'Tide Walrus', base: 'walrus', kind: 'aoe',
+    cost: 175, hp: 150, rate: 2.4, damage: 16, radius: 1.3, knock: 0.85, tier: 2,
+    blurb: 'Comes down like a wave, and everything goes back with it.',
+    rule: 'Shoves everything near it back down the row.',
+  },
 ];
 
 export const BEAST_BY_ID = Object.freeze(
@@ -111,6 +126,8 @@ export const UPGRADES = {
   bell: { name: 'Great Bell', cost: 10, blurb: 'Slows to a third.', apply: (b) => { b.slow = 0.32; } },
   owl: { name: 'Night Eyes', cost: 12, blurb: 'Half again the damage.', apply: (b) => { b.damage = Math.round(b.damage * 1.5); } },
   hive: { name: 'Second Hive', cost: 12, blurb: 'Two bees at a time.', apply: (b) => { b.twin = true; } },
+  maul: { name: 'Long Horn', cost: 12, blurb: 'Half again the damage, and faster.', apply: (b) => { b.damage = 40; b.rate = 0.8; } },
+  tide: { name: 'Spring Tide', cost: 12, blurb: 'Shoves twice as far.', apply: (b) => { b.knock = 1.7; b.radius = 1.6; } },
   reed: { name: 'Broad Reed', cost: 6, blurb: 'Tougher, and free to plant.', apply: (b) => { b.hp = 90; b.cost = 0; } },
 };
 

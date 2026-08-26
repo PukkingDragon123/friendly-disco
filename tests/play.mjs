@@ -29,6 +29,8 @@ const g = cv.getContext('2d');
 const DT = 1 / 60;
 
 let errors = [];
+// what the island rig managed with the new levers, printed on the tally line
+let grabbedTotal = 0, calledTotal = 0, bossTotal = 0;
 let shotIx = 0;
 let app = null;
 
@@ -223,7 +225,36 @@ function playIsland() {
   const def = (id) => f.hand.find((b) => b.id === id);
   let planted = 0;
   let guard = 0;
+  let moteTries = 0;
   while (!f.over && guard++ < 300) {
+    // CLAY LYING ON THE FIELD, clicked where it is DRAWN rather than on its tile -- which
+    // is the same pixel-space hit test the player's cursor uses, and the only way this rig
+    // ever exercises it.
+    // THE FRESHEST ONE, not the first: a mote at the end of its nine seconds sinks away
+    // between reading the field and the click landing, and that is the game working.
+    const motes = ((d0.motes && d0.motes()) || []).filter((q) => q.k < 0.7);
+    if (motes.length && moteTries < 60) {
+      moteTries++;
+      const purse = f.clay;
+      clickAt(Math.round(motes[0].x), Math.round(motes[0].y));
+      if (f.clay > purse) { grabbedTotal++; continue; }
+      if (!f.over) {
+        errors.push('island: clicking a mote where it is drawn did not take it');
+        moteTries = 60;
+      }
+    }
+    // and a breather with nothing left to spend on is worth selling back
+    if (f.clay > 260 && LA.callable(f)) {
+      paint();
+      const cr = dbg().rects && dbg().rects.call;
+      if (cr) {
+        const [cx0, cy0] = centre(cr);
+        clickAt(cx0, cy0);
+        if (f.called) calledTotal++;
+        else errors.push('island: the call button did not bring the wave on');
+      }
+    }
+    if (f.beasts.some((b) => b.boss)) bossTotal++;
     // wells first, then a thorn and a wall in each row
     const wells = f.plants.filter((p) => p.def.kind === 'gen').length;
     let want = null, wr = 0, wc = 0;
@@ -246,8 +277,16 @@ function playIsland() {
       const before = f.plants.length;
       if (!pick(want)) { errors.push('island: clicking a beast card selected nothing'); break; }
       put(wr, wc);
-      if (f.plants.length > before) planted++;
-      else if (f.clay >= def(want).cost && !f.over) {
+      // ASK WHAT THE CLICK DID, not what the field looks like afterwards. Counting plants
+      // was wrong the moment the waves got heavy enough to eat one during the four frames
+      // the click takes: the thorn went in, something else was chewed to bits, the count
+      // came out level and the rig called a working game broken.
+      const act = dbg().lastAct;
+      const did = act && act.res && act.res.ok && !act.res.mote;
+      void before;
+      if (did) planted++;
+      else if (f.clay >= def(want).cost && !f.over
+        && !(act && act.res && act.res.mote)) {
         // A refusal is only a bug if the beast was still affordable when the click
         // landed: the drought event halves the bank between the card and the tile, and
         // the game is right to say no.
@@ -538,6 +577,7 @@ for (let i = 0; i < SEEDS; i++) {
   const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
     + `  paths ${s.obstaclesCleared}`
+    + `  [clay ${grabbedTotal} called ${calledTotal} boss ${bossTotal ? 'met' : '-'}]`
     + `  [walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
     + ` island ${out.seen.island} eden ${out.seen.eden}`
     + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;

@@ -451,21 +451,48 @@ The boat starts **half empty** — four farm animals, one of each kind, four abi
 berth an animal occupies is a berth a rescue cannot fill, and arriving at the first island
 with the pens full meant the first thing the game did was refuse to let you play it.
 
-### An island stage (`src/game/field.js`)
+### An island stage (`src/game/lane.js`)
+
+Five rows, nine columns, and everything the flood ruined walking down them at the ark. The
+animals are the enemy AND the reward: knock one down and it stands there dazed and ordinary
+again, and an apple in that window keeps it — aboard the boat, and available as a blessed
+clay beast next island.
+
 ```
-field           880 × 306 px      ball radius     13 px (the sprite's own radius)
-world friction  1.5 / (1 + reach) shot power      0.28 + p × 1.32   (max 1.6)
-tide per action 0.075 + danger × 0.012 − patience
-tile 32 px, grid 29 x 11       an animal walks ~1.35 tiles a second
+field        864 × 330 px      tile 96 × 66     rows 5   cols 9
+clay         75 to open        drip 5/s         a mote 20, one every ~6s, gone in 9s
+waves        4 + (danger>=2) + (danger>=4), then a last one at 3.1x with a CHAMPION in it
+row guards   one per row       danger>=3 opens one row short, danger>=4 two (never on water)
+the ark      2 breaches        each one also costs an animal off the deck
 ```
 
-The stranded spawn in a **band**, not against the far shore, and the tide starts just off
-it: spawning them at the edge drowned somebody in the first two moves of every level, which
-reads as the game cheating rather than as the water winning.
+**The five things that make it a fight** rather than arithmetic you do once:
 
-Balance, from the greedy bot across all eleven islands: **36 saved, 19 lost.** You save most
-of them and the water still gets some, which is the number this whole design exists to
-produce.
+| | |
+|---|---|
+| motes | clay you pick up with the cursor, so the economy is played rather than watched |
+| calling | `[C]` brings the next wave on early and pays 4 clay a second of the time you skipped |
+| enrage | anything under a third of its health walks 45% faster and hits 30% harder |
+| the crust | a shell that soaks everything until something with `pierce` is pointed at it |
+| the champion | one named animal per island, with an aura over the whole wave |
+
+The champion is the same size as everything else, because the art is one resolution: its
+presence is a crown, a heavier shadow, a ring turning in the mud, and the widest bar in the
+HUD. A row guard does not stop it — the guard breaks and it keeps walking. Taming one
+teaches a beast the run almost certainly does not have.
+
+**Auras.** `haste` the rest of them run · `heal` the rest of them mend · `crust` the rest of
+them are caked.
+
+**The tide.** Two things in the fight buy time instead of dealing damage — the heal aura and
+the walrus's shove — and a board of both can deadlock: nothing dies, nothing advances. So a
+minute after the last of them is on the field the water starts taking them, through crust
+and armour, harder as it goes. In a normal stage you never see it. It is a story about
+water; the water gets the last word.
+
+Balance, from the competent bot (`tools/lanebot.mjs`) across all fourteen islands: **7 held,
+7 overrun, the champion met on eight of them.** Danger is a number you read off the map
+before you sail and it means what it says.
 
 ### The garden (`src/game/garden.js`)
 One gate a visit, free, never the same person twice, so the pool narrows and the choice

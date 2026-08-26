@@ -37,12 +37,23 @@ import {
   makeBuf, bset, bget, brect, bline, btri, blob, outline, flush,
 } from './pixbuf.js';
 
-export const SPRITE_SIZE = 64;            // on screen at scale 1
+export const SPRITE_SIZE = 80;            // the sprite's WIDTH on screen at scale 1
+export const SPRITE_H = 88;               // and its height: 40x44 art at 2x
 export const ICON_SIZE = 24;
 
-const A = 32;                             // the art buffer is 32x32 ...
-const S = 2;                              // ... blitted at 2x
-const GROUND = 29;                        // the row the feet stand on
+// THE BUFFER IS TALLER THAN IT IS WIDE, and that is not an aesthetic choice. At 32x32
+// the giraffe's head sat six rows ABOVE the top of the buffer and a lion's mane came out
+// as a brown box clipped by two edges: an animal drawn to the top of its box has nowhere
+// to put the antlers, ears, horns and manes that are most of how you tell one species
+// from another. Eleven rows of headroom is what a set of antlers costs.
+// THE BUFFER IS WIDER THAN THE ANIMAL, TOO. At 32 wide a big animal's barrel left five
+// pixels in front of its shoulder for the whole head, and an elephant's trunk was drawn
+// at x=33: off the edge, so the trunk simply did not exist. Forty gives the head, the
+// muzzle and whatever hangs off it somewhere to be.
+const AW = 40;                            // art width ...
+const AH = 44;                            // ... and height, blitted at 2x
+const S = 2;
+const GROUND = 41;                        // the row the feet stand on
 const PHASES = 4;
 
 export const PLANS = ['quad', 'bird', 'serpent', 'fish', 'bug'];
@@ -163,6 +174,7 @@ export function specFor(a, rc) {
     headR: Math.round(headR),
     legs: plan === 'bug' ? 6 : plan === 'bird' ? 2 : plan === 'quad' ? 4 : 0,
     heavy: has('big') || has('armored') || has('pachyderm'),
+    pachyderm: has('pachyderm'),
     ears: rc.ears || 'round', face: rc.face || 'muzzle',
     extra: rc.extra || 'none', pattern: rc.pattern || 'none',
     eyeStyle: rc.eyeStyle || 'dot',
@@ -347,7 +359,7 @@ function frame(sp) {
   if (sp.plan === 'fish') {
     // a fish has no legs and no neck: its "head" is the front third of its own body, so
     // the head layer is told to put the eye there rather than on a disc of its own
-    const cy = 15, high = sp.bodyHigh + 2;
+    const cy = GROUND - 14, high = sp.bodyHigh + 2;
     const back = 4, front = back + sp.bodyLen + 3;
     return {
       back, front, bodyTop: cy - high / 2, bodyBottom: cy + high / 2,
@@ -358,7 +370,7 @@ function frame(sp) {
   const bodyBottom = GROUND - legLen;
   void 0;
   const bodyTop = bodyBottom - sp.bodyHigh;
-  const back = Math.round((A - sp.bodyLen) / 2) - 1;
+  const back = Math.round((AW - sp.bodyLen) / 2) - 1;
   const front = back + sp.bodyLen;
   const nx = front - 1;
   const ny = bodyTop + 1;
@@ -541,10 +553,21 @@ function tailOf(b, f, sp, C, phase) {
       limb(b, bx, by, bx - 5, by - 6 + i * 3 + swish, 1.2, 0.6, C, { near: false });
     }
   } else if (k === 'mane') {
-    for (let i = 0; i < 6; i++) {
-      const t = i / 5;
-      limb(b, f.nx - 2 - t * 2, f.ny - t * 2, f.nx - 4 - t * 3, f.ny - 3 - t * 3, 1.4, 0.8, C, { near: false });
+    // A MANE IS A RING ROUND THE SKULL. It used to be six strands laid up the neck, which
+    // at this size is a scarf: a lion reads because its head is twice as wide as its
+    // muzzle, and the only way to say that in eight pixels is a collar of dark fur drawn
+    // BEFORE the head lands on top of it.
+    const M = Object.assign({}, C, { body: C.shade, light: C.body, belly: C.shade });
+    const rr = sp.headR + 1.8;
+    // the collar, from the top of the head round the BACK to the chest. The front is left
+    // open on purpose: a full ring buries the muzzle and the animal loses its face.
+    for (let i = 0; i <= 12; i++) {
+      const a = -Math.PI * 0.42 + (i / 12) * Math.PI * 1.32;
+      disc(b, f.headCx - Math.cos(a) * rr, f.headCy - Math.sin(a) * rr, i % 2 ? 2.2 : 1.8, M,
+        { edge: C.deep });
     }
+    // and a bib, where the mane meets the chest
+    for (let i = 0; i < 3; i++) disc(b, f.nx - 1 + i, f.ny + 2 + i * 1.5, 2.1, M, { edge: C.deep });
   } else if (k === 'shell') {
     barrel(b, f.back - 1, f.bodyTop - 3, f.front - 2, f.bodyBottom - 2, C, { belly: false });
     for (let i = 0; i < 4; i++) bline(b, f.back + 2 + i * 3, f.bodyTop - 2, f.back + 1 + i * 3, f.bodyBottom - 3, C.deep);
@@ -615,9 +638,19 @@ function headLayer(b, sp, C, mood) {
 
   // the skull -- unless the plan says the head IS the body's front, which is what a fish
   // is. A disc stuck on the nose of a whale reads as a bubble it is about to swallow.
+  // An elephant's ear is the biggest thing on its head and half the reason you know what
+  // you are looking at -- so it goes on FIRST, behind the skull, like a plate.
+  if (!f.noSkull && sp.pachyderm && sp.ears === 'round') {
+    blob(b, cx - r * 0.7, cy + 1, r * 1.05, r * 1.3, C.shade, { edge: C.deep });
+    blob(b, cx - r * 0.9, cy + 1, r * 0.7, r * 0.95, mix(C.shade, C.deep, 0.4));
+  }
   if (!f.noSkull) {
     disc(b, cx, cy, r, C, { edge: C.deep });
     blob(b, cx - r * 0.4, cy + r * 0.3, r * 0.7, r * 0.55, C.body);   // a cheek
+    // A JAW. A skull drawn as one disc is a ball on a stick whatever you put in front of
+    // it; the line from the ear down to the chin is what makes a head a head.
+    blob(b, cx + r * 0.15, cy + r * 0.62, r * 0.66, r * 0.34, mix(C.shade, C.body, 0.5));
+    bline(b, cx - r * 0.5, cy + r * 0.9, cx + r * 0.8, cy + r * 0.95, C.deep);
   }
 
   // --- the muzzle or beak, forward of the skull
@@ -629,8 +662,23 @@ function headLayer(b, sp, C, mood) {
     wedge(b, mx - 1, my - 2, mx + Math.round(r * 1.1), my, mx - 1, my + 2, 'brass2', 'brass0');
     bline(b, mx - 1, my, mx + Math.round(r * 0.9), my, 'brass0');
   } else if (k === 'trunk') {
-    limb(b, mx, my, mx + 1, GROUND - 4, 1.6, 1, C, { near: true });
-    bset(b, mx + 1, GROUND - 4, C.deep);
+    // A trunk is not a post. Three tapering segments curving forward and down, a curl at
+    // the tip, and a pair of tusks either side of it -- without those it read as a cannon
+    // bolted to the front of a grey dog.
+    let tx = mx, ty = my;
+    const drop = GROUND - 3 - my;
+    for (let i = 1; i <= 7; i++) {
+      const u = i / 7;
+      const nx2 = mx + Math.round(Math.sin(u * 2.1) * 3.5);
+      const ny2 = my + Math.round(drop * u);
+      limb(b, tx, ty, nx2, ny2, 2.0 - u * 1.0, 1.9 - u * 1.0, C, { near: true });
+      tx = nx2; ty = ny2;
+    }
+    bset(b, tx + 1, ty, C.body); bset(b, tx + 2, ty - 1, C.shade);
+    for (const sgn of [-1, 1]) {
+      limb(b, mx + 1, my + 2, mx + Math.round(r * 0.9), my + 4 + sgn, 1.0, 0.5,
+        { body: 'white', shade: 'bone', deep: 'grey1', light: 'white' }, { near: sgn > 0 });
+    }
   } else if (k === 'snout' || k === 'muzzle' || k === 'whiskers') {
     blob(b, mx, my, r * 0.62, r * 0.44, snout);
     bset(b, mx + Math.round(r * 0.5), my - 1, C.deep);          // the nostril
@@ -680,7 +728,10 @@ function earsOf(b, cx, cy, r, sp, C) {
   const bx = cx - Math.round(r * 0.35);
   const by = cy - Math.round(r * 0.8);
   const in_ = mix(C.belly, P.red1, 0.3);
-  if (k === 'round') { disc(b, bx, by - 1, Math.max(2, Math.round(r * 0.42)), C, { edge: C.deep }); bset(b, bx, by - 1, in_); }
+  if (k === 'round' && sp.pachyderm) {
+    // drawn in headLayer BEFORE the skull -- see fanEar. Nothing to do here, or the ear
+    // lands on top of the face and the animal has no eye.
+  } else if (k === 'round') { disc(b, bx, by - 1, Math.max(2, Math.round(r * 0.42)), C, { edge: C.deep }); bset(b, bx, by - 1, in_); }
   else if (k === 'tiny') { brect(b, bx, by, 2, 2, C.shade); }
   else if (k === 'pointy') { wedge(b, bx - 1, by + 1, bx + 1, by - 4, bx + 2, by + 1, C.body, C.deep); bset(b, bx, by - 1, in_); }
   else if (k === 'long') { limb(b, bx, by + 1, bx - 2, by - 7, 1.4, 1, C, { near: true }); bset(b, bx - 1, by - 4, in_); }
@@ -719,10 +770,10 @@ function tintKey(o) {
 }
 
 function bakeLayer(paint, o = {}) {
-  const b = makeBuf(A, A);
+  const b = makeBuf(AW, AH);
   paint(b);
   if (!o.noOutline) outline(b, 'ink', o.outline || {});
-  const c = makeCanvas(SPRITE_SIZE, SPRITE_SIZE);
+  const c = makeCanvas(SPRITE_SIZE, SPRITE_H);
   if (!c) return null;
   flush(b, c.g, 0, 0, S);
   return c.canvas;
@@ -818,6 +869,7 @@ export function walkPhase(opts) {
 export function drawAnimal(g, animal, sx, sy, opts = {}) {
   const sc = opts.scale || 1;
   const SZ = Math.round(SPRITE_SIZE * sc);
+  const SZH = Math.round(SPRITE_H * sc);
   const phase = walkPhase(opts);
   const mood = opts.mood || (opts.blink ? 'blink' : 'idle');
   const back = cachedBack(animal, opts);
@@ -826,14 +878,14 @@ export function drawAnimal(g, animal, sx, sy, opts = {}) {
   if (!body && !head) return;
 
   const dx = Math.round(sx - SZ / 2);
-  // the art's ground row is GROUND of A, so anchor the feet rather than the box
-  const dy = Math.round(sy - (SZ * (GROUND + 1)) / A);
+  // the art's ground row is GROUND of AH, so anchor the FEET rather than the box
+  const dy = Math.round(sy - (SZH * (GROUND + 1)) / AH);
 
   const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
   g.save();
   if (opts.flip) { g.translate(dx + SZ, dy); g.scale(-1, 1); } else { g.translate(dx, dy); }
-  const put = (c) => c && g.drawImage(c, 0, 0, SPRITE_SIZE, SPRITE_SIZE, 0, 0, SZ, SZ);
+  const put = (c) => c && g.drawImage(c, 0, 0, SPRITE_SIZE, SPRITE_H, 0, 0, SZ, SZH);
   put(back); put(body); put(head);
   g.restore();
   g.globalAlpha = prevA;
@@ -901,20 +953,32 @@ export function bakeIcon(a, size = ICON_SIZE) {
   const rc = recipeOf(a);
   const sp = specFor(a, rc), C = tones(rc, {});
   const fn = PLANS_FN[sp.plan] || quadBody;
-  const b = makeBuf(A, A);
+  const b = makeBuf(AW, AH);
   fn(b, sp, C, 0, true);
   fn(b, sp, C, 0, false);
   headLayer(b, sp, C, 'idle');
   outline(b, 'ink');
+  // CROP TO THE INK. The buffer has eleven rows of headroom for antlers, and an icon that
+  // includes them for a badger is an icon of a badger in the bottom corner of a box.
+  let x0 = AW, y0 = AH, x1 = -1, y1 = -1;
+  for (let y = 0; y < AH; y++) {
+    for (let x = 0; x < AW; x++) {
+      if (bget(b, x, y) === null) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  const cw = x1 - x0 + 1, chh = y1 - y0 + 1;
   const c = makeCanvas(size, size);
-  if (!c) return null;
-  // fit the 32-pixel art into the icon box, nearest neighbour, integer where possible
-  const s = size / A;
-  const tmp = makeCanvas(A, A);
-  if (!tmp) return null;
+  const tmp = makeCanvas(AW, AH);
+  if (!c || !tmp) return null;
   flush(b, tmp.g, 0, 0, 1);
+  const sc2 = Math.min(size / cw, size / chh);
+  const dw = Math.max(1, Math.round(cw * sc2)), dh = Math.max(1, Math.round(chh * sc2));
   c.g.imageSmoothingEnabled = false;
-  c.g.drawImage(tmp.canvas, 0, 0, A, A, 0, 0, Math.round(A * s), Math.round(A * s));
+  c.g.drawImage(tmp.canvas, x0, y0, cw, chh,
+    Math.round((size - dw) / 2), Math.round((size - dh) / 2), dw, dh);
   return c.canvas;
 }
 

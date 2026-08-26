@@ -67,6 +67,8 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.scriptId !== undefined) return 'cutscene';
+    if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
+    if (d.heaven) return 'heaven';
     if (d.lane) return 'island';
     if (d.encounter) return 'choice';
     if (d.rects && d.rects.gates) return 'garden';
@@ -77,11 +79,26 @@ async function sceneKind(page) {
   });
 }
 
-/** Click through any dialogue until we are out on the map. */
-async function skipDialogue(page, tries = 60) {
+/**
+ * Click and walk through everything between the menu and the map: the prologue's
+ * set-pieces, then the causeway -- which is the one scene that needs a HELD key rather
+ * than a keypress, so it gets walked with a real one.
+ */
+async function skipDialogue(page, tries = 80) {
   for (let i = 0; i < tries; i++) {
     const kind = await sceneKind(page);
     if (kind === 'ocean') return true;
+    if (kind === 'walk') {
+      await walkCauseway(page);
+      continue;
+    }
+    if (kind === 'heaven') {
+      for (let k = 0; k < 8 && (await sceneKind(page)) === 'heaven'; k++) {
+        await page.mouse.click(480 * (await page.evaluate(() => window.__ARK.app.scale)), 300);
+        await page.waitForTimeout(220);
+      }
+      continue;
+    }
     await page.keyboard.press('Escape');
     await page.waitForTimeout(160);
     if ((await sceneKind(page)) === 'cutscene') {
@@ -90,6 +107,38 @@ async function skipDialogue(page, tries = 60) {
     }
   }
   return false;
+}
+
+/** Walk the causeway with a held key, click the dying man out, and board the ark. */
+async function walkCauseway(page) {
+  await page.screenshot({ path: `${OUT}-3b-causeway.png` });
+  await page.keyboard.down('KeyD');
+  for (let i = 0; i < 140; i++) {
+    await page.waitForTimeout(200);
+    const p = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug();
+      return { phase: d.phase, x: d.heroX, seen: d.seen };
+    });
+    if (p.phase !== 'walk') break;
+  }
+  await page.keyboard.up('KeyD');
+  const at = await page.evaluate(() => window.__ARK.app.scene.debug());
+  if (at.phase !== 'talk') errors.push(`the causeway stalled at x=${at.heroX} (${at.phase})`);
+  else if (at.seen < 4) errors.push(`only ${at.seen} sights on the causeway`);
+  await page.screenshot({ path: `${OUT}-3c-noah.png` });
+  for (let i = 0; i < 40; i++) {
+    const d = await page.evaluate(() => window.__ARK.app.scene.debug());
+    if (!d || d.phase !== 'talk') break;
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(150);
+  }
+  await page.keyboard.down('KeyD');
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(240);
+    if ((await sceneKind(page)) !== 'walk') break;
+  }
+  await page.keyboard.up('KeyD');
+  await page.waitForTimeout(600);
 }
 
 /** Click a rect from the current scene's debug hooks, in page coordinates. */

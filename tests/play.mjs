@@ -62,6 +62,11 @@ function clickAt(x, y, hold = 2) {
 }
 function centre(r) { return [Math.round(r.x + r.w / 2), Math.round(r.y + r.h / 2)]; }
 
+// The causeway is the one scene driven by a HELD key rather than a click, so the rig
+// needs to be able to lean on one: Input.key() reads `keys`, which consume() leaves alone.
+function holdKey(code) { Input.keys[code] = true; }
+function releaseKey(code) { Input.keys[code] = false; }
+
 // Software rasterising a full frame costs far more than the game logic, so draw on a
 // 1-in-DRAW_EVERY cadence. Every path in draw() is still exercised many times a scene.
 // 40, not 12. A lane island is ninety seconds of game time -- 5,400 frames -- and a full
@@ -104,6 +109,8 @@ function dbg() {
 function where() {
   const d = dbg();
   if (d.scriptId !== undefined) return 'cutscene';
+  if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
+  if (d.heaven) return 'heaven';
   if (d.lane) return 'island';
   if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
@@ -310,6 +317,62 @@ function playChoice() {
 }
 
 /**
+ * THE CAUSEWAY. Walk east with the keyboard, reading whatever the golem stops to look at,
+ * until a dying man interrupts; click through him; then walk on to the boat.
+ */
+function playWalk() {
+  paint();
+  snap('walk');
+  const start = dbg();
+  if (start.sights === undefined) errors.push('walk: nothing to look at on the road');
+  let guard = 0;
+  // walk to Noah
+  while (dbg().phase === 'walk' && guard++ < 400) {
+    holdKey('KeyD');
+    tick(6);
+    if (guard % 24 === 0) paint();
+  }
+  releaseKey('KeyD');
+  paint();
+  if (dbg().phase !== 'talk') { errors.push('walk: never reached the man'); return false; }
+  if (dbg().seen < 4) errors.push(`walk: only ${dbg().seen} sights on the way`);
+  snap('walk-noah');
+  // click through his last words
+  guard = 0;
+  while (dbg().phase === 'talk' && guard++ < 60) {
+    clickAt(480, 300);
+    tick(6);
+  }
+  paint();
+  if (!dbg().dead) errors.push('walk: he never died');
+  // and on to the boat
+  guard = 0;
+  while (where() === 'walk' && guard++ < 400) {
+    holdKey('KeyD');
+    tick(6);
+  }
+  releaseKey('KeyD');
+  tick(40);
+  if (where() === 'walk') { errors.push('walk: never got aboard'); return false; }
+  return true;
+}
+
+/** Heaven. He talks, we click, we leave. */
+function playHeaven() {
+  paint();
+  snap('heaven');
+  let guard = 0;
+  while (where() === 'heaven' && guard++ < 60) {
+    const go = dbg().rects && dbg().rects.go;
+    if (go && go.w) { const [x, y] = centre(go); clickAt(x, y); } else clickAt(480, 300);
+    tick(8);
+  }
+  tick(30);
+  if (where() === 'heaven') { errors.push('heaven: no way back to the boat'); return false; }
+  return true;
+}
+
+/**
  * The garden. Stow what the boat is carrying, have the Cherubim call Noah, buy whatever
  * we can afford off whoever is standing about, then back to sea through the gate.
  */
@@ -428,7 +491,7 @@ function playVoyage(seed) {
   router.menu();
   tick(4);
 
-  const seen = { cutscene: 0, ocean: 0, island: 0, eden: 0, choice: 0 };
+  const seen = { cutscene: 0, walk: 0, heaven: 0, ocean: 0, island: 0, eden: 0, choice: 0 };
   // click NEW RUN to prove the button works, then start OUR seed on purpose: the menu's
   // own seed is derived from a fixed string, so every voyage the bot played by clicking
   // through the title screen was the same voyage.
@@ -442,6 +505,8 @@ function playVoyage(seed) {
     const w = where();
     if (process.env.TRACE) console.log('   step', guard, w, Object.keys(dbg()).join(','));
     if (w === 'cutscene') { seen.cutscene++; playCutscene(); continue; }
+    if (w === 'walk') { seen.walk = (seen.walk || 0) + 1; playWalk(); continue; }
+    if (w === 'heaven') { seen.heaven = (seen.heaven || 0) + 1; playHeaven(); continue; }
     if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
     if (w === 'choice') { seen.choice++; playChoice(); continue; }
     if (w === 'island') { seen.island++; playIsland(); continue; }
@@ -473,7 +538,8 @@ for (let i = 0; i < SEEDS; i++) {
   const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
     + `  paths ${s.obstaclesCleared}`
-    + `  [ocean ${out.seen.ocean} island ${out.seen.island} eden ${out.seen.eden}`
+    + `  [walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
+    + ` island ${out.seen.island} eden ${out.seen.eden}`
     + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;
   if (errors.length) {
     failed++;

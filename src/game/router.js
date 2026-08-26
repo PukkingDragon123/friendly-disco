@@ -1,8 +1,11 @@
 // The shape of a run, in one file.
 //
-//     menu -> prologue -> OCEAN -> pick one of three -> ISLAND (a rescue)  -> OCEAN ...
-//                                                    \-> CHERUBIM -> EDEN -> OCEAN ...
-//                         and when the chapters run out, or the flood does: THE MANIFEST
+//   menu -> PROLOGUE (the wrath, the flood, the forge)
+//        -> THE CAUSEWAY   walk the ruins, find Noah dying, take his boat
+//        -> OCEAN -> pick one of three -> ISLAND (a rescue)  -> OCEAN ...
+//                                     \-> CHERUBIM -> EDEN -> OCEAN ...
+//        -> HEAVEN at the end of every chapter, and once more at the end
+//        -> THE MANIFEST
 //
 // Kept out of main.js so a headless harness can drive the whole game without a DOM
 // bootstrap or a requestAnimationFrame loop. main.js is then just the browser shell.
@@ -19,7 +22,9 @@ import { makeChoiceScene } from '../scenes/choice.js';
 import { makeEdenScene } from '../scenes/eden.js';
 import { makeGameOverScene } from '../scenes/gameover.js';
 import { makeCutscene } from '../scenes/cutscene.js';
-import { getScript } from '../data/story.js';
+import { makeWalkScene } from '../scenes/walk.js';
+import { makeHeavenScene } from '../scenes/heaven.js';
+import { getScript, heavenLines, heavenTitle } from '../data/story.js';
 import { rollEncounter } from './choices.js';
 
 /**
@@ -48,7 +53,24 @@ export function createRouter(app, o = {}) {
     startRun(seed) {
       voyage = newVoyage(seed);
       if (o.onRun) o.onRun(voyage);
-      R.play(getScript('prologue'), () => R.ocean());
+      // the set-pieces, then the walk. The walk is where the errand is handed over, so
+      // nothing before it can be skipped into the map.
+      R.play(getScript('prologue'), () => R.causeway());
+    },
+
+    /** The only scene you can walk in, and the reason the rest of the run matters. */
+    causeway() {
+      go(makeWalkScene(), { voyage, onDone: () => R.ocean() }, 'curtain');
+    },
+
+    /** Reporting in. `kind` is 'chapter', 'win' or 'lose'. */
+    heaven(kind, then) {
+      go(makeHeavenScene(), {
+        voyage,
+        title: heavenTitle(kind),
+        lines: heavenLines(voyage, kind),
+        onDone: then,
+      }, 'light');
     },
 
     /** Play a dialogue script, then continue. A null or already-seen script just continues. */
@@ -116,7 +138,8 @@ export function createRouter(app, o = {}) {
       departIsland(voyage);
       if (voyage.over) { R.summary(voyage.won); return; }
       if (voyage.chapter > wasChapter) {
-        R.play(getScript(`chapter${voyage.chapter}`), () => R.ocean());
+        // a chapter ends by going to see him, and then the beat that opens the next one
+        R.heaven('chapter', () => R.play(getScript(`chapter${voyage.chapter}`), () => R.ocean()));
         return;
       }
       R.ocean();
@@ -124,7 +147,10 @@ export function createRouter(app, o = {}) {
 
     summary(won) {
       if (!voyage.over) endVoyage(voyage, won, null);
-      go(makeGameOverScene(), { voyage, won, onDone: () => R.menu() }, 'iris');
+      // he gets the last word before the ledger does
+      R.heaven(won ? 'win' : 'lose', () => {
+        go(makeGameOverScene(), { voyage, won, onDone: () => R.menu() }, 'iris');
+      });
     },
   };
 

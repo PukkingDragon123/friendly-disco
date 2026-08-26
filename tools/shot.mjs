@@ -461,6 +461,31 @@ switch (which) {
     }
     break;
   }
+  case 'heaven': {
+    // KIND=chapter|win|lose
+    const V = await import('../src/game/voyage.js');
+    const { makeHeavenScene } = await import('../src/scenes/heaven.js');
+    const { heavenLines, heavenTitle } = await import('../src/data/story.js');
+    const voyage = V.newVoyage(seed);
+    voyage.chapter = Number(process.env.CH || 3);
+    voyage.lost = (voyage.stock || []).slice(0, Number(process.env.LOST || 5));
+    const kind = process.env.KIND || 'chapter';
+    const sc = makeHeavenScene();
+    sc.enter({ voyage, title: heavenTitle(kind), lines: heavenLines(voyage, kind), onDone: () => {} }, app);
+    scene = sc;
+    break;
+  }
+  case 'walk': {
+    // the causeway. AT=x walks the golem to that point; TALK=1 jumps to Noah.
+    const V = await import('../src/game/voyage.js');
+    const { makeWalkScene } = await import('../src/scenes/walk.js');
+    const sc = makeWalkScene();
+    sc.enter({ voyage: V.newVoyage(seed), onDone: () => {} }, app);
+    if (process.env.AT) sc.debug().walkTo(Number(process.env.AT));
+    if (process.env.SKIP) sc.debug().skip();
+    scene = sc;
+    break;
+  }
   case 'cut': {
     // The cutscene, with the dialogue board over a set-piece. LINE=n advances to that
     // line, FRAMES governs how far into the shot we are.

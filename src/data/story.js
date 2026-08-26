@@ -163,3 +163,48 @@ export function getScript(id) {
   return null;
 }
 
+/* ------------------------------------------------------------------ heaven
+
+What he says when you report in. He is dead, he is not in a hurry, and he can see the
+ledger -- so these read the run rather than the plot: how many are aboard, how many are
+in the garden, and how many got there before you.
+
+Kept short. A man who has finished does not make speeches.
+*/
+export function heavenLines(v, kind) {
+  const saved = (v && v.eden ? v.eden.length : 0) + (v && v.aboard ? v.aboard.length : 0);
+  const lost = v && v.lost ? v.lost.length : 0;
+  const money = v && v.money ? v.money : 0;
+  const out = [];
+  if (kind === 'win') {
+    out.push('Land. You found land. I can see it from here, which is not the same as standing on it.');
+    out.push(`${saved} of them off the boat and onto the grass. I counted every one with you.`);
+    if (lost) out.push(`And ${lost} here with me. They are not angry. They were never going to be.`);
+    out.push('Sit down. You do not get tired, but sit down anyway. That is what the seat is for.');
+    return out;
+  }
+  if (kind === 'lose') {
+    out.push('The water took her. I felt it go.');
+    out.push(lost ? `${lost} of them are here, and they came in talking about you.`
+      : 'And you brought nobody here but yourself, which is its own kind of arithmetic.');
+    out.push('It was never how many. It was that somebody went out at all. Go again.');
+    return out;
+  }
+  // a chapter break: he is checking in, and he is specific about it
+  out.push([
+    'You are further out than I ever got. How is she riding?',
+    'Halfway. The water is not going to get bored before you do.',
+    'I can see the ridge from here. Everything left alive is standing on it.',
+  ][Math.max(0, Math.min(2, (v ? v.chapter : 2) - 2))]);
+  out.push(`${saved} carried, ${lost} lost, ${money} coins in the tin. I am not going to tell you which of those matters.`);
+  if (lost > saved) out.push('More here than there. I am not blaming you. I am telling you the number.');
+  else if (lost === 0) out.push('Nobody here yet. Do not get proud about it, it is early.');
+  else out.push('They sit where they like and they wait for the rest. Go on, then.');
+  return out;
+}
+
+export function heavenTitle(kind) {
+  return kind === 'win' ? 'LANDFALL, AND A SEAT BY HIM'
+    : kind === 'lose' ? 'HE KEPT THE SEAT ANYWAY'
+      : 'A SEAT BY HIM';
+}

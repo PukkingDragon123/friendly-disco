@@ -210,8 +210,28 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
   const answered = OBSTACLES.filter((o) => o.clearedBy).length;
   ok(answered >= 8, 'most obstacles are solvable by an animal', `${answered}/${OBSTACLES.length}`);
 
-  // --- islands: eleven biomes plus the gate, each a place you can tell apart
-  ok(ISLANDS.length === 11, 'eleven biomes', String(ISLANDS.length));
+  // --- islands: eleven biomes, three people islands, and the gate
+  const rescues = ISLANDS.filter((i) => !i.meets);
+  const peopleIsles = ISLANDS.filter((i) => i.meets);
+  ok(rescues.length === 11, 'eleven biomes', String(rescues.length));
+  ok(peopleIsles.length === 3, 'and an island each for the three who trade', String(peopleIsles.length));
+  for (const i of peopleIsles) {
+    ok(!!M.npcs.NPC_BY_ID[i.meets], `${i.id} belongs to somebody real`, i.meets);
+    ok(i.animals > 0, `${i.id} is still a rescue`, String(i.animals));
+  }
+  {
+    // and they are only offered while their person is a stranger
+    const r2 = M.rng.makeRng('PEOPLE');
+    let withUnmet = 0, withoutUnmet = 0;
+    for (let leg = 2; leg <= 40; leg++) {
+      const a = rollLeg(r2.fork('a' + leg), { leg, unmet: ['snake', 'adam', 'eve'] });
+      const b2 = rollLeg(r2.fork('b' + leg), { leg, unmet: [] });
+      if (a.some((i) => i.meets)) withUnmet++;
+      if (b2.some((i) => i.meets)) withoutUnmet++;
+    }
+    ok(withUnmet > 20, 'a stranger island is offered while they are a stranger', String(withUnmet));
+    ok(withoutUnmet === 0, 'and never once you have met all three', String(withoutUnmet));
+  }
   const seenBiome = new Set();
   for (const i of ISLANDS.concat([CHERUBIM])) {
     seenBiome.add(i.biome);

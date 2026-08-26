@@ -264,6 +264,9 @@ export function rollChoices(v) {
     leg: v.leg + (v.chapter - 1) * LEGS_PER_CHAPTER,
     exclude: v.visited.slice(-3),
     lastWasCherubim: v.lastWasCherubim,
+    // whose island is still worth sailing to: the three who trade in the garden and have
+    // not been met yet
+    unmet: ['snake', 'adam', 'eve'].filter((id) => (v.summoned || []).indexOf(id) < 0),
   });
   return v.choices;
 }

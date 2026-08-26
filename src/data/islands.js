@@ -188,6 +188,63 @@ export const ISLANDS = [
     reward: 4,
     sanctuary: true,
   }),
+
+  /* ---------------------------------------------------------- people islands
+
+  One island each for the three who trade in the garden. They are rescues like any other
+  -- the lane game is played on them -- but they only ever appear while you have not met
+  their person yet, and arriving on one runs that person's introduction instead of rolling
+  for a random encounter. That is what makes "you meet them out there" a place you can
+  choose to sail to rather than a coin flip on the way in.
+  */
+  I('snake_rock', {
+    name: 'The Bitten Rock',
+    biome: 'ruins',
+    blurb: 'One tree left standing on it, and something is already up the tree.',
+    ground: ['moss', 'leaf1', 'stone2'],
+    rock: ['stone1', 'stone2', 'moss'], relief: 0.8, steep: 0.72,
+    sky: ['leaf1', 'sand', 'cream'],
+    scenery: ['ruins', 'tree', 'vines', 'stillwater'],
+    weather: 'clear',
+    obstacles: ['rock', 'thorns'],
+    likes: ['tame', 'bushy'],
+    animals: 5,
+    danger: 2,
+    reward: 2,
+    meets: 'snake',
+  }),
+  I('adams_ditch', {
+    name: "Adam's Cut",
+    biome: 'grassland',
+    blurb: 'Somebody has been digging here. Recently, and by hand.',
+    ground: ['clay1', 'leaf1', 'moss'],
+    rock: ['clay1', 'leaf2', 'leaf3'], relief: 0.62, steep: 0.42,
+    sky: ['sky', 'cream', 'sand'],
+    scenery: ['hills', 'wall', 'flowers'],
+    weather: 'clear',
+    obstacles: ['mud', 'rock'],
+    likes: ['tame', 'warm'],
+    animals: 6,
+    danger: 2,
+    reward: 2,
+    meets: 'adam',
+  }),
+  I('eves_orchard', {
+    name: "Eve's Orchard",
+    biome: 'sacred',
+    blurb: 'Forty animals sitting under one tree, and none of them tied.',
+    ground: ['moss', 'leaf2', 'leaf3'],
+    rock: ['moss', 'leaf2', 'leaf4'], relief: 0.7, steep: 0.5,
+    sky: ['cream', 'gold', 'sky'],
+    scenery: ['tree', 'flowers', 'rays', 'stillwater'],
+    weather: 'clear',
+    obstacles: ['thorns'],
+    likes: ['tame', 'bushy', 'warm'],
+    animals: 7,
+    danger: 2,
+    reward: 2,
+    meets: 'eve',
+  }),
 ];
 
 export const ISLAND_BY_ID = Object.freeze(
@@ -233,16 +290,30 @@ export function allObstacleKinds() {
 export function rollLeg(rng, o = {}) {
   const leg = o.leg || 1;
   const wantDanger = Math.min(4, 1 + Math.floor(leg / 2));
-  const pool = ISLANDS.filter((i) => !o.exclude || o.exclude.indexOf(i.id) < 0);
-  const safe = pool.filter((i) => i.danger <= wantDanger);
-  const risky = pool.filter((i) => i.danger > wantDanger);
+  const unmet = o.unmet || [];
+  // A people island is only worth sailing to while its person is still a stranger.
+  const pool = ISLANDS.filter((i) => (!o.exclude || o.exclude.indexOf(i.id) < 0)
+    && (!i.meets || unmet.indexOf(i.meets) >= 0));
+  // people islands take their slot explicitly below and are kept out of the general
+  // pools, so a leg never offers two of them and never wastes both hauls on the same
+  // errand
+  const safe = pool.filter((i) => i.danger <= wantDanger && !i.meets);
+  const risky = pool.filter((i) => i.danger > wantDanger && !i.meets);
   const out = [];
+  const people = pool.filter((i) => i.meets);
+  // Three slots, and the shape is fixed: a safe haul, a second haul, and the gate. A
+  // people island takes the SECOND slot rather than adding a fourth -- meeting somebody
+  // is the risky haul this leg, not an extra one.
   if (safe.length) out.push(rng.pick(safe));
-  if (risky.length) out.push(rng.pick(risky));
-  else if (safe.length > 1) out.push(rng.pick(safe.filter((i) => i !== out[0])));
+  if (people.length && leg >= 2) out.push(rng.pick(people));
+  else if (risky.length) out.push(rng.pick(risky));
+  else {
+    const rest = safe.filter((i) => out.indexOf(i) < 0);
+    if (rest.length) out.push(rng.pick(rest));
+  }
   if (leg >= 2 && !o.lastWasCherubim) out.push(CHERUBIM);
   else {
-    const rest = pool.filter((i) => out.indexOf(i) < 0);
+    const rest = pool.filter((i) => out.indexOf(i) < 0 && !i.meets);
     if (rest.length) out.push(rng.pick(rest));
   }
   return out.slice(0, 3);

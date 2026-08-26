@@ -60,6 +60,13 @@ export function bedMod(v) { return (v.bonusBeds || 0) - (v.flags.greedy ? 4 : 0)
  */
 export function rollEncounter(v, island) {
   if (!island || island.teleport) return null;
+  // AN ISLAND THAT IS SOMEBODY'S ISLAND runs their introduction, every time, whatever the
+  // dice say. You sailed there to meet them; being told "nothing happened on the way in"
+  // would make the whole choice a lie.
+  if (island.meets && (v.summoned || []).indexOf(island.meets) < 0) {
+    const intro = CHOICES.find((c) => c.unmet === island.meets);
+    if (intro && (v.seenChoices || []).indexOf(intro.id) < 0) return intro;
+  }
   if (v.lastEncounter && v.stats.legs - v.lastEncounter < 2) return null;
   const seen = v.seenChoices || [];
   const rng = v.rng.fork(`enc/${v.chapter}/${v.leg}`);

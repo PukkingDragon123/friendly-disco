@@ -22,7 +22,7 @@
 
 import { P, col, mix } from '../core/palette.js';
 import {
-  makeCanvas, rect, px, dashLine, disc, ellipse, text, textW, wrap, wash,
+  makeCanvas, rect, px, dashLine, disc, ellipse, tri, text, textW, wrap, wash,
   dither, vgrad, clamp, lerp, W, H,
 } from '../core/pixel.js';
 import { Input } from '../core/input.js';
@@ -31,7 +31,8 @@ import { Audio } from '../core/audio.js';
 import { createParticles } from '../core/particles.js';
 import * as UI from '../render/uikit.js';
 import { drawBoat } from '../render/boat.js';
-import { drawIslandFar } from '../render/islandart.js';
+import { drawIslandFar, FLORA_BIOME } from '../render/islandart.js';
+import { drawPlant } from '../render/flora.js';
 import { drawAnimal } from '../render/sprites.js';
 import { drawFolk } from '../render/folk.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
@@ -44,15 +45,22 @@ import {
 } from '../game/voyage.js';
 
 const HUD_H = 46;
-const HORIZON = 206;              // where sky meets sea
-const ISLE_X = [186, 480, 774];
-const ISLE_W = 208, ISLE_H = 104;
-const CARD_W = 254, CARD_H = 150, CARD_Y = 226;
-const DECK_X = 322, DECK_Y = 426, DECK_W = W - DECK_X - 14, DECK_H = 102;
-const BOAT_X = 166, BOAT_WL = 512;
+const LADDER_Y = HUD_H + 2, LADDER_H = 22;
+const HORIZON = 214;              // where sky meets sea
+// THREE BIG ISLANDS. They used to be 208x104 with a 254-wide card parked in front of
+// each one, which meant the thing you were choosing between was a paragraph and the
+// island behind it was decoration. Now the island IS the button: three of them, three
+// hundred pixels wide, and the writing only appears for the one under the cursor.
+const ISLE_X = [162, 480, 798];
+const ISLE_W = 306, ISLE_H = 120;
+const ISLE_BASE = HORIZON + 18;   // the waterline they stand on
+const PIN_Y = 80;                 // the marker plaque above each island
+const PLAQUE_W = 320, PLAQUE_H = 104, PLAQUE_Y = ISLE_BASE + 30;
+const DECK_X = 398, DECK_Y = 430, DECK_W = W - DECK_X - 14, DECK_H = 98;
+const BOAT_X = 196, BOAT_WL = 486;
 const BOAT_SCALE = 3;
-const FLOTSAM_Y = 388;            // the open-water lane between the cards and the deck
-const SUN_X = 712;                // where the afternoon sun sits, for the glitter path
+const FLOTSAM_Y = 360;            // the open-water lane between the islands and the boat
+const SUN_X = 700;                // where the afternoon sun sits, for the glitter path
 
 /* ---------------------------------------------------------------- the backdrop
 
@@ -122,7 +130,7 @@ export function makeOceanScene() {
   let parts = null;
   let t = 0, intro = 0;
   let hover = -1;
-  let cards = [];
+  let isles = [];
   let shop = false;          // the deck panel flips to the workshop
   let craftRects = [];
   let shopTab = null;
@@ -236,6 +244,29 @@ export function makeOceanScene() {
     }
   }
 
+  /**
+   * A compass rose on the water. The lower half of the map is open sea by design -- it
+   * is where the ark is and where the courses run -- but open sea with nothing in it
+   * reads as an unfinished screen. A chart mark costs about forty calls and makes the
+   * emptiness look intended.
+   */
+  function drawRose(g, cx, cy, r) {
+    g.globalAlpha = 0.16;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const len = i % 2 === 0 ? r : r * 0.52;
+      tri(g, cx + Math.cos(a) * len, cy + Math.sin(a) * len * 0.6,
+        cx + Math.cos(a + 0.22) * len * 0.2, cy + Math.sin(a + 0.22) * len * 0.12,
+        cx + Math.cos(a - 0.22) * len * 0.2, cy + Math.sin(a - 0.22) * len * 0.12,
+        i % 2 === 0 ? 'foam' : 'water3');
+    }
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      rect(g, cx + Math.cos(a) * r * 0.82, cy + Math.sin(a) * r * 0.5, 2, 1, 'foam');
+    }
+    g.globalAlpha = 1;
+  }
+
   function drawSea(g) {
     // crests: sparse dashes that get longer and further apart as they come at you
     for (let row = 0; row < 16; row++) {
@@ -293,7 +324,7 @@ export function makeOceanScene() {
     // it printed itself neatly underneath the first card and read as "THE FLOO".
     const label = f > 0.86 ? 'THE FLOOD IS ON YOU' : 'THE FLOOD';
     const lw = textW(label, { font: 5 }) + 12;
-    const ly = Math.min(H - 120, Math.max(edge + 3, CARD_Y + CARD_H + 6));
+    const ly = Math.min(H - 130, Math.max(edge + 3, ISLE_BASE + 26));
     wash(g, 8, ly, lw, 11, 'ink', 0.7);
     rect(g, 8, ly, 2, 11, f > 0.72 ? 'red2' : 'foam');
     text(g, label, 15, ly + 2, f > 0.72 ? 'red2' : 'foam', { font: 5 });
@@ -334,72 +365,159 @@ export function makeOceanScene() {
     text(g, `${v.lost.length} lost`, W - 16, 30, v.lost.length ? 'red2' : 'parch1', { font: 3, right: true });
   }
 
-  /** One destination card. Returns its rect. */
-  function drawCard(g, i, island, have) {
-    const cx = ISLE_X[i];
-    const x = Math.round(cx - CARD_W / 2);
-    const lift = Math.round((1 - Ease.outCubic(clamp(intro * 1.6 - i * 0.14, 0, 1))) * 30);
-    const y = CARD_Y + lift;
-    const hot = hover === i && state === 'choose';
-    const r = UI.rectOf(x, y, CARD_W, CARD_H);
+  /* --------------------------------------------------------------- the islands
 
-    UI.panel(g, x, y, CARD_W, CARD_H, { style: 'paper', shadow: true, corners: true });
-    if (hot) UI.panel(g, x - 2, y - 2, CARD_W + 4, CARD_H + 4, { style: 'brass', corners: true });
-    if (hot) UI.panel(g, x, y, CARD_W, CARD_H, { style: 'paper', corners: true });
-    UI.panelTitle(g, x, y + 4, CARD_W, island.name.toUpperCase(), { color: 'cream' });
+  One island is one button. The marker above it carries the name and the danger, a
+  single line under it carries the two numbers you compare, and the paragraph only
+  appears for the island the cursor is on. Everything else is sea.
+  */
 
-    // biome, danger, spoils — the three numbers you compare across the three cards
-    const rowY = y + 20;
-    text(g, island.biome.toUpperCase(), x + 8, rowY, 'wood1', { font: 3 });
-    for (let s = 0; s < 4; s++) {
-      UI.icon(g, 'skull', x + CARD_W - 40 + s * 8, rowY - 2,
-        { color: s < island.danger ? 'red1' : mix(P.parch0, P.parch, 0.5) });
-    }
-    const spoil = island.teleport ? 'THE GARDEN'
-      : `${island.animals} ASHORE · ×${island.reward} SPOILS`;
-    text(g, spoil, x + 8, rowY + 10, 'wood0', { font: 5 });
-
-    UI.divider(g, x + 6, y + 42, CARD_W - 12, { color: 'parch0', light: 'cream' });
-
-    // what is in the way, ticked against the deck
-    const rows = readIsland(island, have);
-    let oy = y + 48;
-    if (!rows.length) {
-      const line = island.teleport ? 'A gate, and nothing trying to kill you.'
-        : 'Nothing in the way. Walk it.';
-      text(g, line, x + 8, oy + 2, 'leaf1', { font: 3 });
-      oy += 14;
-    }
-    for (const row of rows.slice(0, 3)) {
-      const c = row.never ? 'amber' : row.ok ? 'leaf1' : 'red1';
-      UI.icon(g, row.ob.icon, x + 8, oy, { color: row.ob.color });
-      text(g, row.ob.name.toUpperCase(), x + 20, oy + 1, 'wood0', { font: 3 });
-      UI.icon(g, row.never ? 'minus' : row.ok ? 'check' : 'cross', x + CARD_W - 20, oy, { color: c });
-      const tag = row.never ? 'GO ROUND' : row.ok ? 'COVERED' : 'NO ANSWER';
-      text(g, tag, x + CARD_W - 24, oy + 1, c, { font: 3, right: true });
-      oy += 11;
-    }
-
-    // the blurb, which is the only place the island gets to have a voice
-    wrap(island.blurb, CARD_W - 16, { font: 3 }).slice(0, 2).forEach((l, j) => {
-      text(g, l, x + 8, y + 96 + j * 8, 'wood1', { font: 3 });
-    });
-
-    // the cost of getting there, and the button
-    const cost = Math.round(tideCost(island) * 100);
-    text(g, `TIDE +${cost}%`, x + 8, y + CARD_H - 34, cost <= 3 ? 'water2' : 'rust', { font: 5 });
-    if (island.teleport) text(g, 'the short hop', x + CARD_W - 8, y + CARD_H - 33, 'water2', { font: 3, right: true });
-    UI.button(g, UI.rectOf(x + 6, y + CARD_H - 24, CARD_W - 12, 19),
-      state === 'sail' && picked === i ? 'UNDER WAY' : island.teleport ? 'THROUGH THE GATE' : 'SET A COURSE', {
-        state: state === 'sail' ? (picked === i ? 'down' : 'disabled') : hot ? 'hover' : 'idle',
-        color: island.teleport ? 'purple0' : 'wood2',
-        icon: island.teleport ? 'star' : 'boat',
-        font: 5,
-      });
-    return r;
+  /**
+   * Where an island's hit box is. Computed from the constants, NOT recorded during draw:
+   * hit-testing that depends on having drawn a frame first means the first click of a
+   * scene lands on nothing, and a mouse that has not moved since is never seen at all.
+   */
+  function isleRect(i) {
+    if (!v.choices[i]) return null;
+    const lift = Math.round((1 - Ease.outCubic(clamp(intro * 1.6 - i * 0.14, 0, 1))) * 26);
+    return UI.rectOf(ISLE_X[i] - ISLE_W / 2 + 20, PIN_Y + lift,
+      ISLE_W - 40, ISLE_BASE + 22 - PIN_Y);
   }
 
-/**
+  /** The signpost over an island: a post, a plaque, a pennant, and danger skulls. */
+  function drawMarker(g, i, island, hot) {
+    const cx = ISLE_X[i];
+    const top = ISLE_BASE - ISLE_H;
+    const label = island.name.toUpperCase();
+    const tw = Math.max(96, textW(label, { font: 7 }) + 26);
+    const py = PIN_Y - (hot ? 3 : 0);
+    // the post, down to the island's crown
+    rect(g, cx - 2, py + 26, 4, top - py - 22, hot ? 'wood3' : 'wood2');
+    rect(g, cx - 2, py + 26, 1, top - py - 22, 'wood4');
+    // the plaque
+    const x = Math.round(cx - tw / 2);
+    UI.panel(g, x, py, tw, 26, { style: hot ? 'brass' : 'wood', corners: false });
+    text(g, label, cx, py + 8, hot ? 'wood0' : 'cream', { font: 7, center: true, shadow: hot ? null : 'ink' });
+    // danger, as skulls on the rail under the plaque
+    for (let s = 0; s < 4; s++) {
+      UI.icon(g, 'skull', cx - 16 + s * 9, py + 27,
+        { color: s < island.danger ? 'red2' : 'wood1' });
+    }
+    // a pennant that snaps in the wind, so the chosen one is alive
+    const fl = Math.round(Math.sin(t * 3 + i) * 2);
+    tri(g, cx + tw / 2 - 2, py - 12, cx + tw / 2 - 2, py + 2, cx + tw / 2 + 16 + fl, py - 5,
+      hot ? 'gold' : 'red1');
+    rect(g, cx + tw / 2 - 3, py - 14, 2, 18, 'wood2');
+    // and the bouncing arrow that says THIS ONE
+    if (hot) {
+      const bob = Math.round(Math.abs(Math.sin(t * 4)) * 5);
+      UI.icon(g, 'arrow_d', cx - 4, py + 40 - bob, { color: 'gold', scale: 2 });
+    }
+  }
+
+  /** The one line of numbers under an island. */
+  function drawStat(g, i, island, hot) {
+    const cx = ISLE_X[i];
+    const y = ISLE_BASE + 6;
+    const line = island.teleport ? 'THE GARDEN · SAFE GROUND'
+      : `${island.animals} ASHORE · ×${island.reward}`;
+    const w = textW(line, { font: 5 }) + 16;
+    rect(g, cx - w / 2, y, w, 15, hot ? 'wood2' : 'wood0');
+    UI.boxEdge(g, cx - w / 2, y, w, 15, hot ? 'brass2' : 'ink');
+    text(g, line, cx, y + 4, hot ? 'cream' : 'parch1', { font: 5, center: true });
+  }
+
+  /**
+   * The paragraph, only for the island under the cursor: what is in the way ticked
+   * against the deck, the blurb, and what the crossing costs.
+   */
+  function drawPlaque(g, i, island, have) {
+    const x = Math.round(clamp(ISLE_X[i] - PLAQUE_W / 2, 8, W - PLAQUE_W - 8));
+    const y = PLAQUE_Y;
+    UI.panel(g, x, y, PLAQUE_W, PLAQUE_H, { style: 'paper', shadow: true });
+    const rows = readIsland(island, have);
+    let oy = y + 12;
+    text(g, island.biome.toUpperCase(), x + 14, oy, 'wood1', { font: 3 });
+    const cost = Math.round(tideCost(island) * 100);
+    text(g, `TIDE +${cost}%`, x + PLAQUE_W - 14, oy - 1, cost <= 3 ? 'water1' : 'rust',
+      { font: 5, right: true });
+    oy += 12;
+    if (!rows.length) {
+      text(g, island.teleport ? 'A gate, and nothing trying to kill you.' : 'Nothing in the way. Walk it.',
+        x + 14, oy, 'leaf1', { font: 5 });
+      oy += 13;
+    }
+    for (const row of rows.slice(0, 3)) {
+      const c = row.never ? 'rust' : row.ok ? 'leaf1' : 'red1';
+      UI.icon(g, row.ob.icon, x + 14, oy - 1, { color: row.ob.color });
+      text(g, row.ob.name.toUpperCase(), x + 26, oy, 'wood0', { font: 3 });
+      UI.icon(g, row.never ? 'minus' : row.ok ? 'check' : 'cross', x + PLAQUE_W - 26, oy - 1, { color: c });
+      text(g, row.never ? 'GO ROUND' : row.ok ? 'COVERED' : 'NO ANSWER',
+        x + PLAQUE_W - 30, oy, c, { font: 3, right: true });
+      oy += 12;
+    }
+    wrap(island.blurb, PLAQUE_W - 28, { font: 3 }).slice(0, 2).forEach((l, j) => {
+      text(g, l, x + 14, y + PLAQUE_H - 38 + j * 9, 'wood1', { font: 3 });
+    });
+    rect(g, x + 10, y + PLAQUE_H - 20, PLAQUE_W - 20, 1, 'parch0');
+    text(g, island.teleport ? 'CLICK TO GO THROUGH' : 'CLICK TO SET A COURSE',
+      x + PLAQUE_W / 2, y + PLAQUE_H - 16, 'wood0', { font: 5, center: true });
+  }
+
+  /**
+   * THE ROUTE. A ladder of legs across the top and three lines fanning out of the boat
+   * to the three markers: where you have been, where you are, and the only three places
+   * you can go. That fan is the whole map, and it is drawn rather than described.
+   */
+  function drawLadder(g) {
+    rect(g, 0, LADDER_Y, W, LADDER_H, 'wood0');
+    rect(g, 0, LADDER_Y, W, 1, 'wood1');
+    rect(g, 0, LADDER_Y + LADDER_H - 1, W, 1, 'ink');
+    const total = CHAPTERS * LEGS_PER_CHAPTER;
+    const done = (v.chapter - 1) * LEGS_PER_CHAPTER + v.leg - 1;
+    const x0 = 120, x1 = W - 120;
+    rect(g, x0, LADDER_Y + 11, x1 - x0, 3, 'ink');
+    rect(g, x0, LADDER_Y + 11, x1 - x0, 1, 'wood1');
+    for (let i = 0; i < total; i++) {
+      const nx = Math.round(x0 + ((x1 - x0) * i) / (total - 1));
+      const past = i < done, now = i === done;
+      const boss = (i + 1) % LEGS_PER_CHAPTER === 0;
+      if (past) rect(g, x0, LADDER_Y + 11, nx - x0, 3, 'brass1');
+      const r = boss ? 6 : 4;
+      rect(g, nx - r, LADDER_Y + 12 - r, r * 2, r * 2, now ? 'gold' : past ? 'brass2' : 'wood2');
+      UI.boxEdge(g, nx - r, LADDER_Y + 12 - r, r * 2, r * 2, 'ink');
+      if (boss) rect(g, nx - 2, LADDER_Y + 10, 4, 4, now ? 'white' : 'red1');
+      if (now) {
+        const bob = Math.round(Math.abs(Math.sin(t * 3)) * 2);
+        UI.icon(g, 'boat', nx - 4, LADDER_Y - 8 - bob, { color: 'cream' });
+      }
+    }
+    text(g, `CHAPTER ${v.chapter}`, 14, LADDER_Y + 7, 'parch1', { font: 3 });
+    text(g, `LEG ${v.leg} OF ${LEGS_PER_CHAPTER}`, W - 14, LADDER_Y + 7, 'parch1',
+      { font: 3, right: true });
+  }
+
+  /** The three courses out of the bow, dashed, the hovered one bright. */
+  function drawCourses(g) {
+    const bx = boatX + 40, by = boatY - 30;
+    for (let i = 0; i < 3; i++) {
+      if (!v.choices[i]) continue;
+      const hot = hover === i || (state === 'sail' && picked === i);
+      const tx = ISLE_X[i], ty = ISLE_BASE + 24;
+      const n = 26;
+      for (let j = 2; j < n; j++) {
+        const f = j / n;
+        const cx2 = lerp(bx, tx, f);
+        const cy2 = lerp(by, ty, f) - Math.sin(f * Math.PI) * 26;
+        if ((j + Math.floor(t * (hot ? 8 : 3))) % 3 === 0) continue;
+        const sz = hot ? 5 : 3;
+        rect(g, cx2 - 1, cy2 - 1, sz + 2, sz + 2, 'ink');
+        rect(g, cx2, cy2, sz, sz, hot ? 'gold' : 'water3');
+      }
+    }
+  }
+
+  /**
    * THE BENCH. Where Noah's work on your beasts is paid for.
    *
    * It shares the deck panel rather than getting its own, and flips with one click. Two
@@ -505,31 +623,51 @@ export function makeOceanScene() {
     else rect(g, 0, 0, W, H, 'water1');
     drawSky(g);
 
-    // the three islands, standing on the horizon
+    // THE THREE ISLANDS, standing on the sea, big enough to be the thing you look at
     const have = aboardAbilities();
+    isles = [];
     v.choices.forEach((island, i) => {
       if (!island) return;
+      const hot = (hover === i && state === 'choose') || (state === 'sail' && picked === i);
       const dim = state === 'sail' && picked !== i ? 0.35 : 1;
+      const lift = Math.round((1 - Ease.outCubic(clamp(intro * 1.6 - i * 0.14, 0, 1))) * 26)
+        - (hot ? 2 : 0);
       const prev = g.globalAlpha;
       if (dim < 1) g.globalAlpha = dim;
-      drawIslandFar(g, island, ISLE_X[i], HORIZON + 8, ISLE_W, ISLE_H, t, {
-        weatherAmt: dim,
-      });
+      drawIslandFar(g, island, ISLE_X[i], ISLE_BASE + lift, ISLE_W, ISLE_H, t, { weatherAmt: dim });
       g.globalAlpha = prev;
-      // a reflection, cheap: three fading bars under the island
-      for (let k = 0; k < 3; k++) {
-        wash(g, ISLE_X[i] - ISLE_W / 2 + k * 6, HORIZON + 9 + k * 3, ISLE_W - k * 12, 2,
+      // a reflection, cheap: fading bars under the island
+      for (let k = 0; k < 4; k++) {
+        wash(g, ISLE_X[i] - ISLE_W / 2 + k * 8, ISLE_BASE + lift + 1 + k * 3, ISLE_W - k * 16, 3,
           'foam', 0.1 - k * 0.02);
       }
+      // a dozen LIVE plants over the baked ones, so the island moves in the wind
+      for (let j = 0; j < 12; j++) {
+        const fx = ISLE_X[i] - ISLE_W / 2 + 30 + hash(i * 31 + j * 7) * (ISLE_W - 60);
+        const fy = ISLE_BASE + lift - hash(i * 17 + j * 5) * ISLE_H * 0.3;
+        drawPlant(g, fx, fy, hash(i + j) > 0.6 ? 'tuft' : 'grass',
+          { biome: FLORA_BIOME[island.biome] || 'grassland', v: j % 4, t });
+      }
+      isles[i] = isleRect(i);
     });
 
     drawSea(g);
+    drawRose(g, 700, 372, 74);
     drawTide(g);
     parts.draw(g, 'back');
+    drawCourses(g);
 
-    // the boat, and the golem standing at the tiller. He is the player, so he is on
-    // screen wherever the player is -- and the mud coming off him is the cheapest
-    // reminder of what he is made of.
+    // the markers and the one line of numbers under each island
+    v.choices.forEach((island, i) => {
+      if (!island) return;
+      const hot = (hover === i && state === 'choose') || (state === 'sail' && picked === i);
+      drawMarker(g, i, island, hot);
+      drawStat(g, i, island, hot);
+    });
+
+    // THE ARK, and the golem standing on its deck. The golem is drawn at 1x against a
+    // boat drawn at 3x on purpose: he used to be as tall as the hull was long, which is
+    // most of why the boat did not read as a boat.
     drawBoat(g, boatX, boatY, t, {
       tiers: v.tiers,
       damage: hullMax(v) - v.hull,
@@ -537,18 +675,13 @@ export function makeOceanScene() {
       speed: state === 'sail' ? 1 : 0.25,
     });
     const deckY = boatY - 8 * BOAT_SCALE + Math.round(Math.sin(t * 1.15) * 1.6) * BOAT_SCALE;
-    drawFolk(g, 'golem', boatX + 56, deckY, t, {
-      scale: 2,
+    drawFolk(g, 'golem', boatX + 26 * BOAT_SCALE, deckY, t, {
+      scale: 1,
       pose: state === 'sail' ? 'react' : 'idle',
       mud: 0.5,
       sparkle: 0.25,
     });
 
-    cards = [];
-    v.choices.forEach((island, i) => {
-      if (!island) return;
-      cards[i] = drawCard(g, i, island, have);
-    });
     if (shop) drawWorkshop(g); else drawDeck(g);
     // the tab that flips between them, top-right of whichever panel is up
     shopTab = UI.rectOf(DECK_X + DECK_W - 108, DECK_Y + 2, 100, 18);
@@ -557,7 +690,12 @@ export function makeOceanScene() {
     UI.boxEdge(g, shopTab.x, shopTab.y, shopTab.w, shopTab.h, tabHot ? 'brass3' : 'wood1');
     text(g, shop ? 'ON DECK  [W]' : 'THE BENCH  [W]', shopTab.x + shopTab.w / 2, shopTab.y + 4,
       tabHot ? 'gold' : 'parch1', { font: 3, center: true });
+
+    // the paragraph, for the one island the cursor is on and no others
+    if (hover >= 0 && v.choices[hover] && state === 'choose') drawPlaque(g, hover, v.choices[hover], have);
+
     drawHud(g);
+    drawLadder(g);
     parts.draw(g, 'front');
 
     if (state === 'sail') {
@@ -578,8 +716,9 @@ export function makeOceanScene() {
       const m = Input.mouse;
       const was = hover;
       hover = -1;
-      for (let i = 0; i < cards.length; i++) {
-        if (cards[i] && UI.hover(cards[i], m)) { hover = i; break; }
+      for (let i = 0; i < 3; i++) {
+        const r = isleRect(i);
+        if (r && UI.hover(r, m)) { hover = i; break; }
       }
       if (hover >= 0 && hover !== was) Audio.sfx('hover');
       // the workshop tab, and crafting inside it. Checked BEFORE the island cards, or a
@@ -610,7 +749,7 @@ export function makeOceanScene() {
     sailT += dt * 0.72;
     const k = Ease.inOutCubic(clamp(sailT, 0, 1));
     boatX = lerp(BOAT_X, ISLE_X[picked], k);
-    boatY = lerp(BOAT_WL, HORIZON + 46, k);
+    boatY = lerp(BOAT_WL, ISLE_BASE + 10, k);
     if (sailT > 0.2 && sailT < 0.9 && Math.floor(sailT * 24) % 4 === 0) {
       parts.emit('splash', boatX - 20, boatY + 4, { count: 1, speed: 40, color: 'foam', life: 0.4 });
     }
@@ -622,7 +761,7 @@ export function makeOceanScene() {
       void api;
       v = args.voyage || args.run;
       onArrive = args.onArrive; onOver = args.onOver;
-      t = 0; intro = 0; hover = -1; cards = [];
+      t = 0; intro = 0; hover = -1; isles = [];
       state = 'choose'; sailT = 0; picked = -1;
       boatX = BOAT_X; boatY = BOAT_WL;
       parts = createParticles({ limit: 160, seed: v.seed + '/ocean' });
@@ -632,11 +771,11 @@ export function makeOceanScene() {
     update, draw,
     debug() {
       return {
-        voyage: v, cards, choose, state,
-        rects: { cards, craft: craftRects, tab: shopTab },
+        voyage: v, cards: isles, isles, choose, state,
+        rects: { cards: isles, isles, craft: craftRects, tab: shopTab },
         get shop() { return shop; },
         workshop: (on) => { shop = on === undefined ? !shop : !!on; },
-        at: { horizon: HORIZON, isles: ISLE_X.slice() },
+        at: { horizon: HORIZON, isles: ISLE_X.slice(), base: ISLE_BASE },
       };
     },
   };

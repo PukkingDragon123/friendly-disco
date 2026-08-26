@@ -19,8 +19,32 @@ import { makeCanvas, rect, px, line, disc, ellipse, tri, wash, clamp } from '../
 import {
   makeBuf, bset, bget, brect, bline, btri, orb, blob, limb, orbShade, outline, flush,
 } from './pixbuf.js';
+import { drawPlant } from './flora.js';
 
 const H2 = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+
+// Which flora palette an island's biome plants itself with, and what grows there.
+export const FLORA_BIOME = {
+  grassland: 'grassland', jungle: 'jungle', desert: 'desert', swamp: 'swamp',
+  snow: 'snow', tundra: 'tundra', volcano: 'volcano', ruins: 'ruins', coral: 'coral',
+  storm: 'storm', mountain: 'mountain', peak: 'peak', sacred: 'sacred',
+};
+export const FLORA_KINDS = {
+  default: ['grass', 'grass', 'grass', 'tuft', 'flower', 'bush'],
+  grassland: ['grass', 'grass', 'grass', 'tuft', 'flower', 'bush'],
+  jungle: ['grass', 'fern', 'fern', 'palm', 'bush', 'grass'],
+  desert: ['grass', 'grass', 'tuft', 'palm', 'flower'],
+  swamp: ['grass', 'reed', 'cattail', 'fern', 'bush'],
+  snow: ['grass', 'grass', 'tuft', 'sapling'],
+  tundra: ['grass', 'grass', 'tuft', 'bush'],
+  volcano: ['grass', 'tuft', 'tuft'],
+  ruins: ['grass', 'grass', 'fern', 'flower', 'bush'],
+  coral: ['grass', 'grass', 'palm', 'flower', 'tuft'],
+  storm: ['grass', 'reed', 'grass', 'fern'],
+  mountain: ['grass', 'grass', 'tuft', 'sapling'],
+  peak: ['grass', 'tuft', 'tuft'],
+  sacred: ['grass', 'flower', 'flower', 'tuft', 'sapling'],
+};
 
 /* ------------------------------------------------------------------ far view */
 
@@ -94,6 +118,29 @@ function bakeFar(island, w, h) {
   ellipse(b, cx, base + 3, Math.round(w / 2), 2, 'foam');
 
   scenery(b, island, cx, base, w, top, 1);
+
+  // UNDERGROWTH. An island silhouette with four tree blobs on it reads as a logo; the
+  // thing that makes it read as somewhere you could land is the fifty small plants
+  // between the trees. Baked at bend 0 -- the scene draws a dozen live ones over the top
+  // for movement, and a dozen moving plants against fifty still ones is plenty of wind.
+  const fbio = FLORA_BIOME[island.biome] || island.biome || 'grassland';
+  const kinds = FLORA_KINDS[island.biome] || FLORA_KINDS.default;
+  const spots = [];
+  for (let i = 0; i < 34; i++) {
+    // biased LOW: undergrowth belongs round the skirts of a hill, and a crown buried in
+    // bushes loses the silhouette that tells the three islands apart at a glance
+    const fy = Math.round(Math.pow(H2(seedN + i * 5), 1.7) * top * 0.9);
+    const hw = profile(fy);
+    if (hw <= 6) continue;
+    const off = Math.round(lean * (top - fy) * 0.5);
+    const fx = cx + off + Math.round((H2(seedN + i * 7) - 0.5) * (hw * 2 - 10));
+    spots.push([fx, base - fy, kinds[Math.floor(H2(seedN + i * 11) * kinds.length)],
+      Math.floor(H2(seedN + i * 13) * 4)]);
+  }
+  spots.sort((a, c) => a[1] - c[1]);
+  for (const [fx, fy, kind, vv] of spots) {
+    drawPlant(b, fx, fy, kind, { biome: fbio, v: vv, bend: 0 });
+  }
   return mk.canvas;
 }
 

@@ -58,7 +58,7 @@ const PIN_Y = 80;                 // the marker plaque above each island
 const PLAQUE_W = 320, PLAQUE_H = 104, PLAQUE_Y = ISLE_BASE + 30;
 const DECK_X = 398, DECK_Y = 430, DECK_W = W - DECK_X - 14, DECK_H = 98;
 const BOAT_X = 196, BOAT_WL = 486;
-const BOAT_SCALE = 3;
+const BOAT_SCALE = 2;              // the ark's art is half-size: 2x is its real size
 const FLOTSAM_Y = 360;            // the open-water lane between the islands and the boat
 const SUN_X = 700;                // where the afternoon sun sits, for the glitter path
 

@@ -106,7 +106,7 @@ export function panel(g, x, y, w, h, o = {}) {
   if (w < 4 || h < 4) return rectOf(x, y, w, h);
   const b = bakedPanel(w, h, o);
   if (b) {
-    g.drawImage(b.canvas, x - b.pad, y - b.pad);
+    g.drawImage(b.canvas, Math.round((x - b.pad) / 2) * 2, Math.round((y - b.pad) / 2) * 2);
     return rectOf(x, y, w, h);
   }
   paintPanel(g, x, y, w, h, o);          // no offscreen support: draw it live

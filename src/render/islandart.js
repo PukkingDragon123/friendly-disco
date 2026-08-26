@@ -153,7 +153,7 @@ export function drawIslandFar(g, island, x, y, w, h, t = 0, o = {}) {
     farCache.set(k, cv);
   }
   const bob = Math.round(Math.sin(t * 0.9 + x * 0.03) * 1);
-  if (cv) g.drawImage(cv, Math.round(x - w / 2), Math.round(y - h) + bob);
+  if (cv) g.drawImage(cv, Math.round((x - w / 2) / 2) * 2, Math.round(((y - h) + bob) / 2) * 2);
   // live weather over the top, which is what makes a map island feel alive
   weather(g, island, x, y - h, w, h, t, o.weatherAmt !== undefined ? o.weatherAmt : 1);
 }
@@ -740,7 +740,7 @@ export function drawIslandBack(g, island, x, y, w, h, t = 0, o = {}) {
     if (backCache.size > 12) backCache.clear();
     backCache.set(k, cv);
   }
-  if (cv) g.drawImage(cv, x, y);
+  if (cv) g.drawImage(cv, Math.round(x / 2) * 2, Math.round(y / 2) * 2);
   weather(g, island, x, y, w, h, t, o.weatherAmt !== undefined ? o.weatherAmt : 1);
 }
 

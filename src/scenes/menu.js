@@ -113,7 +113,7 @@ export function makeMenuScene() {
    * table riding on a boat, left over from the game this one used to be.
    */
   function drawArk(g, cx, cy, roll) {
-    const SC = 3;
+    const SC = 2;                     // the ark's art is half-size: 2x is its real size
     const wl = Math.round(cy + 34);
     drawArkSprite(g, cx, wl, t, { tiers: { capacity: 2, speed: 2, hull: 1, hold: 1 }, scale: SC, speed: 0.3 });
     // animals along the foredeck, in front of the house

@@ -305,7 +305,7 @@ export function tileCacheSize() { return tileCache.size + propCache.size; }
 /** The floor of one tile. */
 export function drawTile(g, x, y, kind, biome, v) {
   const cv = getTile(kind, biome, v);
-  if (cv) g.drawImage(cv, x | 0, y | 0);
+  if (cv) g.drawImage(cv, Math.round(x / 2) * 2, Math.round(y / 2) * 2);
 }
 
 /**
@@ -314,7 +314,7 @@ export function drawTile(g, x, y, kind, biome, v) {
  */
 export function drawProp(g, x, y, kind, biome, v) {
   const cv = getProp(kind, biome, v);
-  if (cv) g.drawImage(cv, x | 0, (y + TILE - cv.height) | 0);
+  if (cv) g.drawImage(cv, Math.round(x / 2) * 2, Math.round((y + TILE - cv.height) / 2) * 2);
 }
 
 /**

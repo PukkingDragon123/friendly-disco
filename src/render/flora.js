@@ -355,7 +355,8 @@ export function drawPlant(g, x, y, kind, o = {}) {
   const bend = o.bend !== undefined ? o.bend : bendAt(o.t || 0, x, o.stiff === undefined ? 1 : o.stiff);
   const c = get(kind, o.biome || 'grassland', v, bend);
   if (!c) return;
-  g.drawImage(c.canvas, Math.round(x - c.ax), Math.round(y - c.ay));
+  // even, so the plant's 2x2 pixels stay in step with the ground under them
+  g.drawImage(c.canvas, Math.round((x - c.ax) / 2) * 2, Math.round((y - c.ay) / 2) * 2);
 }
 
 /**

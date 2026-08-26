@@ -20,20 +20,67 @@ export const H = 540;
 
 const R = Math.round;
 
+/* ----------------------------------------------------------- THE MACRO PIXEL
+
+ONE RESOLUTION FOR THE WHOLE GAME.
+
+The frame is 960x540, but the game is not drawn at 960x540: every asset in it is drawn
+on a TWO-PIXEL GRID, so the smallest thing anything can be is a 2x2 block. That is the
+single rule that makes a screen look like one game rather than three:
+
+  the animals were authored at half size and blitted at 2x  -> 2px features
+  the tiles, the folk and the plants, likewise               -> 2px features
+  the boat, the weather, the set-pieces, the chrome          -> 1px features
+
+Mixed, the fine stuff reads as higher-resolution than the art it sits on, which is
+exactly what "some of this looks like a different game" means. Rather than hand-editing
+several thousand call sites, the grid lives HERE, in the primitives everything draws
+through: positions snap to even, sizes round up to even, and the round things step two
+rows at a time. A hairline becomes a two-pixel line, a one-pixel speckle becomes a
+two-pixel fleck, and a hundred small decisions about detail density come out consistent
+for free.
+
+Text is the one exception and stays on the fine grid: the fonts are authored shapes with
+their own stroke weights (FONT7's stems are already two pixels), and doubling them would
+double every label in the game. Only the ORIGIN of a string snaps, so text sits on the
+same grid as the box it is printed in.
+*/
+export let GRID = 2;
+const Q = (n) => Math.round(n / GRID) * GRID;                      // a position
+const QS = (n) => Math.max(GRID, Math.round(n / GRID) * GRID);     // a size, never zero
+const QN = (n) => Math.round(n / GRID);                            // in whole macro pixels
+
+/**
+ * THE ONE EXEMPTION, and it is not an exemption at all.
+ *
+ * Half the game's art is authored at HALF SIZE and blitted at 2x -- the animals, the
+ * folk, the tiles, the plants. Inside one of those buffers a single pixel already IS a
+ * macro pixel, so snapping again would make it four screen pixels wide.
+ *
+ * fine() drops the grid for the duration of a bake that will be blitted at 2x. Anything
+ * drawn straight to the screen, or baked and blitted at 1:1, stays on the grid. The rule
+ * is not "some things are finer", it is "the macro pixel is measured in SCREEN pixels".
+ */
+export function fine(fn) {
+  const prev = GRID;
+  GRID = 1;
+  try { return fn(); } finally { GRID = prev; }
+}
+
 /* ------------------------------------------------------------------ basics */
 
 export function px(g, x, y, c) {
   g.fillStyle = col(c);
-  g.fillRect(R(x), R(y), 1, 1);
+  g.fillRect(Q(x), Q(y), GRID, GRID);
 }
 
 export function rect(g, x, y, w, h, c) {
   if (w <= 0 || h <= 0) return;
   g.fillStyle = col(c);
-  g.fillRect(R(x), R(y), R(w), R(h));
+  g.fillRect(Q(x), Q(y), QS(w), QS(h));
 }
 
-/** 1px outline. */
+/** One-macro-pixel outline; `t` is in macro pixels. */
 export function frame(g, x, y, w, h, c, t = 1) {
   rect(g, x, y, w, t, c);
   rect(g, x, y + h - t, w, t, c);
@@ -65,15 +112,15 @@ export function boxFrame(g, x, y, w, h, c, r = 1) {
   }
 }
 
-/** Bresenham line. */
+/** Bresenham line, walked in MACRO pixels so a diagonal steps like the art does. */
 export function line(g, x0, y0, x1, y1, c) {
-  x0 = R(x0); y0 = R(y0); x1 = R(x1); y1 = R(y1);
+  x0 = QN(x0); y0 = QN(y0); x1 = QN(x1); y1 = QN(y1);
   const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
   const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
   let err = dx - dy;
   g.fillStyle = col(c);
-  for (let i = 0; i < 4096; i++) {
-    g.fillRect(x0, y0, 1, 1);
+  for (let i = 0; i < 2048; i++) {
+    g.fillRect(x0 * GRID, y0 * GRID, GRID, GRID);
     if (x0 === x1 && y0 === y1) break;
     const e2 = err * 2;
     if (e2 > -dy) { err -= dy; x0 += sx; }
@@ -85,11 +132,11 @@ export function line(g, x0, y0, x1, y1, c) {
 export function dashLine(g, x0, y0, x1, y1, c, on = 2, off = 2, phase = 0) {
   const dx = x1 - x0, dy = y1 - y0;
   const len = Math.max(1, Math.hypot(dx, dy));
-  const period = on + off;
+  const period = Math.max(1, on + off);
   g.fillStyle = col(c);
-  for (let d = 0; d < len; d++) {
-    if ((d + phase) % period < on) {
-      g.fillRect(R(x0 + (dx * d) / len), R(y0 + (dy * d) / len), 1, 1);
+  for (let d = 0; d < len; d += GRID) {
+    if ((Math.round(d / GRID) + phase) % period < on) {
+      g.fillRect(Q(x0 + (dx * d) / len), Q(y0 + (dy * d) / len), GRID, GRID);
     }
   }
 }
@@ -103,10 +150,10 @@ export function tri(g, x0, y0, x1, y1, x2, y2, c) {
     const t1 = (y - p2[1]) / Math.max(1e-6, p3[1] - p2[1]);
     const xa = p0[0] + (p1[0] - p0[0]) * t0;
     const xb = p2[0] + (p3[0] - p2[0]) * t1;
-    const l = R(Math.min(xa, xb)), r = R(Math.max(xa, xb));
-    g.fillRect(l, R(y), Math.max(1, r - l + 1), 1);
+    const l = Q(Math.min(xa, xb)), r = Q(Math.max(xa, xb));
+    g.fillRect(l, Q(y), Math.max(GRID, r - l + GRID), GRID);
   };
-  for (let y = R(ay); y <= R(cy); y++) {
+  for (let y = Q(ay); y <= Q(cy); y += GRID) {
     if (y < by) span(y, [ax, ay], [bx, by], [ax, ay], [cx, cy]);
     else span(y, [bx, by], [cx, cy], [ax, ay], [cx, cy]);
   }
@@ -116,56 +163,60 @@ export function tri(g, x0, y0, x1, y1, x2, y2, c) {
 
 /** Filled circle built from integer row spans — the pixel-art way. */
 export function disc(g, cx, cy, r, c) {
-  cx = R(cx); cy = R(cy);
+  cx = Q(cx); cy = Q(cy);
+  const ir = QN(r) * GRID;
   g.fillStyle = col(c);
-  for (let dy = -R(r); dy <= R(r); dy++) {
-    const dx = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy)) + 0.4);
-    if (dx <= 0 && Math.abs(dy) === R(r) && r > 1.5) continue;
-    g.fillRect(cx - dx, cy + dy, dx * 2 + 1, 1);
+  for (let dy = -ir; dy <= ir; dy += GRID) {
+    const dx = Q(Math.sqrt(Math.max(0, r * r - dy * dy)));
+    if (dx <= 0 && Math.abs(dy) === ir && r > 1.5 * GRID) continue;
+    g.fillRect(cx - dx, cy + dy, dx * 2 + GRID, GRID);
   }
 }
 
 export function ring(g, cx, cy, r, c, t = 1) {
-  cx = R(cx); cy = R(cy);
+  cx = Q(cx); cy = Q(cy);
   g.fillStyle = col(c);
-  const ri = Math.max(0, r - t);
-  for (let dy = -R(r); dy <= R(r); dy++) {
-    const dxo = Math.floor(Math.sqrt(Math.max(0, r * r - dy * dy)) + 0.4);
-    const dxi = Math.abs(dy) <= ri ? Math.floor(Math.sqrt(Math.max(0, ri * ri - dy * dy)) + 0.4) : -1;
-    if (dxi < 0) { g.fillRect(cx - dxo, cy + dy, dxo * 2 + 1, 1); }
+  const ri = Math.max(0, r - Math.max(GRID, t * GRID));
+  const ir = QN(r) * GRID;
+  for (let dy = -ir; dy <= ir; dy += GRID) {
+    const dxo = Q(Math.sqrt(Math.max(0, r * r - dy * dy)));
+    const dxi = Math.abs(dy) <= ri ? Q(Math.sqrt(Math.max(0, ri * ri - dy * dy))) : -1;
+    if (dxi < 0) { g.fillRect(cx - dxo, cy + dy, dxo * 2 + GRID, GRID); }
     else {
-      g.fillRect(cx - dxo, cy + dy, dxo - dxi, 1);
-      g.fillRect(cx + dxi + 1, cy + dy, dxo - dxi, 1);
+      g.fillRect(cx - dxo, cy + dy, Math.max(GRID, dxo - dxi), GRID);
+      g.fillRect(cx + dxi + GRID, cy + dy, Math.max(GRID, dxo - dxi), GRID);
     }
   }
 }
 
 export function ellipse(g, cx, cy, rx, ry, c) {
-  cx = R(cx); cy = R(cy);
+  cx = Q(cx); cy = Q(cy);
   g.fillStyle = col(c);
-  const ry2 = Math.max(0.5, ry);
-  for (let dy = -Math.ceil(ry2); dy <= Math.ceil(ry2); dy++) {
+  const ry2 = Math.max(GRID / 2, ry);
+  const iy = Math.max(GRID, QN(ry2) * GRID);
+  for (let dy = -iy; dy <= iy; dy += GRID) {
     const k = 1 - (dy * dy) / (ry2 * ry2);
     if (k < 0) continue;
-    const dx = Math.floor(rx * Math.sqrt(k) + 0.4);
-    g.fillRect(cx - dx, cy + dy, dx * 2 + 1, 1);
+    const dx = Q(rx * Math.sqrt(k));
+    g.fillRect(cx - dx, cy + dy, dx * 2 + GRID, GRID);
   }
 }
 
 export function ellipseFrame(g, cx, cy, rx, ry, c) {
-  cx = R(cx); cy = R(cy);
+  cx = Q(cx); cy = Q(cy);
   g.fillStyle = col(c);
   let prev = -1;
-  const ry2 = Math.max(0.5, ry);
-  for (let dy = -Math.ceil(ry2); dy <= Math.ceil(ry2); dy++) {
+  const ry2 = Math.max(GRID / 2, ry);
+  const iy = Math.max(GRID, QN(ry2) * GRID);
+  for (let dy = -iy; dy <= iy; dy += GRID) {
     const k = 1 - (dy * dy) / (ry2 * ry2);
-    const dx = k < 0 ? -1 : Math.floor(rx * Math.sqrt(k) + 0.4);
+    const dx = k < 0 ? -1 : Q(rx * Math.sqrt(k));
     if (dx < 0) { prev = dx; continue; }
-    if (prev < 0 || Math.abs(dy) === Math.ceil(ry2)) g.fillRect(cx - dx, cy + dy, dx * 2 + 1, 1);
+    if (prev < 0 || Math.abs(dy) === iy) g.fillRect(cx - dx, cy + dy, dx * 2 + GRID, GRID);
     else {
-      const w = Math.max(1, dx - prev + 1);
-      g.fillRect(cx - dx, cy + dy, w, 1);
-      g.fillRect(cx + dx - w + 1, cy + dy, w, 1);
+      const w = Math.max(GRID, dx - prev + GRID);
+      g.fillRect(cx - dx, cy + dy, w, GRID);
+      g.fillRect(cx + dx - w + GRID, cy + dy, w, GRID);
     }
     prev = dx;
   }
@@ -222,9 +273,9 @@ export function dither(g, x, y, w, h, cA, cB, level) {
   if (L >= 16) { rect(g, x, y, w, h, b); return; }
   rect(g, x, y, w, h, a);
   g.fillStyle = b;
-  for (let j = 0; j < h; j++) {
-    for (let i = 0; i < w; i++) {
-      if (BAYER[(y + j) & 3][(x + i) & 3] < L) g.fillRect(x + i, y + j, 1, 1);
+  for (let j = 0; j < h; j += GRID) {
+    for (let i = 0; i < w; i += GRID) {
+      if (BAYER[QN(y + j) & 3][QN(x + i) & 3] < L) g.fillRect(Q(x + i), Q(y + j), GRID, GRID);
     }
   }
 }
@@ -236,14 +287,14 @@ export function vgrad(g, x, y, w, h, keys, bandDither = 3) {
   if (n === 1) { rect(g, x, y, w, h, keys[0]); return; }
   const bh = h / (n - 1);
   for (let i = 0; i < n - 1; i++) {
-    const y0 = R(y + bh * i), y1 = R(y + bh * (i + 1));
-    const seg = Math.max(1, y1 - y0);
-    for (let j = 0; j < seg; j++) {
+    const y0 = Q(y + bh * i), y1 = Q(y + bh * (i + 1));
+    const seg = Math.max(GRID, y1 - y0);
+    for (let j = 0; j < seg; j += GRID) {
       const t = j / seg;
       const lvl = t < 0.5 - 0.5 / bandDither ? 0
         : t > 0.5 + 0.5 / bandDither ? 16
           : Math.round(((t - (0.5 - 0.5 / bandDither)) / (1 / bandDither)) * 16);
-      dither(g, x, y0 + j, w, 1, keys[i], keys[i + 1], lvl);
+      dither(g, x, y0 + j, w, GRID, keys[i], keys[i + 1], lvl);
     }
   }
 }
@@ -251,8 +302,8 @@ export function vgrad(g, x, y, w, h, keys, bandDither = 3) {
 /** Horizontal scanline shimmer used on water and metal. */
 export function scan(g, x, y, w, h, c, step = 2, phase = 0) {
   g.fillStyle = col(c);
-  for (let j = 0; j < h; j++) {
-    if (((y + j + phase) % step) === 0) g.fillRect(R(x), R(y + j), R(w), 1);
+  for (let j = 0; j < h; j += GRID) {
+    if (((QN(y + j) + phase) % step) === 0) g.fillRect(Q(x), Q(y + j), QS(w), GRID);
   }
 }
 
@@ -260,12 +311,12 @@ export function scan(g, x, y, w, h, c, step = 2, phase = 0) {
 export function noiseFill(g, x, y, w, h, cA, cB, density = 0.18, seed = 1) {
   rect(g, x, y, w, h, cA);
   g.fillStyle = col(cB);
-  for (let j = 0; j < h; j++) {
-    for (let i = 0; i < w; i++) {
+  for (let j = 0; j < h; j += GRID) {
+    for (let i = 0; i < w; i += GRID) {
       let n = ((i + 374761393) * 1274126177) ^ ((j + 668265263) * 2246822519) ^ (seed * 3266489917);
       n = Math.imul(n ^ (n >>> 15), 2246822507);
       n = (n ^ (n >>> 13)) >>> 0;
-      if ((n % 1000) / 1000 < density) g.fillRect(R(x + i), R(y + j), 1, 1);
+      if ((n % 1000) / 1000 < density) g.fillRect(Q(x + i), Q(y + j), GRID, GRID);
     }
   }
 }
@@ -404,10 +455,11 @@ export function text(g, str, x, y, c, o = {}) {
   const sc = Math.max(1, Math.round(o.scale || 1));
   const s = fold(str);
   const total = textW(s, o);
-  let ox = R(x);
-  if (o.center) ox = R(x - total / 2);
-  else if (o.right) ox = R(x - total);
-  const oy = R(y);
+  // the string's ORIGIN lands on the macro grid; the glyphs keep their own fine strokes
+  let ox = Q(x);
+  if (o.center) ox = Q(x - total / 2);
+  else if (o.right) ox = Q(x - total);
+  const oy = Q(y);
 
   const drawPass = (dx, dy, color) => {
     g.fillStyle = col(color);
@@ -574,7 +626,7 @@ export function clip(g, x, y, w, h, fn) {
 /** Translucent wash — the one sanctioned use of alpha, for overlays. */
 export function wash(g, x, y, w, h, c, a) {
   g.fillStyle = pAlpha(c, a);
-  g.fillRect(R(x), R(y), R(w), R(h));
+  g.fillRect(Q(x), Q(y), QS(w), QS(h));
 }
 
 /** A crisp offscreen canvas for baking sprites. */
@@ -596,11 +648,11 @@ export function blit(g, src, x, y, scale = 1, flip = false) {
   g.save();
   g.imageSmoothingEnabled = false;
   if (flip) {
-    g.translate(R(x) + w, R(y));
+    g.translate(Q(x) + w, Q(y));
     g.scale(-1, 1);
     g.drawImage(src, 0, 0, w, h);
   } else {
-    g.drawImage(src, R(x), R(y), w, h);
+    g.drawImage(src, Q(x), Q(y), w, h);
   }
   g.restore();
 }

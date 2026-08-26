@@ -149,7 +149,7 @@ export function makeChoiceScene() {
     wash(g, 0, SWELL, W, H - SWELL, 'water0', 0.2);
     rect(g, 0, SWELL, W, 2, 'water3');
     drawBoat(g, 786, H + 4, t, {
-      tiers: v.tiers, damage: 0, scale: 3, speed: 0.2, wake: false,
+      tiers: v.tiers, damage: 0, scale: 2, speed: 0.2, wake: false,
     });
     // on the deck, not beside it: the deck of a 3x boat is twenty-four pixels up
     drawFolk(g, 'golem', 786 - 74, H - 20, t, { scale: 1, mud: 0.4, sparkle: 0.2 });

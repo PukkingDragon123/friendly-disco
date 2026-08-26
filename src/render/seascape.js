@@ -9,7 +9,7 @@
 
 import { P, col, mix, alpha } from '../core/palette.js';
 import {
-  rect, px, line, disc, ring, ellipse, tri, dither, vgrad, text, wash, clamp, lerp,
+  rect, px, line, disc, ring, ellipse, tri, dither, vgrad, text, wash, clamp, lerp, fine,
   makeCanvas, blit,
 } from '../core/pixel.js';
 import { makeRng } from '../core/rng.js';
@@ -726,8 +726,11 @@ export function createSeascape(seed, o = {}) {
         half = makeCanvas(hw, hh);
       }
       if (!half) { drawAt(g, o2); return; }        // no offscreen support: draw direct
-      // the offscreen is its own coordinate space, so the layers are drawn at 0,0
-      drawAt(half.g, {
+      // The offscreen is its own coordinate space, so the layers are drawn at 0,0 -- and
+      // on the FINE grid, because one pixel in here is already two on screen. Without
+      // that the sea's dither came out in four-pixel blocks and the sky read as a
+      // checkerboard rather than as weather.
+      fine(() => drawAt(half.g, {
         x: 0,
         y: 0,
         w: hw,
@@ -737,8 +740,8 @@ export function createSeascape(seed, o = {}) {
         storm: o2.storm,
         parallax: o2.parallax,
         reflect: o2.reflect,
-      });
-      g.drawImage(half.canvas, 0, 0, hw, hh, o2.x, o2.y, hw * 2, hh * 2);
+      }));
+      g.drawImage(half.canvas, 0, 0, hw, hh, Math.round(o2.x / 2) * 2, Math.round(o2.y / 2) * 2, hw * 2, hh * 2);
     },
   };
 

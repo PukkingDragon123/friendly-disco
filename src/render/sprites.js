@@ -877,9 +877,11 @@ export function drawAnimal(g, animal, sx, sy, opts = {}) {
   const head = cachedHead(animal, mood, opts);
   if (!body && !head) return;
 
-  const dx = Math.round(sx - SZ / 2);
+  // EVEN, both of them: the sprite's own pixels are 2x2 blocks, so a blit landing on an
+  // odd row shifts its whole grid half a macro pixel out of step with the scene.
+  const dx = Math.round((sx - SZ / 2) / 2) * 2;
   // the art's ground row is GROUND of AH, so anchor the FEET rather than the box
-  const dy = Math.round(sy - (SZH * (GROUND + 1)) / AH);
+  const dy = Math.round((sy - (SZH * (GROUND + 1)) / AH) / 2) * 2;
 
   const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
@@ -992,6 +994,6 @@ export function drawAnimalIcon(g, animal, sx, sy, opts = {}) {
   if (!c) return;
   const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
-  g.drawImage(c, Math.round(sx - size / 2), Math.round(sy - size / 2));
+  g.drawImage(c, Math.round((sx - size / 2) / 2) * 2, Math.round((sy - size / 2) / 2) * 2);
   g.globalAlpha = prevA;
 }

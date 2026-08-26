@@ -102,7 +102,7 @@ export function makeMenuScene() {
       const a = ANIMAL_BY_ID[id];
       if (!a) return;
       const ax = i === 0 ? cx - w / 2 + 26 : cx + w / 2 - 26;
-      drawAnimal(g, a, ax, y - 6 + Math.round(Math.sin(t * 2 + i * 2) * 2), { scale: 1, flip: i === 1 });
+      drawAnimal(g, a, ax, y + 22 + Math.round(Math.sin(t * 2 + i * 2) * 2), { scale: 1, flip: i === 1 });
     });
   }
 
@@ -153,7 +153,7 @@ export function makeMenuScene() {
       if (!a) return;
       const ax = cx - 104 + i * 26;
       const ay = y - 12 + Math.round(Math.sin(t * 2.2 + i * 0.8) * 1.2) + Math.round(roll * (i - 3.5) * 0.4);
-      drawAnimal(g, a, ax, ay, { scale: 1, flip: i % 2 === 1, blink: ((t * 1.3 + i) % 5) < 0.12 ? 1 : 0 });
+      drawAnimal(g, a, ax, ay + 14, { scale: 0.5, flip: i % 2 === 1, blink: ((t * 1.3 + i) % 5) < 0.12 ? 1 : 0 });
     });
     // waterline foam
     for (let i = 0; i < 3; i++) {

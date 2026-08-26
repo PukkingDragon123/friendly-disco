@@ -480,7 +480,7 @@ export function makeOceanScene() {
       rect(g, ax - 17, ay + 17, 34, 1, 'wood0');
       // a bob, so the deck is a pen full of animals rather than a row of stamps
       const bob = Math.round(Math.sin(t * 1.7 + i * 0.9) * 1);
-      drawAnimal(g, a, ax, ay - 4 + bob, { scale: 1 });
+      drawAnimal(g, a, ax, ay + 13 + bob, { scale: 0.5 });
       UI.icon(g, ab.icon, ax - 4, ay + 9, { color: ab.color });
       if (isLoyal(v, id)) UI.icon(g, 'heart', ax + 8, ay - 17, { color: 'gold' });
     });

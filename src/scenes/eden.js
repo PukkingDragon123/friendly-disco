@@ -289,7 +289,8 @@ export function makeEdenScene() {
     const a = ANIMAL_BY_ID[id];
     if (!a) return;
     const bob = Math.round(Math.sin(t * 1.4 + x * 0.07) * 1);
-    drawAnimal(g, a, x, y - 2 + bob, { scale: 1, mood: 'happy' });
+    // scale 0.5 draws the 32-pixel art at 1:1, and the sprite anchors on its FEET now
+    drawAnimal(g, a, x, y + 13 + bob, { scale: 0.5, mood: 'happy' });
     if (isLoyal(v, id)) UI.icon(g, 'heart', x + 8, y - 16, { color: 'gold' });
     else {
       const n = petsOf(v, id);
@@ -378,7 +379,7 @@ export function makeEdenScene() {
       const ab = abilityOf(a);
       rect(g, bx - 17, by - 17, 34, 34, mix(col(ab.color), P.wood0, 0.62));
       rect(g, bx - 17, by - 17, 34, 1, mix(col(ab.color), P.white, 0.3));
-      drawAnimal(g, a, bx, by - 4, { scale: 1 });
+      drawAnimal(g, a, bx, by + 11, { scale: 0.5 });
       UI.icon(g, ab.icon, bx - 4, by + 8, { color: ab.color });
       if (isLoyal(v, id)) px(g, bx + 14, by - 15, 'gold');
       if (selDeck === i) frame(g, bx - 17, by - 17, 34, 34, 'gold');

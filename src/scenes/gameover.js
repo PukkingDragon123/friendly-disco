@@ -36,8 +36,8 @@ export function makeGameOverScene() {
       if (!a) return;
       const ax = x + 8 + 15 + (i % cols) * 30;
       const ay = y + 40 + 14 + Math.floor(i / cols) * 30;
-      drawAnimal(g, a, ax, ay, {
-        scale: 1,
+      drawAnimal(g, a, ax, ay + 13, {
+        scale: 0.5,
         alpha: o.faded ? 0.5 : 1,
         mood: o.faded ? 'blink' : 'happy',
       });

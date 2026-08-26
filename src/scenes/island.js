@@ -264,7 +264,7 @@ export function makeIslandScene() {
       tileFrame(g, tx(c), ty(r), ab.color);
       const prev = g.globalAlpha;
       g.globalAlpha = 0.72;
-      drawAnimal(g, a, tx(c) + TILE / 2, ty(r) + TILE / 2, { scale: 1 });
+      drawAnimal(g, a, tx(c) + TILE / 2, ty(r) + TILE - 3, { scale: 1 });
       g.globalAlpha = prev;
       text(g, ab.verb, tx(c) + TILE / 2, ty(r) - 12, ab.color, { font: 3, center: true });
     }

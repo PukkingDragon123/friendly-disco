@@ -1,6 +1,7 @@
 // Headless screenshotter.
 //   node tools/shot.mjs <scene> [outfile] [frames] [scale]
 // scene: menu | table | shop | over | draft | eden | sprites | anim | icons | folk
+//        | seq (SEQ=wrath|flood|forge, K=, STRIP=1)
 //        | boat | isles | ocean | ui | sea | font
 //
 // Boots the real scene against the software canvas, ticks it, and writes a PNG. This is
@@ -454,6 +455,51 @@ switch (which) {
       };
     } else {
       scene = { update() {}, draw() { rect(g, 0, 0, SW, SH, 'ink'); drawSummoning(g, K, 1.4, {}); } };
+    }
+    break;
+  }
+  case 'cut': {
+    // The cutscene, with the dialogue board over a set-piece. LINE=n advances to that
+    // line, FRAMES governs how far into the shot we are.
+    const { makeCutscene } = await import('../src/scenes/cutscene.js');
+    const { getScript } = await import('../src/data/story.js');
+    const sc = makeCutscene();
+    sc.enter({ script: getScript(process.env.SCRIPT || 'prologue'), onDone: () => {} }, app);
+    const line = Number(process.env.LINE || 0);
+    for (let i = 0; i < line; i++) {
+      for (let f = 0; f < 40; f++) sc.update(1 / 60);
+      Input.mouse.pressed = true; sc.update(1 / 60); Input.mouse.pressed = false;
+    }
+    scene = sc;
+    break;
+  }
+  case 'seq': {
+    // A set-piece. SEQ=wrath|flood|forge, K=0.4 for one instant, STRIP=1 for a
+    // contact sheet with one frame per shot -- which is how the cuts get judged.
+    const { SEQUENCES, drawSequence } = await import('../src/render/setpieces.js');
+    const { rect, text } = await import('../src/core/pixel.js');
+    const seq = SEQUENCES[process.env.SEQ || 'wrath'];
+    const K = process.env.K !== undefined ? Number(process.env.K) : 0.5;
+    if (process.env.STRIP) {
+      const cols = 2, rows = Math.ceil(seq.shots.length / cols);
+      const cw = Math.floor(SW / cols), ch = Math.floor(SH / rows);
+      scene = {
+        update() {},
+        draw() {
+          rect(g, 0, 0, SW, SH, 'ink');
+          seq.shots.forEach((sh, i) => {
+            const kk = sh.at + ((seq.shots[i + 1] ? seq.shots[i + 1].at : 1) - sh.at) * 0.62;
+            const ox = (i % cols) * cw, oy = Math.floor(i / cols) * ch;
+            g.save(); g.beginPath(); g.rect(ox, oy, cw - 2, ch - 2); g.clip();
+            g.translate(ox - (SW - cw) / 2, oy - (SH - ch) / 2);
+            drawSequence(g, seq, kk, 1.3 + i * 0.7, {});
+            g.restore();
+            text(g, sh.id + ' k=' + kk.toFixed(2), ox + 6, oy + 6, 'gold', { font: 5 });
+          });
+        },
+      };
+    } else {
+      scene = { update() {}, draw() { drawSequence(g, seq, K, 1.4, {}); } };
     }
     break;
   }

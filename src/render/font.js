@@ -185,13 +185,18 @@ const ART5 = {
   '·': '././#',                // ·
   '°': '.#./#.#/.#.',          // °
   '¢': '..#./.###/#.#./#.#./.###/..#.', // ¢
+
+  '\u2014': '././#####',           // em dash
+  '\u2013': '././.###.',           // en dash
+  '\u25b6': '#..../###../#####/###../#....', // right-pointing prompt
+  '\u25c0': '....#/..###/#####/..###/....#',
 };
 
 // Narrow glyphs get an explicit advance so words kern tightly instead of
 // floating in a 5px cell. ↑ / ↓ are declared because their ink is centred.
 const WIDTHS5 = {
   i: 1, l: 2, 1: 3, '.': 1, ',': 2, '!': 1, "'": 1, ':': 1, ';': 2, '|': 1,
-  '↑': 5, '↓': 5,
+  '↑': 5, '↓': 5, '\u2013': 5, '\u25c0': 5,
 };
 
 export const FONT5 = compile(5, 7, 2, WIDTHS5, ART5);
@@ -374,6 +379,14 @@ const ART7 = {
   '▲': '...#.../...#.../..###../..###../.#####./.#####./#######',
   '▼': '#######/.#####./.#####./..###../..###../...#.../...#...',
   '°': '.###.../##.##../##.##../.###.../......./......./.......',
+
+  // Typographic punctuation the game's own copy actually uses. An em dash was rendering
+  // as pixel.js' missing-glyph BLOCK in every line of dialogue that had one, which is
+  // most of them -- a solid black bar in the middle of a sentence.
+  '\u2014': '......./......./......./#######/......./......./.......',
+  '\u2013': '......./......./......./.#####./......./......./.......',
+  '\u25b6': '.##..../.####../.#####./.######/.#####./.####../.##....',
+  '\u25c0': '....##./..####./.#####./######./.#####./..####./....##.',
 };
 
 const WIDTHS7 = {
@@ -382,6 +395,7 @@ const WIDTHS7 = {
   // glyphs drawn with a deliberate left bearing must declare their advance, or
   // pixel.js' right-trim would kern them into their neighbour
   '<': 7, '>': 7, '•': 7, '↑': 7, '↓': 7, '*': 7, '=': 7, '°': 7,
+  '\u2013': 7, '\u25b6': 7, '\u25c0': 7,
 };
 
 export const FONT7 = compile(7, 9, 3, WIDTHS7, ART7);

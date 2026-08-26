@@ -16,8 +16,9 @@ import { Juice, Ease, approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
 import { createParticles } from '../core/particles.js';
 import { createSeascape } from '../render/seascape.js';
-import { drawPortrait, drawCherub } from '../render/portraits.js';
+import { drawPortrait } from '../render/portraits.js';
 import { drawSummoning } from '../render/cinematic.js';
+import { SEQUENCES, drawSequence, nextCut, shotIndex } from '../render/setpieces.js';
 import * as UI from '../render/uikit.js';
 import { SPEAKERS } from '../data/story.js';
 import { summonBeat } from '../render/cinematic.js';
@@ -84,10 +85,19 @@ export function makeCutscene() {
         break;
       case 'raise':
         // the summoning takes over the backdrop and runs on its own clock
-        cine = { t: 0, dur: 5.6, beat: null };
+        cine = { kind: 'summon', t: 0, dur: 5.6, beat: null };
         Audio.sfx('crate_land');
         Juice.shake(3, 0.5);
         break;
+      case 'wrath': case 'flood': case 'forge': {
+        // A SET-PIECE takes the whole backdrop for the rest of the beat, and it cuts
+        // between its own shots. Clicking on through the lines cuts with it.
+        const seq = SEQUENCES[l.fx];
+        cine = { kind: 'seq', seq, t: 0, dur: seq.dur, shot: -1 };
+        Audio.sfx(l.fx === 'forge' ? 'crate_land' : 'boss_sting');
+        Juice.shake(3, 0.4);
+        break;
+      }
       case 'rays':
         for (let i = 0; i < 14; i++) {
           parts.emit('star', 40 + i * 42, 40 + (i % 3) * 26, { count: 1, color: 'gold', life: 1.4 });
@@ -102,6 +112,12 @@ export function makeCutscene() {
     if (!fullyTyped()) { typed = lineText().length; Audio.sfx('click'); return; }
     if (ix >= script.lines.length - 1) { leave(); return; }
     ix++; typed = 0; lineT = 0; shownFx = -1;
+    // A reader who is faster than the camera takes the camera with them: advancing a
+    // line inside a set-piece cuts to that set-piece's next shot.
+    if (cine && cine.kind === 'seq') {
+      const k = Math.min(1, cine.t / cine.dur);
+      cine.t = Math.max(cine.t, nextCut(cine.seq, k) * cine.dur + 0.001);
+    }
     Audio.sfx('deal', { vol: 0.5 });
   }
 
@@ -116,6 +132,18 @@ export function makeCutscene() {
     if (!cine) return;
     cine.t += dt;
     const k = Math.min(1, cine.t / cine.dur);
+    if (cine.kind === 'seq') {
+      const i = shotIndex(cine.seq, k);
+      if (i !== cine.shot) {
+        cine.shot = i;
+        const sh = cine.seq.shots[i];
+        if (sh.shake) Juice.shake(sh.shake, 0.5);
+        Audio.sfx(i === 0 ? 'whoosh' : sh.shake >= 5 ? 'crate_land' : 'shuffle');
+        if (cine.seq.id === 'wrath' && i >= 1) Juice.flash('white', 0.1, 0.5);
+        if (cine.seq.id === 'forge' && i === 3) Juice.flash('orange', 0.3, 0.4);
+      }
+      return;
+    }
     const b = summonBeat(k).id;
     if (b !== cine.beat) {
       cine.beat = b;
@@ -175,7 +203,9 @@ export function makeCutscene() {
     // A cinematic replaces the backdrop entirely -- it brings its own sky, its own
     // ground and its own ark on the skyline, so it composes as one picture rather than
     // sitting on top of a seascape that disagrees with it.
-    if (cine) {
+    if (cine && cine.kind === 'seq') {
+      drawSequence(g, cine.seq, Math.min(1, cine.t / cine.dur), t, {});
+    } else if (cine) {
       drawSummoning(g, Math.min(1, cine.t / cine.dur), t, {});
     } else {
       sea.draw(g, {
@@ -209,8 +239,9 @@ export function makeCutscene() {
     const outK = outT >= 0 ? Ease.inQuad(clamp(outT / 0.42, 0, 1)) : 0;
     const slide = Math.round((1 - inK) * 40 + outK * 40);
 
-    // --- title banner
-    if (script.title) {
+    // --- title banner. A set-piece brings its own caption on the letterbox bar, and two
+    // captions at the top of the same frame is one too many.
+    if (script.title && !cine) {
       const tw = Math.min(W - 40, textW(script.title, { font: 7 }) + 40);
       const ty = 20 - Math.round(outK * 42);
       wash(g, W / 2 - tw / 2, ty - 4, tw, 26, 'ink', 0.68);
@@ -228,46 +259,46 @@ export function makeCutscene() {
       icon: script.boss ? script.boss.icon : null,
     });
 
-    // --- dialogue board. Fixed height so the box does not jump between a one-line and
-    // a three-line beat, but sized to three rows of FONT7 and no more.
-    const bh = 118;
-    const by = H - bh - 22 + slide;
-    UI.panel(g, BOX_X, by, BOX_W, bh, { style: 'wood', shadow: true, rivets: true });
-    // an inner slate so the type has contrast whatever the sky is doing
-    UI.panel(g, BOX_X + 8, by + 18, BOX_W - 16, bh - 34, { style: 'slate', inset: true, corners: false });
+    // --- THE DIALOGUE BOARD.
+    //
+    // Parchment with dark ink on it, and nothing else. The old board was a timber panel
+    // with a slate plate inside it and pale text on the slate, which is three surfaces
+    // and two of them were only there to hold the third. One sheet, one ink, one plaque
+    // with the speaker's name on it.
+    const bh = 132;
+    const by = H - bh - 18 + slide;
+    UI.panel(g, BOX_X, by, BOX_W, bh, { style: 'paper', shadow: true });
 
-    // nameplate straddling the top edge
-    const nw = textW(sp.name, { font: 7 }) + 30;
-    const nx = BOX_X + 20;
-    box(g, nx, by - 8, nw, 23, 'ink', 2);
-    box(g, nx + 1, by - 7, nw - 2, 21, mix(col(sp.color), P.ink, 0.55), 2);
-    rect(g, nx + 2, by - 6, nw - 4, 2, sp.color);
-    text(g, sp.name, nx + nw / 2, by - 3, sp.color, { font: 7, center: true, shadow: 'ink' });
+    // the nameplate, straddling the top edge, in the speaker's own colour
+    const nw = textW(sp.name, { font: 7 }) + 34;
+    const nx = BOX_X + 26;
+    rect(g, nx, by - 13, nw, 26, 'wood0');
+    rect(g, nx + 3, by - 10, nw - 6, 20, mix(col(sp.color), P.ink, 0.62));
+    rect(g, nx + 3, by - 10, nw - 6, 3, sp.color);
+    px(g, nx + 4, by - 9, 'cream'); px(g, nx + nw - 5, by - 9, 'cream');
+    text(g, sp.name, nx + nw / 2, by - 6, sp.color, { font: 7, center: true, shadow: 'ink' });
 
-    // the line, typed out
+    // the line, typed out. Dark ink on parchment: the highest contrast the palette has.
     const shown = lineText().slice(0, Math.floor(typed));
-    const rows = wrap(shown, BOX_W - 46, { font: 7 });
+    const rows = wrap(shown, BOX_W - 64, { font: 7 });
     rows.slice(0, 3).forEach((r, i) => {
-      text(g, r, BOX_X + 22, by + 28 + i * 22, 'bone', { font: 7, scale: 1, shadow: 'ink' });
+      text(g, r, BOX_X + 32, by + 30 + i * 24, 'wood0', { font: 7 });
     });
 
-    // advance prompt, inside the slate where it has contrast
+    // advance prompt
     if (fullyTyped() && outT < 0 && Math.floor(t * 2) % 2 === 0) {
       const label = ix >= script.lines.length - 1 ? 'CONTINUE ▶' : 'NEXT ▶';
-      text(g, label, BOX_X + BOX_W - 24, by + bh - 32, 'brass3', { font: 5, right: true });
+      text(g, label, BOX_X + BOX_W - 34, by + bh - 34, 'wood1', { font: 7, right: true });
     }
-    // progress pips ride the wood strip UNDER the slate, where they are not covered
+    // how far through the beat we are, as ticks along the bottom rail
     for (let i = 0; i < script.lines.length; i++) {
-      const dx = BOX_X + 22 + i * 10;
-      if (dx > BOX_X + BOX_W - 120) break;
-      rect(g, dx, by + bh - 10, 7, 4, i < ix ? sp.color : i === ix ? 'white' : 'wood0');
-      px(g, dx, by + bh - 10, i <= ix ? 'white' : 'wood1');
+      const dx = BOX_X + 32 + i * 12;
+      if (dx > BOX_X + BOX_W - 150) break;
+      rect(g, dx, by + bh - 16, 8, 5, i < ix ? mix(col(sp.color), P.parch, 0.3) : i === ix ? sp.color : 'parch0');
+      rect(g, dx, by + bh - 16, 8, 1, i <= ix ? 'cream' : 'parch1');
     }
-    if (outT < 0) text(g, 'ESC SKIPS', BOX_X + BOX_W - 24, by + bh - 12, 'brass1', { font: 3, right: true });
+    if (outT < 0) text(g, 'ESC SKIPS', BOX_X + BOX_W - 34, by + bh - 16, 'parch0', { font: 3, right: true });
 
-    // cherubs perched on the board corners — the god UI the brief asked for
-    drawCherub(g, BOX_X + BOX_W - 34, by - 12, t, { scale: 2, arms: true });
-    drawCherub(g, BOX_X - 10, by + 40, t + 2.1, { scale: 2 });
 
     parts.draw(g, 'front');
 
@@ -305,6 +336,12 @@ export function makeCutscene() {
     },
     exit() {},
     update, draw,
-    debug() { return { scriptId: script && script.id, ix, lines: script ? script.lines.length : 0, typed: Math.floor(typed), done, outT }; },
+    debug() {
+      return {
+        scriptId: script && script.id, ix, lines: script ? script.lines.length : 0,
+        typed: Math.floor(typed), done, outT,
+        cine: cine ? (cine.kind === 'seq' ? cine.seq.id + ':' + cine.shot : 'summon') : null,
+      };
+    },
   };
 }

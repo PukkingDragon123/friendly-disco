@@ -353,12 +353,37 @@ const FONT7B = Object.assign(Object.create(Object.getPrototypeOf(FONT7)), FONT7,
 
 function pickFont(f) { return f === 3 ? FONT5 : f === 7 ? FONT7B : FONT7; }
 
+/**
+ * FOLD the characters the fonts do not draw.
+ *
+ * pixel.js renders an unknown character as a SOLID BLOCK on purpose -- a missing glyph
+ * should be impossible to miss and get fixed. But a curly apostrophe out of a quoted
+ * line, or a non-breaking space out of a copied string, is not a missing glyph: it is
+ * the same character the font already has, typeset differently. Those fold to their
+ * ASCII twin instead of putting a black bar in the middle of a sentence.
+ *
+ * The em and en dashes are NOT here: they are real glyphs now, because a sentence that
+ * uses one wants the long dash it asked for.
+ */
+const FOLD = {
+  '\u2019': "'", '\u2018': "'", '\u201c': '"', '\u201d': '"',
+  '\u2212': '-', '\u2010': '-', '\u2011': '-',
+  '\u00a0': ' ', '\u2007': ' ', '\u2009': ' ', '\u202f': ' ',
+  '\u00bb': '>', '\u00ab': '<', '\u2022': '\u00b7',
+};
+const FOLD_RE = /[\u2019\u2018\u201c\u201d\u2212\u2010\u2011\u00a0\u2007\u2009\u202f\u00bb\u00ab\u2026]/g;
+export function fold(str) {
+  const s = String(str);
+  if (!FOLD_RE.test(s)) return s;
+  return s.replace(/\u2026/g, '...').replace(FOLD_RE, (c) => FOLD[c] || c);
+}
+
 export function textW(str, o = {}) {
   const font = pickFont(o.font);
   const sp = o.spacing !== undefined ? o.spacing : (font.gap !== undefined ? font.gap : 1);
   const scale = Math.max(1, Math.round(o.scale || 1));
   let w = 0;
-  const s = String(str);
+  const s = fold(str);
   for (let i = 0; i < s.length; i++) w += charW(s[i], font) + (i < s.length - 1 ? sp : 0);
   return w * scale;
 }
@@ -377,7 +402,7 @@ export function text(g, str, x, y, c, o = {}) {
   const font = pickFont(o.font);
   const sp = o.spacing !== undefined ? o.spacing : (font.gap !== undefined ? font.gap : 1);
   const sc = Math.max(1, Math.round(o.scale || 1));
-  const s = String(str);
+  const s = fold(str);
   const total = textW(s, o);
   let ox = R(x);
   if (o.center) ox = R(x - total / 2);
@@ -523,7 +548,7 @@ export function textCacheSize() { return runCache.size; }
 
 /** Greedy word wrap to a pixel width. */
 export function wrap(str, maxW, o = {}) {
-  const words = String(str).split(/\s+/).filter(Boolean);
+  const words = fold(str).split(/\s+/).filter(Boolean);
   const lines = [];
   let cur = '';
   for (const w of words) {

@@ -6,8 +6,8 @@
 
 import { P, col, mix, alpha } from '../core/palette.js';
 import {
-  rect, frame, box, boxFrame, px, line, dashLine, disc, ring, ellipse, tri,
-  dither, vgrad, text, textW, wrap, wash, clip, clamp, lerp, makeCanvas,
+  rect, frame, box, boxFrame, px, line, tri,
+  text, textW, wrap, wash, clip, clamp, makeCanvas,
 } from '../core/pixel.js';
 import { Juice } from '../core/juice.js';
 import { W as SCREEN_W, H as SCREEN_H } from '../core/pixel.js';
@@ -25,94 +25,31 @@ export function hover(r, m) {
 /**
  * Five surfaces, and every one of them is WARM.
  *
- * `slate` used to be built out of shadow/deep/night -- and `night` is the one purple in
- * the palette, so every inset panel in the game had a cold violet cast sitting inside a
- * warm wooden frame. Nothing looks more like a UI mockup dropped on top of pixel art
- * than that. It is now oiled dark timber, which is what an inset panel in a boat is.
+ * Each style is a small ramp plus the two tones the FRAME is built from:
+ *   band -- the solid mid-tone the thick border is made of
+ *   lip  -- the light line where that border meets the fill
+ * Everything else is the surface itself: fill, its lit top, its shadowed bottom, and
+ * the brass (trim/bright) the corner studs are cast in.
  *
- * `paper` is parchment on purpose: `parch` for the sheet, `cream` for the lit top edge,
- * `parch0` for the shadowed bottom. Bone and sand were close, but parchment is the
- * colour the whole cozy palette is built around and the cards are the thing the player
- * reads most.
+ * `paper` is a brown board around parchment on purpose: it is the box the player reads
+ * the most, and dark timber around a pale sheet is the highest contrast the palette can
+ * give a block of text.
  */
 const STYLES = {
-  wood: { fill: 'wood2', top: 'wood4', mid: 'wood3', bot: 'wood1', edge: 'wood0', ink: 'cream', trim: 'brass1', bright: 'brass2' },
-  brass: { fill: 'brass1', top: 'brass3', mid: 'brass2', bot: 'brass0', edge: 'wood0', ink: 'wood0', trim: 'brass3', bright: 'cream' },
-  slate: { fill: 'deep', top: 'shadow', mid: 'wood0', bot: 'ink', edge: 'ink', ink: 'parch1', trim: 'wood2', bright: 'wood3' },
-  paper: { fill: 'parch', top: 'cream', mid: 'parch1', bot: 'parch0', edge: 'wood2', ink: 'wood0', trim: 'wood3', bright: 'cream' },
-  glass: { fill: null, top: 'foam', mid: 'water2', bot: 'water0', edge: 'ice', ink: 'cream', trim: 'foam', bright: 'white' },
+  wood: { fill: 'wood2', top: 'wood4', mid: 'wood3', bot: 'wood1', edge: 'wood0', band: 'wood1', lip: 'wood3', ink: 'cream', trim: 'brass1', bright: 'brass2' },
+  brass: { fill: 'brass1', top: 'brass3', mid: 'brass2', bot: 'brass0', edge: 'wood0', band: 'brass0', lip: 'brass3', ink: 'wood0', trim: 'brass3', bright: 'cream' },
+  slate: { fill: 'deep', top: 'shadow', mid: 'wood0', bot: 'ink', edge: 'ink', band: 'wood0', lip: 'wood2', ink: 'parch1', trim: 'wood2', bright: 'wood3' },
+  paper: { fill: 'parch', top: 'cream', mid: 'wood3', bot: 'parch0', edge: 'wood0', band: 'wood2', lip: 'cream', ink: 'wood0', trim: 'brass2', bright: 'brass3' },
+  glass: { fill: null, top: 'foam', mid: 'water2', bot: 'water0', edge: 'ink', band: 'water0', lip: 'foam', ink: 'cream', trim: 'foam', bright: 'white' },
 };
-
-// Deterministic surface textures. Cheap enough per frame at these sizes, and they are
-// what stops a panel reading as a flat rectangle.
-function hash2(x, y, seed) {
-  let n = Math.imul(x + 374761393, 1274126177) ^ Math.imul(y + 668265263, 2246822519) ^ Math.imul(seed, 3266489917);
-  n = Math.imul(n ^ (n >>> 15), 2246822507);
-  return ((n ^ (n >>> 13)) >>> 0) / 4294967296;
-}
-
-function grain(g, x, y, w, h, s) {
-  for (let j = 0; j < h; j++) {
-    const r = hash2(0, y + j, 7);
-    if (r < 0.22) rect(g, x, y + j, w, 1, s.bot);
-    else if (r > 0.86) rect(g, x, y + j, w, 1, s.mid);
-  }
-  // long streaks along the grain
-  for (let i = 0; i < Math.max(2, (w * h) / 320); i++) {
-    const gx = x + Math.floor(hash2(i, 1, 11) * w);
-    const gy = y + Math.floor(hash2(i, 2, 13) * h);
-    const len = 3 + Math.floor(hash2(i, 3, 17) * 12);
-    rect(g, gx, gy, Math.min(len, x + w - gx), 1, hash2(i, 4, 19) < 0.5 ? s.bot : s.mid);
-  }
-}
-
-function speckle(g, x, y, w, h) {
-  for (let j = 0; j < h; j += 1) {
-    for (let i = 0; i < w; i += 1) {
-      if (hash2(x + i, y + j, 29) < 0.045) px(g, x + i, y + j, 'parch0');
-    }
-  }
-}
-
-function brushed(g, x, y, w, h, s) {
-  for (let j = 0; j < h; j++) if (j % 4 === 1) rect(g, x, y + j, w, 1, s.mid);
-}
-
-/**
- * PLANK SEAMS. A wood panel wants to look built, not textured: a groove every eight or
- * ten rows with a lit lip under it reads as boards, and boards are most of what makes a
- * farming-game frame feel warm rather than generic.
- */
-function planks(g, x, y, w, h, s) {
-  for (let j = 9; j < h - 4; j += 10) {
-    rect(g, x + 2, y + j, w - 4, 1, s.edge);
-    rect(g, x + 2, y + j + 1, w - 4, 1, s.top);
-    // a peg at each end of every board
-    px(g, x + 5, y + j - 3, s.trim);
-    px(g, x + w - 6, y + j - 3, s.trim);
-  }
-}
-
-/**
- * A DECKLE EDGE. Real paper does not end in a straight line, and one irregular pixel
- * along a parchment card is the cheapest possible signal that it is paper.
- */
-function deckle(g, x, y, w, h, s) {
-  for (let i = 3; i < w - 3; i++) {
-    if (hash2(i, 0, 91) > 0.62) { px(g, x + i, y + 2, s.top); px(g, x + i, y + h - 3, s.bot); }
-  }
-  for (let j = 3; j < h - 3; j++) {
-    if (hash2(0, j, 93) > 0.62) { px(g, x + 2, y + j, s.top); px(g, x + w - 3, y + j, s.bot); }
-  }
-}
 
 /* ---------------------------------------------------------------- panel cache
 
-A panel is completely determined by its style, size and flags: the wood grain, the
-brass brushing, the bevels, the corner brackets and the rivets never move. Drawing
-them per frame is what a panel costs, and at 960x540 the five big panels on the deck
-came to roughly twelve thousand canvas calls a frame on their own -- more than
-everything else in the scene put together.
+A panel is completely determined by its style, size and flags: the border band, the
+bevel, the corner studs and the title plate never move. Drawing them per frame is what
+a panel costs, and at 960x540 the five big panels on the deck came to roughly twelve
+thousand canvas calls a frame on their own -- more than everything else in the scene
+put together.
 
 So every distinct panel is BAKED once into its own little canvas and blitted after
 that. The cache key is exactly the set of inputs that change a pixel. A scene has a
@@ -120,7 +57,7 @@ handful of distinct panels, so the cache stays small; the cap is a backstop agai
 caller that animates a panel's width, which would otherwise bake a new one per frame.
 
 PAD leaves room for the two things that draw OUTSIDE the panel rect: the drop shadow
-(2px right and below) and the title plate (3px above).
+(3px right and below) and the title plate (4px above).
 */
 const PANEL_PAD = 6;
 const panelCache = new Map();
@@ -176,91 +113,101 @@ export function panel(g, x, y, w, h, o = {}) {
   return rectOf(x, y, w, h);
 }
 
+/**
+ * A STARDEW BOX.
+ *
+ * The old panel stacked six textures onto one rectangle: speckle, wood grain, plank
+ * seams, a deckle edge, a second carved frame, rivets -- every one of them a single
+ * pixel wide against art drawn at two. Zoomed out that is not texture, it is DIRT, and
+ * the box the player reads the most was the dirtiest thing on the screen.
+ *
+ * What a cozy farming game actually draws is a THICK FLAT BORDER and nothing else:
+ *
+ *   2px  s.edge   the outline. Near-black timber, so the box has a hard silhouette.
+ *   3px  s.band   a solid ring of mid-tone. This is the frame; it is what makes the
+ *                 border read as a carved board rather than as a stroke.
+ *   1px  s.lip    a light line where the band meets the fill, dark on the bottom-right,
+ *                 which is the whole of the bevel.
+ *   fill s.fill   completely flat. Nothing inside it. Ever.
+ *
+ * Four solid corner studs are the only ornament, and they are 3x3 blocks of brass, not
+ * one-pixel brackets: hardware you can see at 1x.
+ */
 function paintPanel(g, x, y, w, h, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
 
   if (o.shadow) {
-    wash(g, x + 2, y + h, w, 2, 'ink', 0.4);
-    wash(g, x + w, y + 2, 2, h - 2, 'ink', 0.3);
+    wash(g, x + 3, y + h, w, 3, 'ink', 0.45);
+    wash(g, x + w, y + 3, 3, h - 3, 'ink', 0.35);
   }
 
-  if (s.fill) {
-    box(g, x, y, w, h, s.fill, 2);
-    // inset plates hold icons and readouts; texture would fight what sits on them
-    if (!o.inset && w > 10 && h > 10) {
-      if (o.style === 'wood' || o.style === undefined) {
-        grain(g, x + 2, y + 2, w - 4, h - 4, s);
-        // only on panels tall enough to have boards. A seam every ten rows through a
-        // forty-six pixel HUD strip runs straight through the text on it.
-        if (h > 64) planks(g, x, y, w, h, s);
-      } else if (o.style === 'paper') {
-        speckle(g, x + 2, y + 2, w - 4, h - 4);
-        deckle(g, x, y, w, h, s);
-      } else if (o.style === 'brass') brushed(g, x + 2, y + 2, w - 4, h - 4, s);
-    }
-  } else {
-    wash(g, x, y, w, h, 'water0', 0.55);
-    dither(g, x + 1, y + 1, w - 2, h - 2, 'rgba(0,0,0,0)', 'water1', 4);
-  }
+  if (s.fill) rect(g, x, y, w, h, s.fill);
+  else wash(g, x, y, w, h, 'water0', 0.6);      // glass: the scene stays visible through it
 
   if (o.inset) {
-    // sunken: dark on top-left, light on bottom-right
-    rect(g, x + 1, y + 1, w - 2, 1, s.bot);
-    rect(g, x + 1, y + 1, 1, h - 2, s.bot);
-    rect(g, x + 1, y + h - 2, w - 2, 1, s.mid);
-    rect(g, x + w - 2, y + 1, 1, h - 3, s.mid);
-  } else {
-    rect(g, x + 1, y + 1, w - 2, 1, s.top);
-    rect(g, x + 1, y + 2, w - 2, 1, s.mid);
-    rect(g, x + 1, y + 1, 1, h - 2, s.mid);
-    rect(g, x + 1, y + h - 2, w - 2, 1, s.bot);
-    rect(g, x + w - 2, y + 2, 1, h - 4, s.bot);
-  }
-  boxFrame(g, x, y, w, h, s.edge, 2);
-  // a second, carved line inset from the first: one frame is a box, two is a FRAME, and
-  // that is most of the difference between a UI rectangle and a cozy wooden board
-  if (o.carve !== false && w > 20 && h > 16) {
-    boxFrame(g, x + 3, y + 3, w - 6, h - 6, s.bot, 1);
-    rect(g, x + 4, y + 4, w - 8, 1, s.top);
+    // A sunken plate. Icons and readouts sit ON these, so they get two tones and stop:
+    // the dark rim, then the surface's own shadow along the top and left.
+    if (w > 8 && h > 8) {
+      rect(g, x + 2, y + 2, w - 4, 2, s.bot);
+      rect(g, x + 2, y + 2, 2, h - 4, s.bot);
+      rect(g, x + 2, y + h - 3, w - 4, 1, s.lip);
+      rect(g, x + w - 3, y + 3, 1, h - 5, s.lip);
+    }
+    boxEdge(g, x, y, w, h, s.edge);
+    if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor, style: o.style, font: o.font });
+    return;
   }
 
-  // brass corner plates: a bracket with a rivet in it, which reads at a glance as
-  // hardware rather than as four stray pixels
-  if (o.corners !== false && w > 16 && h > 12) {
-    for (const [cx, cy, dx, dy] of [
-      [x + 2, y + 2, 1, 1], [x + w - 3, y + 2, -1, 1],
-      [x + 2, y + h - 3, 1, -1], [x + w - 3, y + h - 3, -1, -1],
+  if (w > 18 && h > 16) {
+    frame(g, x + 2, y + 2, w - 4, h - 4, s.band, 3);
+    rect(g, x + 2, y + 2, w - 4, 1, s.mid);                 // lit top of the board itself
+    rect(g, x + 5, y + 5, w - 10, 1, s.lip);                // the bevel, four sides
+    rect(g, x + 5, y + 5, 1, h - 10, s.lip);
+    rect(g, x + 5, y + h - 6, w - 10, 1, s.bot);
+    rect(g, x + w - 6, y + 6, 1, h - 12, s.bot);
+  }
+  boxEdge(g, x, y, w, h, s.edge);
+
+  if (o.corners !== false && w > 34 && h > 26) {
+    for (const [cx, cy] of [
+      [x + 3, y + 3], [x + w - 6, y + 3], [x + 3, y + h - 6], [x + w - 6, y + h - 6],
     ]) {
-      rect(g, Math.min(cx, cx + dx * 5), cy, 5, 1, s.trim);
-      rect(g, cx, Math.min(cy, cy + dy * 5), 1, 5, s.trim);
-      rect(g, Math.min(cx, cx + dx * 3), cy + dy, 3, 1, s.bright);
-      rect(g, cx + dx, Math.min(cy, cy + dy * 3), 1, 3, s.bright);
-      px(g, cx + dx * 2, cy + dy * 2, s.edge);
+      rect(g, cx, cy, 3, 3, s.edge);
+      rect(g, cx, cy, 2, 2, s.trim);
+      px(g, cx, cy, s.bright);
     }
   }
-  if (o.rivets && w > 40) {
-    for (let rx = x + 10; rx < x + w - 8; rx += 18) {
-      px(g, rx, y + 4, s.bright); px(g, rx, y + 5, s.bot);
-      px(g, rx, y + h - 6, s.bright); px(g, rx, y + h - 5, s.bot);
+  if (o.rivets && w > 64 && h > 26) {
+    for (let rx = x + 18; rx < x + w - 18; rx += 24) {
+      rect(g, rx, y + 3, 2, 2, s.trim); px(g, rx, y + 3, s.bright);
+      rect(g, rx, y + h - 5, 2, 2, s.trim); px(g, rx, y + h - 5, s.bright);
     }
   }
-  if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor || s.ink, style: o.style, font: o.font });
+  if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor, style: o.style, font: o.font });
 }
 
 const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'parch1', paper: 'cream', glass: 'foam' };
 
+/**
+ * A PLAQUE bolted to the top rail. Solid dark board, two-pixel outline, one lit line
+ * along its top and a stud at either end.
+ *
+ * The board is always dark whatever the panel is made of: a brass title on a brass panel
+ * is unreadable, and this is the one label the player must never squint at.
+ */
 export function panelTitle(g, x, y, w, label, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
-  const tw = textW(label, { font: o.font || 7 }) + 12;
+  const font = o.font || 7;
+  const tw = textW(label, { font }) + 16;
   const tx = Math.round(x + (w - tw) / 2);
-  // The plate is always dark regardless of panel style — a brass title on a brass
-  // panel is unreadable, and this is the one label the player must never squint at.
-  rect(g, tx, y - 3, tw, 11, 'ink');
-  rect(g, tx + 1, y - 2, tw - 2, 9, 'shadow');
-  rect(g, tx + 1, y - 2, tw - 2, 1, s.trim);
-  px(g, tx + 1, y - 2, s.bright); px(g, tx + tw - 2, y - 2, s.bright);
-  text(g, label, x + w / 2, y, o.color || TITLE_ACCENT[o.style] || 'bone',
-    { center: true, shadow: 'ink', font: o.font || 7 });
+  const ty = y - 4;
+  rect(g, tx, ty, tw, 14, 'wood0');
+  rect(g, tx + 2, ty + 2, tw - 4, 10, 'shadow');
+  rect(g, tx + 2, ty + 2, tw - 4, 1, s.trim);
+  px(g, tx + 3, ty + 4, s.bright); px(g, tx + tw - 4, ty + 4, s.bright);
+  text(g, label, x + w / 2, ty + 4, o.color || TITLE_ACCENT[o.style] || 'cream',
+    { center: true, shadow: 'ink', font });
+  return rectOf(tx, ty, tw, 14);
 }
 
 export function divider(g, x, y, w, o = {}) {

@@ -30,29 +30,28 @@ export const PROLOGUE = {
   id: 'prologue',
   bg: { timeOfDay: 0.5, storm: 0.35 },
   music: 'harbour',
-  title: 'THE ARK IS FINISHED. THE ANIMALS ARE NOT.',
+  title: 'THE WORLD IS BEING TAKEN BACK',
   lines: [
-    L('noah', 'The ark is done. Three decks, a door, and pitch inside and out.', null),
-    L('noah', 'It took me a hundred years. It took the animals four days to ruin it.', 'shake'),
-    L('god', 'What is the trouble.', 'rays'),
-    L('noah', 'They will not GO IN. The ostrich is on the roof. The pigs are under the hull.',
-      null),
-    L('noah', 'Two of everything, and every one of them has an opinion about where it sleeps.', null),
-    L('god', 'Then you need hands that do not get tired and do not get argued with.', 'flash'),
-    L('noah', '(a hundredweight of river clay stands up out of the bank)', 'raise'),
-    L('golem', '(it has no face to speak with. There is a word driven into its brow.)', 'rays'),
-    L('god', 'It is made of the riverbank and it will last exactly as long as the word does.', null),
+    L('god', 'I made it in six days and I have been watching it for a long time.', 'wrath'),
+    L('god', 'I am not going to argue about it. I am going to wash it.', null),
+    L('noah', 'All of it?', null),
+    L('god', 'All of it. The water started an hour ago.', null),
+    L('noah', 'The rivers came up over the road before we had the barley in.', 'flood'),
+    L('noah', 'Then the sea stood up and walked inland and there was no road.', null),
+    L('god', 'Every living thing is on high ground now, and the high ground is shrinking.', null),
+    L('noah', 'I built the boat. Three decks, a door, pitch inside and out.', null),
+    L('noah', 'I am ninety. I cannot go and fetch a bear.', null),
+    L('god', 'Then you need hands that do not get tired. Go down to the river.', 'forge'),
+    L('golem', '(a hundredweight of riverbank stands up. There is a word cut into its brow.)', null),
+    L('god', 'It is made of the bank and it lasts exactly as long as the word does.', null),
     L('noah', 'What is it FOR.', null),
-    L('god', 'Fetching. Everything alive is on high ground now, and the high ground is',
-      null),
-    L('god', 'getting smaller. It will go out and bring them back, one at a time.', 'wave'),
-    L('noah', 'All of them?', null),
-    L('god', 'As many as the boat will hold. That is the whole of the arithmetic.', null),
-    L('noah', 'And the ones it cannot carry?', null),
-    L('golem', '(the light behind its eyes does not change. It waits.)', null),
-    L('god', 'It will have to choose. Give it something to choose WITH.', 'flash'),
-    L('noah', '(he puts an olive-wood crook in its hand. The crook lights at the crook.)', 'rays'),
-    L('god', 'Begin. The water started an hour ago.', 'lightning'),
+    L('god', 'Rescue. Everything out there is cornered, and something has got at them.', null),
+    L('noah', 'Got at them how?', null),
+    L('god', 'You will see it when you land. It was a deer this morning.', 'lightning'),
+    L('god', 'Beat the corruption out of a beast and it comes back to itself.',  'rays'),
+    L('god', 'Then give it an apple, and it will follow you onto that boat.', 'flash'),
+    L('noah', 'And the ones we cannot reach?', null),
+    L('god', 'That is the arithmetic. Go. Take the clay with you.', 'lightning'),
   ],
 };
 
@@ -60,34 +59,22 @@ export const TUTORIAL = {
   id: 'tutorial',
   bg: { timeOfDay: 0.28, storm: 0.12 },
   music: 'deck',
-  title: 'TWO THINGS THE CROOK DOES',
+  title: 'HOW AN ISLAND GOES',
   lines: [
-    L('noah', 'Right. Two things, and then I am going to go and sit down.', null),
-    L('noah', 'One. An animal on the ground is a BALL. Pull the crook back off it and let go.', null),
-    L('golem', '(a sheep rolls the length of the island and comes to rest against the hull)', 'wave'),
-    L('noah', 'It bounces off rock. It bogs in mud. It slides on ice. Learn the ground.', null),
-    L('noah', 'Two. An animal you are ALREADY CARRYING can be put down on what is in the way.', null),
-    L('noah', 'The ox shifts a boulder. The pig digs. The duck holds the channel open.', 'rays'),
-    L('golem', '(it looks at the four on the deck, and then at the briar)', null),
-    L('noah', 'And it STAYS there, mind. You put one down, you had better want the path.', null),
-    L('noah', 'Every flick and every one you put down lets the water in another step.', 'wave'),
-    L('noah', 'So it is never how many you can save. It is what order, and what it costs.', null),
-    L('golem', '(the word on its brow is the only thing it ever says. It goes.)', 'flash'),
+    L('noah', 'Right. Five rows of ground, the sea behind you, and the ark at your back.', null),
+    L('noah', 'The corrupted come along the rows. Every row they finish is a row we lose.', null),
+    L('golem', '(it opens its hands. Wet clay, and not very much of it.)', null),
+    L('noah', 'CLAY is what you spend. It drips in on its own, and a WELL makes more.',  'rays'),
+    L('noah', 'Put the cheap ones down first. You cannot fight on an empty bank.', null),
+    L('noah', 'A REED floats. Water rows need one before anything else will stand there.', 'wave'),
+    L('noah', 'Knock a beast down and it stops being corrupted. It lies there, stunned.', 'shake'),
+    L('noah', 'Then THROW AN APPLE at it. That is the rescue. That is the whole game.', 'flash'),
+    L('noah', 'A tamed beast is yours: blessed clay, and it will stand a row for you after.', 'rays'),
+    L('noah', 'Trees on the field carry apples. Shake them when they are ripe.', null),
+    L('golem', '(it looks at the rows, and then at the two apples in its hand)', null),
+    L('noah', 'Every row has one guard plank. After that they are chewing on the ark.', null),
+    L('noah', 'So it is never how many you can save. It is which ones, and in what order.', null),
   ],
-};
-
-export const ANTE_LINES = {
-  1: [L('god', 'The first rain. For now, it is only rain.', 'rain')],
-  2: [L('god', 'The rivers have turned around and begun climbing their own banks.', 'wave')],
-  3: [L('god', 'The low countries are under. Do not go looking for them.', 'rain'),
-    L('noah', 'There were people in the low countries.', null),
-    L('god', 'Keep shoving.', 'lightning')],
-  4: [L('god', 'Half the world is water. The other half is arguing about whose fault it is.', null)],
-  5: [L('god', 'The mountains are islands now. The islands are a rumour.', 'wave')],
-  6: [L('noah', 'There is nothing on the horizon in any direction.', 'rain'),
-    L('god', 'There is the deck. There is what you saved. That was always the whole list.', 'rays')],
-  7: [L('god', 'Forty days was the promise. This is the thirty-ninth.', 'lightning')],
-  8: [L('god', 'One more. Then I will let the sun back in and we will never speak of it.', 'rays')],
 };
 
 export const EPILOGUE_WIN = {
@@ -96,10 +83,10 @@ export const EPILOGUE_WIN = {
   music: 'victory',
   title: 'LANDFALL',
   lines: [
-    L('dove', '(returns, and drops an olive sprig on the felt)', 'rays'),
+    L('dove', '(returns, and drops an olive sprig on the deck)', 'rays'),
     L('noah', 'Land.', null),
     L('god', 'Land. Open the door and let them off.', 'flash'),
-    L('noah', 'Every one of them in a berth it could live in. Every single one.', null),
+    L('noah', 'Every one of them out of the mud and onto the grass. Every single one.', null),
     L('golem', '(it sets down the last animal. Then it stands where it was put.)', null),
     L('noah', 'You can stop now. Nobody is going to argue with you again.', null),
     L('god', 'Keep the word. It has earned the word.', 'rays'),
@@ -114,40 +101,11 @@ export const EPILOGUE_LOSE = {
   music: 'gameover',
   title: 'THE WATER TAKES THE DECK',
   lines: [
-    L('god', 'The water has the deck.', 'wave'),
-    L('noah', 'It needed one more shove.', null),
+    L('god', 'The water has the deck.', 'flood'),
+    L('noah', 'It needed one more apple.', null),
     L('golem', '(the light behind its eyes goes out. The word is only scratches now.)', 'shake'),
     L('god', 'Everyone needs one more. Dig up the bank; I have nothing but time.', 'rain'),
   ],
-};
-
-/* --------------------------------------------------------- boss disasters */
-
-// Keyed by boss id. The disaster itself speaks, in its own register.
-export const BOSS_LINES = {
-  deluge: [L('disaster', 'I AM THE FORTY DAYS. I DO NOT NEGOTIATE, I ONLY ARRIVE.', 'wave'),
-    L('god', 'It rises twice as fast while this one is on the water. Be quick.', null)],
-  fimbulwinter: [L('disaster', 'THREE WINTERS AND NO SUMMER BETWEEN THEM.', 'flash'),
-    L('noah', 'The deck has frozen. Nothing you push is going to stop rolling.', null)],
-  plagues: [L('disaster', 'LOCUSTS. FROGS. BOILS. I HAVE BROUGHT A LIST.', 'rain'),
-    L('god', 'Everything you count will count for less. Count more of it.', null)],
-  poseidon: [L('disaster', 'THE SEA IS MINE AND I AM TILTING IT.', 'wave')],
-  leviathan: [L('disaster', 'ONE OF THE CREATURES ON YOUR DECK IS NOT A CREATURE.', 'lightning'),
-    L('noah', 'Which one?', null),
-    L('disaster', 'YES.', null)],
-  fenrir: [L('disaster', 'I ATE THE SUN. A SHOT IS NOTHING.', 'lightning')],
-  typhon: [L('disaster', 'A HUNDRED HEADS, AND EVERY ONE OF THEM IS LEANING ON YOUR GATES.', 'shake')],
-  jormungandr: [L('disaster', 'I CIRCLE THE WORLD. WATCH THE GATES GO ROUND WITH ME.', 'wave')],
-  duat: [L('disaster', 'STEP INTO THE DARK AND TELL ME WHICH DOOR IS WHICH.', 'flash')],
-  tiamat: [L('disaster', 'I AM THE SALT MOTHER. I HALVE WHAT YOU MULTIPLY.', 'shake')],
-  vritra: [L('disaster', 'I HAVE SWALLOWED THE RIVERS. DRINK FROM MY COILS.', 'rain')],
-  amaterasu: [L('disaster', 'SHE HAS GONE INTO THE CAVE AND TAKEN THE LIGHT WITH HER.', 'flash')],
-  charybdis: [L('disaster', 'DOWN. EVERYTHING GOES DOWN, AND IT GOES DOWN HERE.', 'wave')],
-  maat: [L('disaster', 'YOUR SHOT WILL BE WEIGHED AGAINST A FEATHER.', 'rays'),
-    L('god', 'A weak shot costs you a shot. Do not be light.', null)],
-  eden: [L('disaster', 'THREE GATES ARE SHUT AND THE FLAMING SWORD IS AT EACH.', 'flash')],
-  ragnarok: [L('disaster', 'THIS IS THE LAST ONE. I HAVE BROUGHT EVERYTHING.', 'lightning'),
-    L('god', 'So have you. Go on.', 'rays')],
 };
 
 /* ---------------------------------------------------------- the chapters
@@ -159,18 +117,18 @@ opener the player skips, and then the one that matters gets skipped too.
 export const CHAPTER_LINES = {
   2: [
     L('noah', 'The low islands are gone. Not flooded. GONE.', 'wave'),
-    L('golem', '(it looks at the deck, and then at the beds it has not filled)', null),
-    L('noah', 'Whatever you were saving room for, this is it.', null),
+    L('golem', '(it looks at the deck, and then at the pens still standing empty)', null),
+    L('noah', 'Whatever you were leaving room for, this is it.', null),
   ],
   3: [
-    L('noah', 'Forty days, they said. Nobody said forty days of THIS.', 'shake'),
-    L('god', 'The mountains are next.', 'rays'),
-    L('noah', 'Then we go where the mountains are, and we go quickly.', null),
+    L('noah', 'The corruption is thicker out here. They come four rows at a time now.', 'shake'),
+    L('god', 'The mountains are next, and there are big things living on mountains.', 'rays'),
+    L('noah', 'Then we go where the mountains are, and we take every apple we have.', null),
   ],
   4: [
-    L('disaster', 'THERE IS NOWHERE LEFT ABOVE THE WATER.', 'lightning'),
-    L('god', 'There is one place. Get to it.', 'rays'),
-    L('golem', '(it has been carrying them for a hundred and fifty days. It does not stop.)', null),
+    L('god', 'There is nowhere left above the water but one ridge.', 'lightning'),
+    L('noah', 'Everything alive is standing on it. So is everything that got at them.', null),
+    L('golem', '(a hundred and fifty days of carrying. It does not put anything down.)', null),
   ],
 };
 
@@ -205,40 +163,3 @@ export function getScript(id) {
   return null;
 }
 
-/** The short beat that opens an ante. */
-export function anteScript(ante) {
-  const lines = ANTE_LINES[Math.max(1, Math.min(8, ante | 0))];
-  if (!lines || !lines.length) return null;
-  const storm = Math.min(0.9, 0.08 + ante * 0.1);
-  return {
-    id: 'ante' + ante,
-    bg: { timeOfDay: ante >= 7 ? 0.72 : ante >= 4 ? 0.5 : 0.28, storm },
-    music: ante >= 6 ? 'deck_tense' : 'deck',
-    title: 'DAY ' + (ante * 5),
-    lines,
-  };
-}
-
-/** The disaster's entrance. `boss` is the record from data/blinds.js. */
-export function bossScript(boss) {
-  if (!boss) return null;
-  const lines = BOSS_LINES[boss.id]
-    || [{ who: 'disaster', text: (boss.disaster || boss.desc || 'I HAVE COME FOR THE DECK.').toUpperCase(), fx: 'lightning' }];
-  return {
-    id: 'boss_' + boss.id,
-    bg: { timeOfDay: 0.72, storm: 0.85 },
-    music: 'boss',
-    title: String(boss.name).toUpperCase(),
-    boss,
-    lines,
-  };
-}
-
-/** Contextual coaching, shown once each. The scene decides when to ask. */
-export const HINTS = {
-  first_wrong: 'That gate was not its home. Wrong gates keep a quarter of the chips.',
-  first_eat: 'It ate the other one. Predators feed on prey already in the gate.',
-  flood_high: 'The water is at the rail. One more shot and the deck is gone.',
-  first_combo: 'Two in one shot. Every extra animal compounds the multiplier.',
-  last_shot: 'Last shot. Make it count or the water finishes the job.',
-};

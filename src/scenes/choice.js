@@ -72,20 +72,29 @@ export function makeChoiceScene() {
 
     const k = Ease.outCubic(clamp(intro, 0, 1));
 
-    // the situation, on a sheet of parchment
-    const pw = 620, ph = 96;
+    // THE SITUATION, and only as much of it as there is.
+    //
+    // It used to be a fixed 620x96 sheet with a title, three lines under it and a portrait
+    // plate beside it, drawn whether or not the encounter had a speaker or anything to
+    // say -- so an encounter that is just a thing you found on the shore arrived with an
+    // empty parchment and a stranger staring out of a frame at you. The sheet is now the
+    // size of its own contents, and the portrait only turns up when somebody is actually
+    // talking to you.
+    const lines = (enc.lines || []).filter(Boolean).slice(0, 3);
+    const pw = 620, ph = 44 + lines.length * 18;
     const pxx = Math.round((W - pw) / 2), pyy = Math.round(28 + (1 - k) * -20);
     UI.panel(g, pxx, pyy, pw, ph, { style: 'paper', shadow: true });
-    text(g, enc.title, pxx + pw / 2, pyy + 10, 'wood0', { font: 7, center: true, scale: 2 });
-    (enc.lines || []).slice(0, 3).forEach((l, i) => {
+    text(g, enc.title, pxx + pw / 2, pyy + 12, 'wood0', { font: 7, center: true, scale: 2 });
+    lines.forEach((l, i) => {
       wrap(l, pw - 32, { font: 5 }).slice(0, 1).forEach((row) => {
-        text(g, row, pxx + pw / 2, pyy + 44 + i * 16, 'wood1', { font: 5, center: true });
+        text(g, row, pxx + pw / 2, pyy + 42 + i * 18, 'wood1', { font: 5, center: true });
       });
     });
 
-    // whoever is telling you about it
+    // whoever is telling you about it -- IF anybody is
     const who = FOLK_FOR[enc.who] || enc.who;
-    if (FOLK_IDS.indexOf(who) >= 0) {
+    const spoken = !!enc.who && FOLK_IDS.indexOf(who) >= 0 && lines.length > 0;
+    if (spoken) {
       drawFolkPortrait(g, who, 20, 150, 150, 196, t, {});
       text(g, String(enc.who).toUpperCase(), 95, 352, 'parch1', { font: 5, center: true });
     }

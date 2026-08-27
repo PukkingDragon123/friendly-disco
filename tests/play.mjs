@@ -110,6 +110,8 @@ function dbg() {
 /** Which scene are we in? Read off the debug shape, which every scene provides. */
 function where() {
   const d = dbg();
+  if (d.film) return 'film';
+  if (d.basement) return 'basement';
   if (d.scriptId !== undefined) return 'cutscene';
   if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
   if (d.heaven) return 'heaven';
@@ -359,6 +361,67 @@ function playChoice() {
  * THE CAUSEWAY. Walk east with the keyboard, reading whatever the golem stops to look at,
  * until a dying man interrupts; click through him; then walk on to the boat.
  */
+/**
+ * A FILM REEL. Click through the cuts until it hands over. There is nothing to get wrong
+ * in here, so the only thing the rig checks is that it ENDS: an auto-advancing scene that
+ * never finishes is the one failure mode a film can have.
+ */
+function playFilm() {
+  paint();
+  snap('film');
+  const start = dbg();
+  if (!start.reels || !start.reels.length) errors.push('film: no reels to play');
+  let guard = 0;
+  while (where() === 'film' && guard++ < 300) {
+    clickAt(480, 270);
+    tick(6);
+  }
+  if (where() === 'film') errors.push('film: it never ended');
+  return true;
+}
+
+/**
+ * THE CELLAR: eleven clicks to build the golem, then take the apple and throw it, then
+ * click through what he says. Everything the prologue teaches is taught in here, so the
+ * rig plays it the way a player does rather than calling skip().
+ */
+function playBasement() {
+  paint();
+  snap('cellar');
+  let guard = 0;
+  let built = false, took = false, threw = false;
+  while (where() === 'basement' && guard++ < 400) {
+    const d = dbg();
+    if (d.phase === 'build') {
+      const tg = (d.targets() || []).find((x) => !x.hit);
+      if (tg) {
+        d.click(tg.x, tg.y);
+        tick(2);
+        continue;
+      }
+    }
+    if (d.phase === 'wake' && !built) {
+      const b = d.built;
+      built = true;
+      if (b.clay < 5 || b.ribs < 3 || b.word < 3) {
+        errors.push(`cellar: it woke up half-built (${JSON.stringify(b)})`);
+      }
+    }
+    if (d.phase === 'apple') {
+      if (!d.holding) { d.click(d.apple.x, d.apple.y); took = true; }
+      else if (!threw) { const l = d.lion(); d.click(l.x, l.y); threw = true; }
+      tick(6);
+      continue;
+    }
+    d.next();
+    tick(6);
+  }
+  if (!took) errors.push('cellar: never got to take the apple');
+  if (!threw) errors.push('cellar: never got to throw it');
+  if (where() === 'basement') errors.push('cellar: it never ended');
+  return true;
+}
+
 function playWalk() {
   paint();
   snap('walk');
@@ -530,7 +593,9 @@ function playVoyage(seed) {
   router.menu();
   tick(4);
 
-  const seen = { cutscene: 0, walk: 0, heaven: 0, ocean: 0, island: 0, eden: 0, choice: 0 };
+  const seen = {
+    film: 0, cellar: 0, cutscene: 0, walk: 0, heaven: 0, ocean: 0, island: 0, eden: 0, choice: 0,
+  };
   // click NEW RUN to prove the button works, then start OUR seed on purpose: the menu's
   // own seed is derived from a fixed string, so every voyage the bot played by clicking
   // through the title screen was the same voyage.
@@ -543,6 +608,8 @@ function playVoyage(seed) {
   while (guard++ < 90) {
     const w = where();
     if (process.env.TRACE) console.log('   step', guard, w, Object.keys(dbg()).join(','));
+    if (w === 'film') { seen.film = (seen.film || 0) + 1; playFilm(); continue; }
+    if (w === 'basement') { seen.cellar = (seen.cellar || 0) + 1; playBasement(); continue; }
     if (w === 'cutscene') { seen.cutscene++; playCutscene(); continue; }
     if (w === 'walk') { seen.walk = (seen.walk || 0) + 1; playWalk(); continue; }
     if (w === 'heaven') { seen.heaven = (seen.heaven || 0) + 1; playHeaven(); continue; }
@@ -578,7 +645,8 @@ for (let i = 0; i < SEEDS; i++) {
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
     + `  paths ${s.obstaclesCleared}`
     + `  [clay ${grabbedTotal} called ${calledTotal} boss ${bossTotal ? 'met' : '-'}]`
-    + `  [walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
+    + `  [film ${out.seen.film} cellar ${out.seen.cellar}`
+    + ` walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
     + ` island ${out.seen.island} eden ${out.seen.eden}`
     + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;
   if (errors.length) {

@@ -165,9 +165,14 @@ export function tri(g, x0, y0, x1, y1, x2, y2, c) {
   const pts = [[x0, y0], [x1, y1], [x2, y2]].sort((a, b) => a[1] - b[1]);
   const [[ax, ay], [bx, by], [cx, cy]] = pts;
   g.fillStyle = col(c);
+  // CLAMPED, both of them. An edge that is horizontal (or one the grid has SNAPPED into
+  // being horizontal, which is how this turned up: a roof sixteen pixels tall lands on one
+  // row when the grid is four) divides by nearly zero, the interpolation runs off to
+  // infinity, and the scanline is drawn from one side of the screen to the other. Every
+  // pitched roof in the game was firing a brown laser across the frame.
   const span = (y, p0, p1, p2, p3) => {
-    const t0 = (y - p0[1]) / Math.max(1e-6, p1[1] - p0[1]);
-    const t1 = (y - p2[1]) / Math.max(1e-6, p3[1] - p2[1]);
+    const t0 = clamp((y - p0[1]) / (Math.abs(p1[1] - p0[1]) < 1e-6 ? 1e-6 : p1[1] - p0[1]), 0, 1);
+    const t1 = clamp((y - p2[1]) / (Math.abs(p3[1] - p2[1]) < 1e-6 ? 1e-6 : p3[1] - p2[1]), 0, 1);
     const xa = p0[0] + (p1[0] - p0[0]) * t0;
     const xb = p2[0] + (p3[0] - p2[0]) * t1;
     const l = Q(Math.min(xa, xb)), r = Q(Math.max(xa, xb));

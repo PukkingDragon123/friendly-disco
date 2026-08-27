@@ -1280,6 +1280,18 @@ export const FORGE = {
 
 export const SEQUENCES = { wrath: WRATH, flood: FLOOD, forge: FORGE };
 
+/**
+ * THE SHARED KIT, for the reels that live in their own file.
+ *
+ * These are the parts every set-piece is built out of, and there are now more set-pieces
+ * than fit in one file without it becoming a phone book. Exported as one object rather
+ * than fifteen named exports so the next reel can pull the whole kit in one line.
+ */
+export const FX = {
+  h, vBand, ridge, village, rays, fissure, lens, lensRows, rain, waterRows, rippleRing,
+  cloudLid, taper, drawArkSmall, drawTower, drawMark,
+};
+
 const BAR = 38;              // letterbox bar height
 
 export function shotIndex(seq, k) {

@@ -66,6 +66,8 @@ async function drawTime(page) {
 async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
+    if (d.film) return 'film';
+    if (d.basement) return 'cellar';
     if (d.scriptId !== undefined) return 'cutscene';
     if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
     if (d.heaven) return 'heaven';
@@ -84,12 +86,23 @@ async function sceneKind(page) {
  * set-pieces, then the causeway -- which is the one scene that needs a HELD key rather
  * than a keypress, so it gets walked with a real one.
  */
-async function skipDialogue(page, tries = 80) {
+async function skipDialogue(page, tries = 120) {
   for (let i = 0; i < tries; i++) {
     const kind = await sceneKind(page);
     if (kind === 'ocean') return true;
     if (kind === 'walk') {
       await walkCauseway(page);
+      continue;
+    }
+    // THE FILM: Escape leaves a reel, but it fades out over half a second, so give it one.
+    if (kind === 'film') {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(600);
+      continue;
+    }
+    // THE CELLAR is played, not skipped: it is the one place the game teaches the apple.
+    if (kind === 'cellar') {
+      await playCellar(page);
       continue;
     }
     if (kind === 'heaven') {
@@ -107,6 +120,54 @@ async function skipDialogue(page, tries = 80) {
     }
   }
   return false;
+}
+
+/**
+ * THE CELLAR, with a real mouse: eleven clicks to build the golem, one to take the apple,
+ * one to throw it, and then click through what he says. This is the only place in the game
+ * where the two verbs are taught, so the browser test plays it rather than skipping it.
+ */
+async function playCellar(page) {
+  await page.screenshot({ path: `${OUT}-2b-cellar.png` });
+  const scale = await page.evaluate(() => window.__ARK.app.scale);
+  const box = await page.evaluate(() => {
+    const r = document.getElementById('game').getBoundingClientRect();
+    return { left: r.left, top: r.top };
+  });
+  const clickGame = async (x, y) => {
+    await page.mouse.click(box.left + x * scale, box.top + y * scale);
+    await page.waitForTimeout(90);
+  };
+  for (let i = 0; i < 140; i++) {
+    const st = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug();
+      if (!d.basement) return null;
+      return {
+        phase: d.phase, holding: d.holding, tamed: d.tamed,
+        next: (d.targets() || []).find((x) => !x.hit) || null,
+        apple: d.apple, lion: d.lion(),
+      };
+    });
+    if (!st) break;
+    if (st.phase === 'build' && st.next) { await clickGame(st.next.x, st.next.y); continue; }
+    if (st.phase === 'apple') {
+      if (!st.holding) await clickGame(st.apple.x, st.apple.y);
+      else if (!st.tamed) await clickGame(st.lion.x, st.lion.y);
+      else await clickGame(480, 500);
+      continue;
+    }
+    await clickGame(480, 500);
+  }
+  const out = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return d.basement ? { phase: d.phase, built: d.built, tamed: d.tamed } : null;
+  });
+  if (out) {
+    console.log('cellar:', JSON.stringify(out));
+    errors.push(`the cellar did not finish (stuck in ${out.phase})`);
+  } else {
+    console.log('cellar: played through');
+  }
 }
 
 /** Walk the causeway with a held key, click the dying man out, and board the ark. */

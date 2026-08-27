@@ -1,7 +1,7 @@
 // Headless screenshotter.
 //   node tools/shot.mjs <scene> [outfile] [frames] [scale]
 // scene: menu | table | shop | over | draft | eden | sprites | anim | icons | folk
-//        | seq (SEQ=wrath|flood|forge, K=, STRIP=1)
+//        | seq (SEQ=wrath|flood|forge|rivers|chaos|passing|setsail, K=, STRIP=1)
 //        | boat | isles | ocean | ui | sea | font
 //
 // Boots the real scene against the software canvas, ticks it, and writes a PNG. This is
@@ -529,12 +529,49 @@ switch (which) {
     scene = sc;
     break;
   }
+  case 'cellar': {
+    // The basement, at a phase. PHASE=intro|build|wake|lion|apple|tame|last|soul
+    const V = await import('../src/game/voyage.js');
+    const { makeBasementScene } = await import('../src/scenes/basement.js');
+    scene = makeBasementScene();
+    scene.enter({ voyage: V.newVoyage(seed), onDone: () => {} }, app);
+    const d = scene.debug();
+    const want = process.env.PHASE || 'build';
+    // click through to the phase asked for, the way a player would
+    const guard = 400;
+    for (let i = 0; i < guard && d.phase !== want; i++) {
+      if (d.phase === 'build') {
+        const tg = d.targets().find((x) => !x.hit);
+        if (tg) d.click(tg.x, tg.y);
+        else d.next();
+      } else if (d.phase === 'apple') {
+        if (!d.holding) d.click(d.apple.x, d.apple.y);
+        else d.click(d.lion().x, d.lion().y);
+      } else d.next();
+      scene.update(1 / 60, app, 1 / 60);
+      if (d.phase === 'lion') for (let k = 0; k < 60 * 7; k++) scene.update(1 / 60, app, 1 / 60);
+    }
+    for (let i = 0; i < 60 * Number(process.env.SECS || 1); i++) scene.update(1 / 60, app, 1 / 60);
+    mouse(Number(process.env.MX || 560), Number(process.env.MY || 300));
+    break;
+  }
+  case 'film': {
+    // The prologue as it actually plays. FILM=rivers,wrath,chaos and SECS= to sit inside it.
+    const { makeFilmScene } = await import('../src/scenes/film.js');
+    scene = makeFilmScene();
+    scene.enter({ reels: (process.env.FILM || 'rivers,wrath,chaos').split(',') }, app);
+    for (let i = 0; i < 60 * Number(process.env.SECS || 3); i++) scene.update(1 / 60, app, 1 / 60);
+    break;
+  }
   case 'seq': {
     // A set-piece. SEQ=wrath|flood|forge, K=0.4 for one instant, STRIP=1 for a
     // contact sheet with one frame per shot -- which is how the cuts get judged.
     const { SEQUENCES, drawSequence } = await import('../src/render/setpieces.js');
+    const { REELS } = await import('../src/render/reels.js');
     const { rect, text } = await import('../src/core/pixel.js');
-    const seq = SEQUENCES[process.env.SEQ || 'wrath'];
+    const ALL = Object.assign({}, SEQUENCES, REELS);
+    const seq = ALL[process.env.SEQ || 'wrath'];
+    if (!seq) { console.error('no such reel:', process.env.SEQ, '-- have', Object.keys(ALL).join(' ')); process.exit(1); }
     const K = process.env.K !== undefined ? Number(process.env.K) : 0.5;
     if (process.env.STRIP) {
       const cols = 2, rows = Math.ceil(seq.shots.length / cols);

@@ -1,20 +1,25 @@
-// THE FIRST HOUR: a walk through what is left, and a man dying at the end of it.
+// THE WALK OUT: the ruins of the street he lived on, and a dead man showing you the way.
 //
-// This is the only scene in the game you can WALK in, and that is the point. The flood
-// happens to you in a set-piece -- a hand comes through the cloud, a wave stands up, a
-// word is cut into your brow -- and then the camera lets go and you are standing in a
-// drowned street with nothing to do but go and look. Everything the game is about is
-// established by walking: the water is winning, there were people here, somebody has
-// been shooting at somebody, and one old man is still alive at the end of the road.
+// This is the only scene in the game you can WALK in, and that is the point. Everything
+// before it happens TO you -- a reel of the poisoned river, a hand through the cloud, a
+// lion in the cellar -- and then the camera lets go and you are standing in a drowned
+// street with nothing to do but go and look. Walking establishes the whole game: the water
+// is winning, there were people here, the animals that turned have been through it, and
+// the boat is at the far end.
 //
-// He gives you the ark and the arithmetic, and then he dies, and the whole run after
-// this is an errand for a dead man. That framing is cheap to build and it is what turns
-// a tower-defence island into a thing you care about losing.
+// AND HE IS STILL WITH YOU. He died in the cellar; what walks the causeway with you is a
+// pale shape a little way ahead that stops when you stop and waits at the gangway. That is
+// the promise the rest of the run is made of -- you can go and tell him -- and it costs a
+// translucent sprite and eight motes.
 //
-// HOW IT IS BUILT. Two long strips are baked once -- the drowned skyline and the
-// causeway you walk on -- and blitted at their own parallax. Everything else is live:
-// rain, the water line, the raiders on the far roof, the plants in the wind, Noah, and
-// the board his last words are printed on. One scroll, two blits, no tiles.
+// NO DIALOGUE BOARD IN HERE EITHER. What he says arrives as captions on a bar at the foot
+// of the frame, the way the film reels do it, so the walk out and the reels either side of
+// it are one continuous piece of storytelling rather than a game with cutscenes in it.
+//
+// HOW IT IS BUILT. Two long strips are baked once -- the drowned skyline and the causeway
+// you walk on -- and blitted at their own parallax. Everything else is live: rain, the
+// water line, the corrupted on the far roofs, the plants in the wind, the soul, and the
+// captions. One scroll, two blits, no tiles.
 
 import { P, col, mix } from '../core/palette.js';
 import {
@@ -46,28 +51,26 @@ function h(n) { const v = Math.sin(n * 78.233 + 12.9898) * 43758.5453; return v 
  */
 const SIGHTS = [
   { x: 270, kind: 'door', line: 'A front door, floating. Still locked.' },
-  { x: 540, kind: 'cart', line: 'A cart. The wheel is still turning and the traces are empty.' },
+  { x: 540, kind: 'cart', line: 'A cart, and the traces cut. Whatever was in them let itself out.' },
   { x: 810, kind: 'shoe', line: 'A shoe, this big. No child.' },
-  { x: 1080, kind: 'arrows', line: 'Arrows in a wall, six of them, at the height of a chest.' },
+  { x: 1080, kind: 'arrows', line: 'Claw marks in a wall, at the height of a chest.' },
   { x: 1350, kind: 'post', line: 'A rope, a post, and a dog that could not reach the roof.' },
-  { x: 1620, kind: 'shrine', line: 'A shrine with the offering still on it. Nobody came back for it.' },
+  { x: 1620, kind: 'shrine', line: 'A shrine, and the offering still on it. Nobody came back for it.' },
   { x: 1900, kind: 'house', line: 'The water is at the upstairs windows, and it is still coming.' },
-  { x: 2120, kind: 'wreck', line: "Somebody's boat, stove in on the stones. They tried." },
+  { x: 2120, kind: 'wreck', line: 'A pipe, running into the water. It is why any of this happened.' },
 ];
 
+// WHAT HE SAYS AT THE GANGWAY, as captions. Short, because they are read on a bar and not
+// in a box -- and because he has already said the important part in the cellar.
 const LINES = [
-  { who: null, text: '(he is propped against the wall with three arrows in him. He is smiling.)' },
-  { who: 'NOAH', text: 'There. I knew something would come. I had hoped for a son.' },
-  { who: 'NOAH', text: 'Men came for the boat. They shot me from the water and rowed off.' },
-  { who: 'NOAH', text: 'They could not work her rudder. That is the only funny part.' },
-  { who: 'NOAH', text: 'A hundred years I built her. Three decks, a door, pitch inside and out.' },
-  { who: 'NOAH', text: 'Every living thing was to go on her. That was the whole arrangement.' },
-  { who: 'NOAH', text: 'I cannot stand up. You do not get tired. You see the arithmetic.' },
-  { who: null, text: '(the word cut into its brow is the only thing it ever says)' },
-  { who: 'NOAH', text: 'Then take her. Take the dream with her: two of everything, nothing left.' },
-  { who: 'NOAH', text: 'And when it is done, come and tell me. I will keep a seat by me.' },
-  { who: null, text: '(he shuts his eyes. The lantern beside him goes out.)' },
+  '(the pale shape at the gangway waits for you to catch up)',
+  '"THREE DECKS, A DOOR, PITCH INSIDE AND OUT. A HUNDRED YEARS."',
+  '"EVERY LIVING THING WAS TO GO ON HER. THAT WAS THE ARRANGEMENT."',
+  '"I CANNOT LIFT ANYTHING ANY MORE. YOU DO NOT GET TIRED."',
+  '"SO TAKE HER, AND TAKE THE ARRANGEMENT WITH HER."',
+  '"AND WHEN IT IS DONE, COME AND TELL ME. I WILL KEEP A SEAT."',
 ];
+
 
 export function makeWalkScene() {
   let v = null, onDone = null;
@@ -169,13 +172,16 @@ export function makeWalkScene() {
       }
       if (h(x * 11) > 0.8) rect(b, x + 8, gy - 20, 6 + h(x) * 10, 5, 'stone2');   // rubble
     }
-    // the sea wall along the back of the road, broken in places
-    for (let x = 0; x < WORLD + W; x += 6) {
-      if (h(x * 0.7) > 0.82) continue;                   // a gap where it has gone
-      const hh = 22 + Math.round(h(x * 1.3) * 8);
-      rect(b, x, gy - 18 - hh, 6, hh, 'stone1');
-      rect(b, x, gy - 18 - hh, 6, 3, 'stone3');
-      rect(b, x + 5, gy - 18 - hh, 1, hh, mix(P.stone0, P.ink, 0.4));
+    // THE SEA WALL along the back of the road, broken in places. In six-pixel segments on
+    // the world grid it came out as a picket fence for two thousand pixels; in
+    // twenty-four-pixel blocks with the odd one missing it is a wall that has been hit.
+    for (let x = 0; x < WORLD + W; x += 24) {
+      if (h(x * 0.7) > 0.86) continue;                   // a gap where it has gone
+      const hh = 24 + Math.round(h(x * 1.3) * 12);
+      rect(b, x, gy - 18 - hh, 24, hh, 'ink');
+      rect(b, x + 2, gy - 16 - hh, 20, hh - 2, 'stone1');
+      rect(b, x + 2, gy - 16 - hh, 20, 4, 'stone3');
+      if (h(x * 5) > 0.6) rect(b, x + 2, gy - 16 - hh + 12, 20, 4, mix(P.stone0, P.ink, 0.3));
     }
     // THE END OF THE ROAD: the stones give out and the ark is moored in the gap
     for (let x = ARK_X - 60; x < WORLD + W; x += 1) {
@@ -197,16 +203,25 @@ export function makeWalkScene() {
     for (let i = 0; i < 16; i++) px(b, ARK_X - 82 + i * 3, gy - 30 + Math.sin(i * 0.5) * 3, 'cloth1');
 
     for (const s of SIGHTS) prop(b, s.x, gy, s.kind);
-    // and the wall Noah is propped against
+    // THE HOUSE HE LIVED IN, at the end of the road, with the cellar door open at the foot
+    // of it. You came out of there ten minutes ago, and the frame says so: this is the last
+    // building on the causeway and every other one is behind you.
     const nx = NOAH_X;
-    rect(b, nx - 40, gy - 96, 96, 96, 'stone1');
-    rect(b, nx - 40, gy - 96, 96, 4, 'stone3');
-    for (let y = gy - 92; y < gy; y += 12) rect(b, nx - 40, y, 96, 2, mix(P.stone0, P.ink, 0.35));
-    for (let i = 0; i < 5; i++) rect(b, nx + 20 + i * 7, gy - 96 - (i % 3) * 9, 6, 12, 'stone1');
-    // arrows in that wall, and in the stones around him: they shot at him for a while
-    for (let i = 0; i < 7; i++) {
-      const ax = nx - 30 + h(i * 3) * 90, ay = gy - 84 + h(i * 5) * 70;
-      arrow(b, ax, ay, -0.5 - h(i) * 0.4);
+    rect(b, nx - 60, gy - 150, 150, 150, 'ink');
+    rect(b, nx - 54, gy - 144, 138, 144, 'stone1');
+    rect(b, nx - 54, gy - 144, 138, 6, 'stone3');
+    for (let y = gy - 132; y < gy; y += 18) rect(b, nx - 54, y, 138, 4, mix(P.stone0, P.ink, 0.35));
+    // the cellar doorway, open, black
+    rect(b, nx - 6, gy - 60, 54, 60, 'ink');
+    rect(b, nx - 10, gy - 64, 62, 8, 'wood1');
+    // and the door itself, off its hinges and lying in the road: the lion did that
+    rect(b, nx - 130, gy - 16, 90, 16, 'ink');
+    rect(b, nx - 126, gy - 12, 82, 8, 'wood1');
+    // claw marks up the doorframe
+    for (let i = 0; i < 3; i++) {
+      for (let k = 0; k < 3; k++) {
+        rect(b, nx - 18 + k * 8, gy - 70 - i * 22, 5, 26, mix(P.ink, P.stone0, 0.2));
+      }
     }
     return mk.canvas;
   }
@@ -328,109 +343,101 @@ export function makeWalkScene() {
   }
 
   /** The men who shot him, leaving. Silhouettes on a roof, and they do not stay. */
+  /**
+   * THE CORRUPTED, on the far rooftops, watching you go past.
+   *
+   * It used to be men with bows -- the story had raiders in it, who shot Noah for the boat.
+   * The story does not have raiders in it any more: what came for him came on four legs and
+   * used to eat out of his hand. So they are silhouettes with red eyes now, on the roofs
+   * across the water, and they do not follow. They are just there, in numbers, and that
+   * tells you what every island after this is going to be.
+   */
   function drawRaiders(g) {
-    const gone = clamp((heroX - 1500) / 600, 0, 1);
-    if (gone >= 1) return;
-    const rx = 1820 - camX, ry = GY - 150;
-    if (rx < -200 || rx > W + 200) return;
-    g.globalAlpha = 1 - gone;
-    rect(g, rx - 60, ry, 190, 8, 'shadow');
-    for (let i = 0; i < 3; i++) {
-      const x = rx + i * 46 + Math.round(Math.sin(t * 2 + i) * 1);
-      rect(g, x, ry - 34, 12, 34, 'ink');
-      disc(g, x + 6, ry - 40, 7, 'ink');
-      rect(g, x - 2, ry - 44, 16, 5, 'ink');            // a hood
-      // the bow, held down: they are done shooting
-      line(g, x + 12, ry - 26, x + 18, ry - 6, 'ink');
-      line(g, x + 12, ry - 26, x + 17, ry - 30, 'ink');
-    }
-    g.globalAlpha = 1;
-  }
-
-  /** Noah, with three arrows in him, and the lantern that goes out. */
-  function drawNoah(g) {
-    const nx = NOAH_X - camX;
-    if (nx < -160 || nx > W + 160) return;
-    const dead = deadT >= 0;
-    const dk = dead ? clamp(deadT / 1.6, 0, 1) : 0;
-    // the rubble he is sitting against, drawn before him so his legs are behind it
-    // his body, sat down: the sprite is dropped so only chest and head clear the stones
-    drawFolk(g, 'noah', nx, GY + 6, dead ? 0 : t, {
-      scale: 1, pose: phase === 'talk' && !dead ? 'talk' : 'idle',
-      talking: phase === 'talk' && !dead && !fullyTyped(),
-      alpha: 1,
-    });
-    // the stones across his legs, so he reads as sat down and not as standing behind a box
-    rect(g, nx - 34, GY - 10, 70, 22, 'stone2');
-    rect(g, nx - 34, GY - 10, 70, 3, 'stone3');
-    rect(g, nx - 34, GY + 9, 70, 3, 'stone0');
-    // three arrows in him, and the dark stain under them
-    wash(g, nx - 14, GY - 38, 26, 22, 'red0', 0.45);
-    for (const [ax, ay, aa] of [[-10, -36, -0.7], [2, -28, -0.35], [10, -40, -0.9]]) {
-      const dx = Math.cos(aa) * 20, dy = Math.sin(aa) * 20;
-      for (let i = 2; i < 10; i++) px(g, nx + ax + (dx * i) / 10, GY + ay + (dy * i) / 10, i < 4 ? 'wood1' : 'wood0');
-      for (let i = 0; i < 3; i++) {
-        px(g, nx + ax + dx * (0.86 + i * 0.05), GY + ay + dy * (0.86 + i * 0.05) - 2, 'bone');
-        px(g, nx + ax + dx * (0.86 + i * 0.05), GY + ay + dy * (0.86 + i * 0.05) + 2, 'bone');
+    for (let i = 0; i < 9; i++) {
+      const rx = 300 + i * 340 - camX * 0.72;
+      if (rx < -60 || rx > W + 60) continue;
+      const ry = 250 + (i % 3) * 22;
+      const sc = 1 + (i % 2) * 0.4;
+      g.globalAlpha = 0.85;
+      // body, head, ears: one dark mass, because that is all you can see at this distance
+      rect(g, rx - 20 * sc, ry - 16 * sc, 44 * sc, 18 * sc, 'ink');
+      for (let l = 0; l < 4; l++) rect(g, rx - 16 * sc + l * 11 * sc, ry + 2 * sc, 5 * sc, 14 * sc, 'ink');
+      disc(g, rx + 26 * sc, ry - 22 * sc, 11 * sc, 'ink');
+      tri(g, rx + 18 * sc, ry - 30 * sc, rx + 30 * sc, ry - 30 * sc, rx + 22 * sc, ry - 44 * sc, 'ink');
+      // and the eyes, which are the only thing about them you can make out
+      const pulse = 0.6 + 0.4 * Math.sin(t * 5 + i);
+      for (const dx of [20, 30]) {
+        rect(g, rx + dx * sc, ry - 24 * sc, 4 * sc, 4 * sc, pulse > 0.75 ? 'red2' : 'red1');
       }
-    }
-    // the lantern: lit, then not
-    const lx = nx + 46;
-    if (dk < 1) {
-      g.globalAlpha = 1 - dk;
-      for (let i = 7; i >= 1; i--) wash(g, lx - 9 * i, GY - 16 - 8 * i, 18 * i, 16 * i, 'amber', 0.03);
       g.globalAlpha = 1;
     }
-    rect(g, lx - 7, GY - 16, 14, 18, 'brass1');
-    rect(g, lx - 5, GY - 13, 10, 12, dk < 1 ? 'amber' : 'ink');
-    if (dk < 0.6) rect(g, lx - 2, GY - 9, 4, 6, 'gold');
-    rect(g, lx - 8, GY - 19, 16, 4, 'brass2');
-    // the chart, rolled, under his hand
-    rect(g, nx + 18, GY - 14, 24, 8, 'parch');
-    rect(g, nx + 18, GY - 14, 24, 2, 'cream');
-    rect(g, nx + 18, GY - 14, 3, 8, 'parch0');
-    if (dead) {
-      // a dove goes up out of him, which is the only thing in this game that is a symbol
-      const fy = GY - 70 - dk * 230;
-      const flap = Math.sin(deadT * 9) * 4;
-      disc(g, nx, fy, 5, 'white');
-      disc(g, nx + 4, fy - 3, 3, 'white');
-      tri(g, nx - 4, fy, nx - 16, fy - 6 + flap, nx - 2, fy + 5, 'white');
-      tri(g, nx + 4, fy, nx + 16, fy - 6 - flap, nx + 2, fy + 5, 'bone');
-      px(g, nx + 7, fy - 4, 'ink');
+  }
+
+  /**
+   * HIM, AFTERWARDS. A pale shape that keeps a little way ahead of you and waits.
+   *
+   * It is the same folk sprite as the living man, drawn translucent with a fringe of motes
+   * coming off it, because the recognition is the whole point: the thing walking you to the
+   * boat is visibly the man who built it. He hangs a body's length ahead while you walk,
+   * and stands at the gangway once you are talking.
+   */
+  function drawSoul(g) {
+    const talking = phase === 'talk' || phase === 'give';
+    const sx = talking ? NOAH_X + 40 - camX : heroX + 170 - camX;
+    if (sx < -160 || sx > W + 160) return;
+    const float = Math.sin(t * 1.6) * 8;
+    const sy = GY - 26 + float;
+    const prev = g.globalAlpha;
+    // the light he stands in. DISCS, not a wash: an alpha rectangle at this grid is a pale
+    // box with hard corners round him, which reads as a bug rather than as a glow.
+    const gl = 0.06 + 0.03 * Math.sin(t * 2);
+    for (let i = 3; i >= 1; i--) {
+      g.globalAlpha = gl * i;
+      disc(g, sx, sy - 60, 40 + i * 26, 'ice');
+      g.globalAlpha = 1;
+    }
+    g.globalAlpha = 0.42 + 0.16 * Math.sin(t * 2.2);
+    drawFolk(g, 'noah', sx, sy, t, {
+      scale: 2, pose: talking ? 'talk' : 'idle', talking: talking && !fullyTyped(),
+    });
+    g.globalAlpha = prev;
+    // motes going up off him
+    for (let i = 0; i < 12; i++) {
+      const k = ((t * 0.35 + i / 12) % 1);
+      const mx = sx - 40 + ((i * 37) % 84);
+      rect(g, mx, sy - 40 - k * 170, 6, 6, k > 0.6 ? 'white' : 'ice');
+    }
+    // and he keeps the hat, because he would
+    if (!talking) {
+      const bob = Math.sin(t * 1.6 + 1) * 3;
+      rect(g, sx - 26, sy - 120 + bob, 52, 6, 'ice');
     }
   }
 
-  function fullyTyped() { return typed >= (LINES[ix] ? LINES[ix].text.length : 0); }
+  function fullyTyped() { return typed >= (LINES[ix] ? LINES[ix].length : 0); }
 
   /**
-   * His last words. THE SHEET IS ON THE LEFT, not across the bottom: a board at the foot
-   * of the screen covered the two people it was about -- a dying man and the thing that
-   * came for him are the only picture this scene has.
+   * HIS WORDS, ON A BAR. Not in a box: a timber sheet with a portrait plate on it would put
+   * a piece of furniture between the player and the two figures the scene is about, and the
+   * reels either side of this scene do not have one.
    */
-  function drawBoard(g) {
+  function drawCaptions(g) {
     const l = LINES[ix];
     if (!l) return;
-    const bx = 34, bw = 470, by = 132, bh = 286;
-    UI.panel(g, bx, by, bw, bh, { style: 'paper', shadow: true });
-    if (l.who) {
-      const nw = textW(l.who, { font: 7 }) + 34;
-      rect(g, bx + 26, by - 13, nw, 26, 'wood0');
-      rect(g, bx + 29, by - 10, nw - 6, 20, mix(col('brass3'), P.ink, 0.62));
-      rect(g, bx + 29, by - 10, nw - 6, 3, 'brass3');
-      text(g, l.who, bx + 26 + nw / 2, by - 6, 'brass3', { font: 7, center: true, shadow: 'ink' });
-    }
-    wrap(l.text.slice(0, Math.floor(typed)), bw - 56, { font: 7 }).slice(0, 7).forEach((r, i) => {
-      text(g, r, bx + 28, by + 34 + i * 26, 'wood0', { font: 7 });
+    const bh = 76;
+    rect(g, 0, H - bh, W, bh, 'ink');
+    rect(g, 0, H - bh, W, 4, 'wood0');
+    const shown = l.slice(0, Math.floor(typed));
+    wrap(shown, W - 120, { font: 7 }).slice(0, 2).forEach((r, i) => {
+      text(g, r, 60, H - bh + 18 + i * 24, l[0] === '(' ? 'parch1' : 'brass3', { font: 7 });
     });
     if (fullyTyped() && Math.floor(t * 2) % 2 === 0) {
-      text(g, ix >= LINES.length - 1 ? 'TAKE THE BOAT ▶' : 'NEXT ▶', bx + bw - 28, by + bh - 40,
-        'wood1', { font: 7, right: true });
+      text(g, ix >= LINES.length - 1 ? 'TAKE HER ▶' : 'NEXT ▶', W - 40, H - 34,
+        'wood2', { font: 5, right: true });
     }
     for (let i = 0; i < LINES.length; i++) {
-      rect(g, bx + 28 + i * 12, by + bh - 20, 8, 5, i < ix ? 'parch1' : i === ix ? 'brass2' : 'parch0');
+      rect(g, 60 + i * 16, H - 18, 10, 6, i < ix ? 'wood2' : i === ix ? 'brass3' : 'wood0');
     }
-    text(g, 'ESC SKIPS', bx + bw - 28, by + bh - 18, 'parch0', { font: 3, right: true });
   }
 
   function draw(g) {
@@ -450,7 +457,7 @@ export function makeWalkScene() {
       drawPlant(g, sx, GY + 6 + (i % 3) * 8, i % 4 === 0 ? 'reed' : i % 3 === 0 ? 'cattail' : 'tuft',
         { biome: 'storm', v: i % 4, t });
     }
-    drawNoah(g);
+    drawSoul(g);
     // THE ARK, moored at the end of the causeway, waiting for somebody to work her rudder
     const ax = ARK_X - camX;
     if (ax > -260 && ax < W + 260) {
@@ -481,7 +488,7 @@ export function makeWalkScene() {
       text(g, noteLine, bx + bw / 2, by + 15, 'wood0', { font: 7, center: true });
       g.globalAlpha = 1;
     }
-    if (phase === 'talk') drawBoard(g);
+    if (phase === 'talk') drawCaptions(g);
     if (phase === 'walk' && heroX < 240) {
       const a = 0.6 + 0.4 * Math.sin(t * 3);
       g.globalAlpha = a;
@@ -504,7 +511,7 @@ export function makeWalkScene() {
   /* ----------------------------------------------------------------- update */
 
   function advance() {
-    if (!fullyTyped()) { typed = LINES[ix].text.length; Audio.sfx('click'); return; }
+    if (!fullyTyped()) { typed = LINES[ix].length; Audio.sfx('click'); return; }
     if (ix >= LINES.length - 1) {
       phase = 'give';
       deadT = 0;
@@ -539,7 +546,7 @@ export function makeWalkScene() {
     if (phase === 'talk') {
       // hold the two of them in the right-hand third, clear of the sheet
       camX = approach(camX, clamp(NOAH_X - 754, 0, WORLD - W + 240), 3, dt);
-      const len = LINES[ix] ? LINES[ix].text.length : 0;
+      const len = LINES[ix] ? LINES[ix].length : 0;
       if (typed < len) {
         const prev = typed;
         typed = Math.min(len, typed + dt * 44);

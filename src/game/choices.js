@@ -67,7 +67,10 @@ export function rollEncounter(v, island) {
     const intro = CHOICES.find((c) => c.unmet === island.meets);
     if (intro && (v.seenChoices || []).indexOf(intro.id) < 0) return intro;
   }
-  if (v.lastEncounter && v.stats.legs - v.lastEncounter < 2) return null;
+  // AND NOT EVERY LEG. Somebody stopping you to talk on the way to every single island
+  // turns the crossing into a conversation you cannot get out of; three legs of quiet
+  // between them is what makes the next one land.
+  if (v.lastEncounter && v.stats.legs - v.lastEncounter < 3) return null;
   const seen = v.seenChoices || [];
   const rng = v.rng.fork(`enc/${v.chapter}/${v.leg}`);
   const pool = [];
@@ -81,7 +84,7 @@ export function rollEncounter(v, island) {
     for (let i = 0; i < w; i++) pool.push(c);
   }
   if (!pool.length) return null;
-  if (!rng.chance(0.62)) return null;
+  if (!rng.chance(0.4)) return null;
   return rng.pick(pool);
 }
 

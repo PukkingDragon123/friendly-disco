@@ -104,8 +104,13 @@ export function camTick(cam, dt) {
  * shot as crisp as a still one.
  */
 export function camWrap(g, cam, fn) {
-  const q = (n) => Math.round(n);
-  const z = Math.max(0.5, Math.round(cam.zoom * 8) / 8);
+  // A CAMERA THAT IS NOT A NUMBER MUST NOT BLANK THE GAME. One caller passed its decay rate
+  // and its delta the wrong way round, the zoom went to NaN, and every draw inside the
+  // transform landed nowhere: the whole scene came out as an empty black frame. Anything
+  // non-finite falls back to an identity camera, which loses the effect and keeps the picture.
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  const q = (n) => Math.round(num(n, 0));
+  const z = Math.max(0.5, Math.round(num(cam.zoom, 1) * 8) / 8);
   let sx = 0, sy = 0;
   if (cam.shakeT > 0) {
     const k = (cam.shakeT / (cam.shakeDur || 0.28)) ** 1.3;
@@ -116,9 +121,9 @@ export function camWrap(g, cam, fn) {
   }
   g.save();
   g.translate(q(W / 2 + sx), q(H / 2 + sy));
-  if (cam.roll) g.rotate(cam.roll);
+  if (num(cam.roll, 0)) g.rotate(cam.roll);
   g.scale(z, z);
-  g.translate(q(-W / 2 - cam.x), q(-H / 2 - cam.y));
+  g.translate(q(-W / 2 - num(cam.x, 0)), q(-H / 2 - num(cam.y, 0)));
   try { fn(); } finally { g.restore(); }
   if (cam.flash > 0) {
     wash(g, 0, 0, W, H, cam.flashCol, clamp(cam.flash / (cam.flashDur || 0.1), 0, 1) * 0.85);

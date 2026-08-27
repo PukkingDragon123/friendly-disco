@@ -48,6 +48,8 @@ const M = {};
     ['npcs', '../src/data/npcs.js'], ['garden', '../src/game/garden.js'],
     ['choicedata', '../src/data/choices.js'], ['choices', '../src/game/choices.js'],
     ['summons', '../src/data/summons.js'],
+    ['chart', '../src/game/chart.js'], ['ocean', '../src/render/ocean.js'],
+    ['cine', '../src/render/cine.js'], ['arenagame', '../src/game/arena.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -1555,7 +1557,24 @@ if (section('render') && M.pixel) {
       voyage: M.voyage.newVoyage('RENDER-island'),
       island: M.islands.ISLAND_BY_ID.jungle, onDone: () => {},
     })],
+    // THE TWO SCREENS THE GAME IS ACTUALLY PLAYED ON, and neither was in this list. The
+    // arena spent an afternoon rendering as an empty black frame -- a camera whose zoom had
+    // gone to NaN, so every draw inside its transform landed nowhere -- and nothing here
+    // noticed, because the HUD is drawn outside the camera and the colour count only asks
+    // whether SOMETHING painted.
+    ['arena', '../src/scenes/arena.js', 'makeArenaScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-arena'),
+      island: M.islands.ISLAND_BY_ID.jungle, kind: 'fight', seed: 'RENDER', onDone: () => {},
+    })],
+    ['chart', '../src/scenes/chart.js', 'makeChartScene', () => ({
+      voyage: M.voyage.newVoyage('RENDER-chart'),
+      chart: M.chart.makeChart('RENDER-chart', 1), onPick: () => {},
+    })],
   ];
+  // where the WORLD is on each of them, as opposed to where the interface is
+  const worldBox = {
+    arena: [140, 90, 680, 300], chart: [240, 150, 480, 280], island: [120, 80, 700, 320],
+  };
   const { Input } = await import('../src/core/input.js');
   const { Juice } = await import('../src/core/juice.js');
   for (const [name, path, factory, argsFor] of scenes) {
@@ -1579,6 +1598,27 @@ if (section('render') && M.pixel) {
       const seen = new Set();
       for (let i = 0; i < cv.data.length; i += 4 * 37) seen.add(`${cv.data[i]},${cv.data[i + 1]},${cv.data[i + 2]}`);
       ok(seen.size > 12, `${name} scene renders a rich frame`, `${seen.size} distinct colours`);
+      // AND THE MIDDLE OF IT IS NOT EMPTY. A scene whose interface paints and whose world
+      // does not passes every colour count ever written; this samples the box the world
+      // lives in and asks how much of it is still the background.
+      const box = worldBox[name];
+      if (box) {
+        const [bx, by, bw, bh] = box;
+        let inkish = 0, total = 0;
+        const mid = new Set();
+        for (let y = by; y < by + bh; y += 7) {
+          for (let x = bx; x < bx + bw; x += 7) {
+            const i = (y * 960 + x) * 4;
+            const r = cv.data[i], g2 = cv.data[i + 1], b = cv.data[i + 2];
+            mid.add(`${r},${g2},${b}`);
+            if (r + g2 + b < 96) inkish++;
+            total++;
+          }
+        }
+        ok(inkish / total < 0.7, `${name} world is not a black frame`,
+          `${Math.round((inkish / total) * 100)}% ink`);
+        ok(mid.size > 8, `${name} world has more than a few colours in it`, String(mid.size));
+      }
       writePNG(cv, `shots/scene-${name}.png`, 2);
     } catch (e) {
       ok(false, `${name} scene render`, e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e.message);

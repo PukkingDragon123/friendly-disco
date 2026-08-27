@@ -41,6 +41,9 @@ import {
 import { drawAnimalIcon, drawAnimalShadow, drawAnimal } from '../render/sprites.js';
 import { drawFolk } from '../render/folk.js';
 import {
+  makeCam, camKick, camTick, camWrap, speedLines, shockRing, dust as cineDust,
+} from '../render/cine.js';
+import {
   createFight, update as updateFight, shoot, picked, pick, pickable, livingFoes,
   throwApple, result, SKILLS, FIGHT,
 } from '../game/arena.js';
@@ -57,6 +60,14 @@ export function makeArenaScene() {
   let dragging = false;
   let aim = 0, power = 0;
   let hitStop = 0;
+  // THE COMBAT CAMERA. Hit-stop and a shake are the floor, not the ceiling: a shot that
+  // lands hard should also PUSH IN on what it hit, and a capture should be a moment rather
+  // than a particle burst. `punch` is extra zoom that decays, `look` is what it leans towards,
+  // and both are forced back to nothing while you are aiming -- the drag reads the mouse in
+  // screen space, so an aiming camera would put the ghost ball somewhere the shot will not go.
+  const cam = makeCam();
+  let punch = 0;
+  let look = { x: W / 2, y: GROUND.farY + 60 };
   let banner = null, bannerT = 0;
   let floaters = [];
   let hoverFoe = -1, hoverCard = -1;
@@ -256,6 +267,21 @@ export function makeArenaScene() {
 
     handleInput(dt);
 
+    // the camera, and it is the only stateful thing in the draw path: it decays towards
+    // nothing every frame and is HELD at nothing while the player is aiming
+    camTick(cam, dt);
+    // approach(cur, target, RATE, DT) -- four arguments. Passing dt where the rate goes left
+    // dt undefined inside, so the decay was exp(-rate * undefined) = NaN: the camera's zoom
+    // went to NaN on the first frame and every draw inside the transform landed nowhere. The
+    // entire island rendered as an empty black frame, which is the worst possible failure for
+    // a one-line mistake, so camWrap now refuses a camera that is not a finite number.
+    punch = approach(punch, 0, f.phase === 'aim' ? 9 : 2.6, dt);
+    if (punch < 0.004) punch = 0;
+    const lean = punch * 1.7;
+    cam.zoom = 1 + punch;
+    cam.x = (look.x - W / 2) * lean;
+    cam.y = (look.y - H / 2) * lean;
+
     // HIT-STOP. The single cheapest thing that makes a collision feel like one, and it has
     // to be applied to the SIMULATION rather than to the drawing or the ball keeps moving
     // behind a frozen frame and arrives somewhere else.
@@ -280,6 +306,11 @@ export function makeArenaScene() {
         big: d > 30, col: d > 30 ? 'gold' : 'cream' });
       hitStop = Math.max(hitStop, clamp(d / 260, 0.02, 0.1));
       Juice.shake(clamp(d / 9, 1, 7), 0.18);
+      if (d > 14) {
+        punch = Math.max(punch, clamp(d / 150, 0.05, 0.2));
+        look = { x: s.x, y: s.y };
+        camKick(cam, clamp(d / 14, 1, 6), 0.2);
+      }
       Audio.sfx(d > 30 ? 'thud' : 'tick');
       parts.burst(s.x, s.y, 6 + Math.round(d / 10), { kind: 'dust', speed: 70 });
     }
@@ -290,6 +321,13 @@ export function makeArenaScene() {
         foe.fxDone = true;
         const s = toScreen(foe.ball.x, foe.ball.y, 0);
         captureFx.push({ x: s.x, y: s.y, k: 0, name: foe.def.name });
+        // THE HERO MOMENT: the game stops for an eighth of a second and the camera goes in
+        // on the door it went through. A capture is the whole point of the fight and it used
+        // to be a puff of dust.
+        hitStop = Math.max(hitStop, 0.13);
+        punch = Math.max(punch, 0.26);
+        look = { x: s.x, y: s.y };
+        camKick(cam, 5, 0.3);
       }
     }
     if (f.waveIx !== wasWave && f.phase !== 'won') {
@@ -502,6 +540,24 @@ export function makeArenaScene() {
     all.sort((a, b) => a.y - b.y);
 
     const me = picked(f);
+    // SPEED LINES behind anything travelling, drawn before the balls so they trail rather
+    // than cover. A ball rolling across a table at four hundred pixels a second with nothing
+    // behind it reads as a slow ball; this is the cheapest possible motion cue and it is the
+    // difference between a physics demo and a fight.
+    for (const it of all) {
+      const b = it.kind === 'foe' ? it.foe.ball : it.kind === 'mine' ? it.m.ball : null;
+      if (!b) continue;
+      const sp = Math.hypot(b.vx || 0, b.vy || 0);
+      // only while it is genuinely travelling, or every ball drifting into place wears a pair
+      // of antennae -- which is exactly what three-pixel lines above a ball look like
+      if (sp < 70) continue;
+      const sc = toScreen(b.x, b.y, 0);
+      const pr = ballPixelRadius(b.r, b.y);
+      const dx = -(b.vx || 0) / sp, dy = -((b.vy || 0) * VIEW.tilt) / sp;
+      speedLines(g, sc.x + dx * pr * 0.9, sc.y - pr + dy * pr * 0.9, 3,
+        clamp(sp * 0.3, 12, 40), Math.atan2(dy, dx), mix(P.foam, P.water3, 0.55),
+        Math.round(pr * 1.1));
+    }
     for (const it of all) {
       if (it.kind === 'foe') {
         const foe = it.foe;
@@ -609,16 +665,28 @@ export function makeArenaScene() {
       ellipseFrame(g, p.x, p.y, r, r * 0.4, k < 0.5 ? 'gold' : 'brass2');
       ellipseFrame(g, p.x, p.y, r * 0.7, r * 0.28, 'white');
     }
+    // A CAPTURE IS THE POINT OF THE FIGHT, so it gets a shock ring, a ring of sparks, dust
+    // off the door and a stamp with the animal's name on it -- not a puff and a word.
     for (const c of captureFx) {
       const k = clamp(c.k, 0, 1);
       const y = c.y - k * 40;
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2 + k * 2;
-        const rr = 12 + k * 46;
-        rect(g, c.x + Math.cos(a) * rr - 2, y + Math.sin(a) * rr * 0.45 - 2, 5, 5,
-          i % 2 ? 'gold' : 'white');
+      if (k < 0.55) shockRing(g, c.x, c.y, k / 0.55, 'gold');
+      cineDust(g, c.x, c.y + 6, k, 'brass3');
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2 + k * 2;
+        const rr = 12 + k * 56;
+        rect(g, c.x + Math.cos(a) * rr - 2, y + Math.sin(a) * rr * 0.45 - 2,
+          i % 3 ? 5 : 7, i % 3 ? 5 : 7, i % 2 ? 'gold' : 'white');
       }
-      text(g, 'ABOARD', c.x, y - 24, 'gold', { font: 7, center: true, alpha: 1 - k });
+      const nm = (c.name || '').toUpperCase();
+      const prevA = g.globalAlpha;
+      g.globalAlpha = clamp(1 - (k - 0.4) / 0.6, 0, 1);
+      const bw = Math.max(96, textW(nm, { font: 7 }) + 28);
+      UI.roundRect(g, c.x - bw / 2, y - 44, bw, 38, 6, 'ink');
+      UI.roundRect(g, c.x - bw / 2 + 2, y - 42, bw - 4, 34, 5, 'brass1');
+      text(g, 'CAUGHT', c.x, y - 39, 'brass3', { font: 3, center: true });
+      text(g, nm, c.x, y - 30, 'white', { font: 7, center: true, shadow: 'ink' });
+      g.globalAlpha = prevA;
     }
     for (const fl of floaters) {
       const k = fl.t / 1.1;
@@ -687,10 +755,16 @@ export function makeArenaScene() {
 
   function draw(g) {
     rect(g, 0, 0, W, H, 'ink');
-    drawTable(g);
-    drawArenaFoliage(g, f.island, t, 3);
-    parts.draw(g);
-    drawBursts(g);
+    // THE WORLD IS PHOTOGRAPHED; THE INTERFACE IS NOT. Everything on the island goes through
+    // the combat camera -- whole pixels and whole eighths of zoom, so a push-in stays as crisp
+    // as a still -- and the bar, the tray and the banners are drawn flat over the top of it,
+    // because a HUD that zooms with the action is a HUD nobody can hit.
+    camWrap(g, cam, () => {
+      drawTable(g);
+      drawArenaFoliage(g, f.island, t, 3);
+      parts.draw(g);
+      drawBursts(g);
+    });
     drawHud(g);
     drawTray(g);
     drawBanner(g);

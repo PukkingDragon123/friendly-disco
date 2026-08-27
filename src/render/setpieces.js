@@ -26,6 +26,7 @@ import {
   rect, px, line, disc, ellipse, ellipseFrame, tri, text, wash, clamp, lerp, W, H,
 } from '../core/pixel.js';
 import { Ease } from '../core/juice.js';
+import { drawSea } from './ocean.js';
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -141,25 +142,22 @@ function rain(g, n, t, key, slant) {
  * camera -- that perspective in the ripple scale is the only thing that makes a flat
  * plane of colour read as a surface receding to a horizon.
  */
+/**
+ * The water in the three big set-pieces, and it is the SHARED sea now (render/ocean.js).
+ *
+ * This was a gradient with dashes on it -- the same thing the chart, the arena, the title
+ * screen and the four story reels each had their own copy of. The caller still hands over its
+ * own two-to-four key ramp, so the wrath's sea is still the wrath's colour; what it gets back
+ * is perspective in the ripple scale, lit crests and parallax.
+ */
 function waterRows(g, y0, y1, t, keys) {
   const n = keys.length;
-  const span = Math.max(1, y1 - y0);
-  for (let y = y0; y < y1; y++) {
-    const f = ((y - y0) / span) * (n - 1);
-    const i = Math.min(n - 2, Math.floor(f));
-    rect(g, 0, y, W, 1, mix(P[keys[i]], P[keys[i + 1]], f - i));
-  }
-  for (let y = y0 + 3; y < y1; y += 3) {
-    const f = (y - y0) / span;
-    const step = 30 + f * 90;
-    const len = 4 + f * 24;
-    const band = keys[Math.min(n - 1, Math.round(f * (n - 1)))];
-    const lit = f < 0.35 ? keys[0] : mix(P[band], P.foam, 0.3);
-    const off = Math.sin(y * 0.3 + t * 1.2) * (6 + f * 22);
-    for (let x = -60; x < W; x += step) {
-      rect(g, x + off + h(y * 3 + x) * step * 0.6, y, len, f > 0.6 ? 2 : 1, lit);
-    }
-  }
+  drawSea(g, {
+    top: y0, bottom: y1, t,
+    shallow: P[keys[0]] || keys[0],
+    deep: P[keys[n - 1]] || keys[n - 1],
+    calm: 0.15,
+  });
 }
 
 /** A ripple ring on a surface: dashes, heavier and brighter on the near arc. */
@@ -475,11 +473,40 @@ function wrathCrack(g, u, t) {
 export const WRATH = {
   id: 'wrath',
   dur: 12.5,
+  // THE CAMERA, which these three set-pieces did without for a fortnight. A `drift` is a
+  // parallel move at a constant rate -- it is a conveyor belt, not a camera -- and `shake` is
+  // a constant tremble with no event under it. Keys and hits instead: the sky presses DOWN on
+  // the first shot, the eye is a slow push in, the hand SNAPS the frame in when it arrives,
+  // and the ground shot pulls back off the damage.
   shots: [
-    { at: 0.00, id: 'sky', label: 'THE SKY SHUTS LIKE A LID', draw: wrathSky, drift: [0, 8] },
-    { at: 0.28, id: 'eye', label: 'AND OPENS AN EYE IN IT', draw: wrathEye, shake: 1 },
-    { at: 0.56, id: 'hand', label: 'THE HAND COMES THROUGH', draw: wrathHand, drift: [0, -6], shake: 5 },
-    { at: 0.80, id: 'crack', label: 'AND THE GROUND ANSWERS', draw: wrathCrack, shake: 7 },
+    {
+      at: 0.00, id: 'sky', label: 'THE SKY SHUTS LIKE A LID', draw: wrathSky,
+      cam: [{ at: 0, y: -30, zoom: 1.06 }, { at: 1, y: 26, zoom: 1.14, ease: 'in' }],
+    },
+    {
+      at: 0.28, id: 'eye', label: 'AND OPENS AN EYE IN IT', draw: wrathEye,
+      cam: [{ at: 0, zoom: 1 }, { at: 1, zoom: 1.22, ease: 'inout' }],
+      hits: [[0.5, 4, null]],
+    },
+    {
+      at: 0.56, id: 'hand', label: 'THE HAND COMES THROUGH', draw: wrathHand,
+      cam: [
+        { at: 0, y: -20, zoom: 1.02 },
+        { at: 0.42, y: -14, zoom: 1.04, ease: 'linear' },
+        { at: 0.5, y: 30, zoom: 1.3, ease: 'snap' },
+        { at: 1, y: 10, zoom: 1.1, ease: 'out' },
+      ],
+      hits: [[0.46, 15, 'white'], [0.6, 7, null], [0.82, 5, null]],
+    },
+    {
+      at: 0.80, id: 'crack', label: 'AND THE GROUND ANSWERS', draw: wrathCrack,
+      cam: [
+        { at: 0, y: 40, zoom: 1.34 },
+        { at: 0.24, y: 30, zoom: 1.26, ease: 'snap' },
+        { at: 1, y: 0, zoom: 1, ease: 'out' },
+      ],
+      hits: [[0.06, 16, 'white'], [0.3, 8, null], [0.62, 5, null]],
+    },
   ],
 };
 
@@ -811,10 +838,37 @@ export const FLOOD = {
   id: 'flood',
   dur: 13,
   shots: [
-    { at: 0.00, id: 'drop', label: 'IT BEGINS WITH ONE DROP', draw: floodDrop },
-    { at: 0.30, id: 'valley', label: 'THE RIVERS CLIMB THEIR OWN BANKS', draw: floodValley, drift: [-10, 0] },
-    { at: 0.58, id: 'wall', label: 'AND THE SEA STANDS UP', draw: floodWall, shake: 6 },
-    { at: 0.82, id: 'under', label: 'EVERYTHING FLOATS, OR IT DOES NOT', draw: floodUnder, shake: 2 },
+    {
+      at: 0.00, id: 'drop', label: 'IT BEGINS WITH ONE DROP', draw: floodDrop,
+      // one drop, and the frame flinches when it lands
+      cam: [
+        { at: 0, y: -16, zoom: 1.1 },
+        { at: 0.34, y: -10, zoom: 1.12, ease: 'linear' },
+        { at: 0.42, y: 6, zoom: 1.24, ease: 'snap' },
+        { at: 1, y: 0, zoom: 1.04, ease: 'out' },
+      ],
+      hits: [[0.38, 9, 'white']],
+    },
+    {
+      at: 0.30, id: 'valley', label: 'THE RIVERS CLIMB THEIR OWN BANKS', draw: floodValley,
+      // a slow crane across the fields as the water takes them
+      cam: [{ at: 0, x: 40, y: -20, zoom: 1.16 }, { at: 1, x: -30, y: 14, zoom: 1.04, ease: 'inout' }],
+    },
+    {
+      at: 0.58, id: 'wall', label: 'AND THE SEA STANDS UP', draw: floodWall,
+      cam: [
+        { at: 0, y: 20, zoom: 1.02 },
+        { at: 0.46, y: 10, zoom: 1.06, ease: 'linear' },
+        { at: 0.56, y: -30, zoom: 1.26, ease: 'snap' },
+        { at: 1, y: -10, zoom: 1.08, ease: 'out' },
+      ],
+      hits: [[0.52, 14, 'white'], [0.7, 7, null]],
+    },
+    {
+      at: 0.82, id: 'under', label: 'EVERYTHING FLOATS, OR IT DOES NOT', draw: floodUnder,
+      cam: [{ at: 0, y: -26, zoom: 1.12 }, { at: 1, y: 20, zoom: 1.02, ease: 'out' }],
+      hits: [[0.1, 6, null]],
+    },
   ],
 };
 
@@ -1270,10 +1324,31 @@ export const FORGE = {
   id: 'forge',
   dur: 13.5,
   shots: [
-    { at: 0.00, id: 'bank', label: 'A HUNDREDWEIGHT OF RIVER CLAY', draw: forgeBank },
-    { at: 0.28, id: 'frame', label: 'PACKED ONTO A FRAME OF RIBS', draw: forgeFrame, drift: [0, -6] },
-    { at: 0.56, id: 'word', label: 'AND A WORD DRIVEN IN', draw: forgeWord, shake: 4 },
-    { at: 0.82, id: 'stand', label: 'IT STANDS UP', draw: forgeStand, shake: 6 },
+    {
+      at: 0.00, id: 'bank', label: 'A HUNDREDWEIGHT OF RIVER CLAY', draw: forgeBank,
+      cam: [{ at: 0, x: -24, zoom: 1.08 }, { at: 1, x: 16, zoom: 1.02, ease: 'inout' }],
+    },
+    {
+      at: 0.28, id: 'frame', label: 'PACKED ONTO A FRAME OF RIBS', draw: forgeFrame,
+      cam: [{ at: 0, y: 24, zoom: 1.14 }, { at: 1, y: -18, zoom: 1.04, ease: 'inout' }],
+    },
+    {
+      at: 0.56, id: 'word', label: 'AND A WORD DRIVEN IN', draw: forgeWord,
+      // the chisel goes in, and the frame goes with it
+      cam: [
+        { at: 0, zoom: 1.1, y: 10 },
+        { at: 0.4, zoom: 1.14, y: 8, ease: 'linear' },
+        { at: 0.48, zoom: 1.36, y: 16, ease: 'snap' },
+        { at: 1, zoom: 1.06, y: 0, ease: 'out' },
+      ],
+      hits: [[0.44, 13, 'white'], [0.66, 6, null]],
+    },
+    {
+      at: 0.82, id: 'stand', label: 'IT STANDS UP', draw: forgeStand,
+      // and the last shot of the reel is a pull back: it is bigger than you thought
+      cam: [{ at: 0, y: 40, zoom: 1.3 }, { at: 1, y: -8, zoom: 1, ease: 'out' }],
+      hits: [[0.08, 12, null], [0.4, 6, null]],
+    },
   ],
 };
 

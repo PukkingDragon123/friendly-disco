@@ -39,8 +39,9 @@ import {
 import {
   enterGarden, callNoah, noahCalled, buyOffer, questNow, claimQuest, pet, petsOf, PETS_FOR_LOYALTY,
 } from '../game/garden.js';
+import { drawSea } from '../render/ocean.js';
 
-const HUD_H = 40;
+const HUD_H = 46;
 
 // The garden is DRAWN, not panelled. Three big wooden boxes covered the whole backdrop
 // and turned the one warm place in the game into a filing cabinet, so the beds sit on
@@ -239,19 +240,12 @@ function backdrop() {
   // one of the four rivers, with banks, and a bridge on the way to the gate
   rect(b, 0, RIV_Y - 4, W, 4, 'clay2');
   rect(b, 0, RIV_Y - 4, W, 1, 'clay3');
-  for (let y = 0; y < 22; y++) {
-    rect(b, 0, RIV_Y + y, W, 1,
-      y < 2 ? 'foam' : y < 8 ? 'water3' : y < 15 ? 'water2' : y < 19 ? 'water1' : 'water0');
-  }
+  // the river itself is the SHARED water (render/ocean.js), baked at t=0: five flat bands
+  // with a scatter of bright dashes over them was the same mistake as every other body of
+  // water in the game, just twenty-two pixels tall
+  drawSea(b, { top: RIV_Y, bottom: RIV_Y + 22, t: 0, calm: 0.35, deep: 'water1' });
   rect(b, 0, RIV_Y + 22, W, 4, 'clay2');
   rect(b, 0, RIV_Y + 25, W, 1, 'clay1');
-  // ripples ON the river, as short dashes rather than a scatter of single pixels: a
-  // hundred and sixty specks on the world grid is a hundred and sixty four-pixel blocks,
-  // which is not a river, it is a chequered tablecloth.
-  for (let i = 0; i < 26; i++) {
-    const ry = RIV_Y + 4 + ((i * 7) % 4) * 4;
-    rect(b, (i * 41) % W, ry, 16 + ((i * 13) % 3) * 8, 4, i % 3 ? 'foam' : 'white');
-  }
   // the bridge: three stones, a parapet either side
   rect(b, GATE_CX - 46, RIV_Y - 6, 92, 36, 'stone2');
   rect(b, GATE_CX - 46, RIV_Y - 6, 92, 4, 'stone3');
@@ -593,9 +587,15 @@ export function makeEdenScene() {
       if (hot) text(g, 'CLICK TO TALK', nx, ny + 15, 'gold', { font: 3, center: true, shadow: 'ink' });
     });
     if (!v.summoned.length) {
-      wrap('Nobody here yet. Ask the Cherubim for Noah. You will meet the rest out there.',
-        260, { font: 3 }).forEach((l, i) => {
-        text(g, l, 640, NPC_Y - 34 + i * 9, 'cream', { font: 3, shadow: 'ink' });
+      // ON A PLATE. Five-pixel cream text with an ink shadow, straight onto grass and
+      // flowers, is a line nobody reads -- and it is the line that tells a new player where
+      // everybody in the game is.
+      const lines = wrap('Nobody here yet. Ask the Cherubim for Noah. You will meet the rest '
+        + 'out there.', 250, { font: 3 });
+      const bw = 268, bh = 18 + lines.length * 12;
+      UI.softPanel(g, 620, NPC_Y - 44, bw, bh, { style: 'slate', r: 6, shadow: true });
+      lines.forEach((l, i) => {
+        text(g, l, 632, NPC_Y - 36 + i * 12, 'parch', { font: 3 });
       });
     }
 
@@ -657,9 +657,17 @@ export function makeEdenScene() {
     }
   }
 
+  /**
+   * THE BAR, in the same badges as the map and the arena.
+   *
+   * It was five pieces of five-pixel text, a pill and a thin bar, all at the same weight --
+   * the same problem the other two screens had. Same fix: an icon to find each number by, a
+   * small label to name it, and the number at twice the label's height.
+   */
   function drawHud(g) {
     UI.panel(g, 0, 0, W, HUD_H, { style: 'wood', shadow: true, corners: false });
-    text(g, 'THE GARDEN OF EDEN', 12, 5, 'leaf4', { font: 7, shadow: 'ink' });
+    rect(g, 0, HUD_H - 2, W, 2, mix(P.wood0, P.ink, 0.4));
+    text(g, 'THE GARDEN OF EDEN', 12, 5, 'leaf4', { font: 7, scale: 2, shadow: 'ink' });
     // your reputation, where you are about to go shopping with it
     const flags = activeFlags(v);
     const rep = priceMod(v);
@@ -667,16 +675,34 @@ export function makeEdenScene() {
       ? flags.slice(0, 2).map((f) => f.id.toUpperCase()).join(' · ')
         + (rep ? `  (prices ${rep > 0 ? '+' : ''}${rep})` : '')
       : 'the last dry ground, and the only safe one';
-    text(g, repLine, 12, 24, rep > 0 ? 'red2' : rep < 0 ? 'leaf4' : 'parch1', { font: 3 });
-    UI.moneyPill(g, 330, 10, v.money, { font: 7, h: 16 });
-    text(g, `CHAPTER ${v.chapter} · LEG ${v.leg}`, 420, 6, 'parch1', { font: 3 });
-    text(g, `${v.lost.length} lost so far`, 420, 20, v.lost.length ? 'red2' : 'parch1', { font: 3 });
-    text(g, 'THE FLOOD', 560, 5, 'parch1', { font: 3 });
-    UI.bar(g, 560, 15, 180, 12, v.flood, {
-      fill: v.flood > 0.72 ? 'red2' : 'water2', bg: 'wood0', frame: 'wood0',
-    });
+    text(g, repLine, 14, 30, rep > 0 ? 'red2' : rep < 0 ? 'leaf4' : 'parch1', { font: 3 });
 
-    sailRect = UI.rectOf(W - 150, 6, 140, 28);
+    UI.statBadge(g, 366, 4, {
+      icon: 'coin', label: 'COIN', value: `$${v.money}`, tone: 'brass1', valueColor: 'brass3',
+    });
+    UI.statBadge(g, 480, 4, {
+      icon: 'map', label: 'CHAPTER', value: `${v.chapter}-${v.leg}`, tone: 'wood2',
+      valueColor: 'parch1',
+    });
+    UI.statBadge(g, 596, 4, {
+      icon: 'bone', label: 'LOST', value: v.lost.length, tone: 'wood2',
+      valueColor: v.lost.length ? 'red2' : 'parch1',
+    });
+    // the flood, as the same gauge the map uses
+    const fk = clamp(v.flood || 0, 0, 1);
+    const gx = 690, gw = 118;
+    text(g, 'THE FLOOD', gx, 4, 'parch0', { font: 3 });
+    UI.roundRect(g, gx - 2, 14, gw + 4, 20, 6, 'ink');
+    UI.roundRect(g, gx, 16, gw, 16, 5, mix(P.wood0, P.ink, 0.35));
+    const tone = fk > 0.75 ? 'red2' : fk > 0.45 ? 'gold' : 'water3';
+    if (fk > 0.01) {
+      UI.roundRect(g, gx, 16, Math.max(6, gw * fk), 16, 5, tone);
+      rect(g, gx + 3, 18, Math.max(2, gw * fk - 6), 2, mix(P[tone], P.white, 0.45));
+    }
+    text(g, `${Math.round(fk * 100)}%`, gx + gw - 6, 20, 'white',
+      { font: 7, right: true, shadow: 'ink' });
+
+    sailRect = UI.rectOf(W - 150, 6, 140, 30);
     UI.button(g, sailRect, 'BACK TO SEA', {
       state: UI.hover(sailRect, Input.mouse) ? 'hover' : 'idle',
       color: 'wood2', icon: 'boat', font: 5,

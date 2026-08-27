@@ -39,6 +39,7 @@ import { createParticles } from '../core/particles.js';
 import { drawFolk } from '../render/folk.js';
 import { drawAnimal, drawAnimalShadow } from '../render/sprites.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
+import { drawSea, drawSurf } from '../render/ocean.js';
 
 const BAR = 38;                     // the same letterbox the film reels use
 const FLOOR = 452;                  // where everything stands
@@ -652,12 +653,21 @@ export function makeBasementScene() {
     rect(g, LANT_X - 14, LANT_Y - 10, 28, 38, flick > 0.8 ? 'gold' : 'brass2');
     disc(g, LANT_X, LANT_Y + 10, 10 + flick * 5, 'gold');
 
-    // water coming in under the stairs
+    // WATER COMING IN UNDER THE STAIRS, and it is the shared water: dark, because there is
+    // one lantern down here, with the lamplight breaking on its surface. It was a flat slab
+    // with three cyan dashes travelling across it.
     const wy = H - BAR - 16 - waterK * 40;
-    rect(g, 0, wy, W, H - wy, mix(P.water0, P.ink, 0.45));
-    rect(g, 0, wy, W, 6, 'water2');
-    for (let i = 0; i < 12; i++) {
-      rect(g, ((i * 97 + t * 20) % W), wy + 8 + (i % 3) * 8, 30 + (i % 4) * 20, 4, 'water3');
+    drawSea(g, {
+      top: wy, bottom: H, t, calm: 0.15,
+      shallow: mix(P.water1, P.ink, 0.35), deep: mix(P.water0, P.ink, 0.6), foam: 'water3',
+    });
+    drawSurf(g, 0, wy + 3, W, t, { inland: 1, amp: 2, band: 3 });
+    // and the lantern on it, because a light in a cellar is always in the water too
+    for (let i = 0; i < 7; i++) {
+      const ly = wy + 4 + i * 5;
+      const lw = 26 + i * 9;
+      rect(g, LANT_X - lw / 2 + Math.round(Math.sin(t * 2 + i) * 4), ly, lw, 2,
+        mix(P.gold, P.water0, 0.35 + i * 0.08));
     }
 
     drawNoah(g);

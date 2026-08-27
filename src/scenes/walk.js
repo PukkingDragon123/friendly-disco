@@ -33,6 +33,7 @@ import * as UI from '../render/uikit.js';
 import { drawFolk } from '../render/folk.js';
 import { drawBoat } from '../render/boat.js';
 import { drawPlant } from '../render/flora.js';
+import { drawSea } from '../render/ocean.js';
 
 const WORLD = 2820;                  // how far the causeway runs
 const GY = 468;                      // the road: where feet land
@@ -146,11 +147,11 @@ export function makeWalkScene() {
     const b = mk.g;
     const off = WATER_Y - 20;                            // strip-space y = world y - off
     const gy = GY - off;
-    // the water either side of the road, then the road itself
-    for (let y = 0; y < mk.canvas.height; y++) {
-      const f = y / mk.canvas.height;
-      rect(b, 0, y, WORLD + W, 1, mix(P.water0, P.ink, f * 0.8));
-    }
+    // THE STRIP LEAVES ITS WATER TRANSPARENT. It used to fill every row of itself with a flat
+    // ramp of water before drawing the road on top, and the strip is blitted AFTER the live
+    // water -- so the animated flood and everything floating past on it were painted and then
+    // covered over, every frame, invisibly. The first water in the game was a baked slab.
+    // Rows above the kerb are left clear now and the live sea shows through them.
     for (let y = gy - 16; y < mk.canvas.height; y++) {
       const f = (y - gy + 16) / (mk.canvas.height - gy + 16);
       // wet stone: warm where the last of the light lies on it, cold in the seams
@@ -323,16 +324,13 @@ export function makeWalkScene() {
 
   /** The flood between the city and the road, and the road's own reflection in it. */
   function drawWater(g) {
-    for (let y = WATER_Y + 26; y < GY - 18; y++) {
-      const f = (y - WATER_Y - 26) / Math.max(1, GY - 18 - WATER_Y - 26);
-      rect(g, 0, y, W, 1, mix(P.water0, P.deep, 0.3 + f * 0.5));
-    }
-    for (let i = 0; i < 60; i++) {
-      const f = (i % 10) / 9;
-      const y = WATER_Y + 28 + f * (GY - 52 - WATER_Y);
-      const x = ((i * 137) - camX * 0.6 + t * (6 + f * 14)) % (W + 60) - 30;
-      rect(g, x, y, 6 + Math.round(f * 14), 2, f < 0.4 ? 'water1' : 'water2');
-    }
+    // THE FLOODED CITY, in the shared water at night tones. It was a dark slab with sixty
+    // two-pixel dashes drifting across it -- which is the fault this art pass exists to fix,
+    // and this is the first water the player ever sees.
+    drawSea(g, {
+      top: WATER_Y + 24, bottom: GY - 14, t, calm: 0.4,
+      shallow: mix(P.water1, P.night, 0.4), deep: mix(P.deep, P.ink, 0.4), foam: 'water3',
+    });
     // things going past on the current
     for (let i = 0; i < 7; i++) {
       const x = ((i * 421) - camX * 0.6 + t * 12) % (W + 120) - 60;

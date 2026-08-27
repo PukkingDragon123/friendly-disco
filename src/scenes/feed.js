@@ -35,8 +35,9 @@ import { BEAST_BY_ID as BEAST_LOOKUP } from '../data/beasts.js';
 import { feed, endFeeding } from '../game/lane.js';
 import { berthsFree } from '../game/voyage.js';
 import { checkSummons, nextSummon, progressFor } from '../data/summons.js';
+import { drawSky, drawSea, drawSurf } from '../render/ocean.js';
 
-const BAR = 38;
+const BAR = 46;
 const GROUND = 430;             // the sand they are lying on
 const RAMP_X = 726;             // where the ramp starts
 const GOLEM_X = 250;
@@ -72,33 +73,24 @@ export function makeFeedScene() {
     const g = bakeCv.g;
     g.clearRect(0, 0, W, H);
 
-    // A DUSK SKY IN HARD BANDS, and the water behind everything
-    const sky = ['purple0', 'rust', 'orange', 'brass2', 'gold'];
-    for (let i = 0; i < sky.length; i++) {
-      const y0 = Math.round(Math.pow(i / sky.length, 1.4) * 300);
-      const y1 = Math.round(Math.pow((i + 1) / sky.length, 1.4) * 300);
-      rect(g, 0, y0, W, Math.max(4, y1 - y0), sky[i]);
-    }
-    // the sun, low, sitting on the water
-    disc(g, 150, 268, 56, 'cream');
-    disc(g, 150, 268, 40, 'white');
-    // the sea
-    for (let y = 300; y < GROUND; y++) {
-      const fk = (y - 300) / (GROUND - 300);
-      rect(g, 0, y, W, 1, mix(P.water1, P.deep, 0.2 + fk * 0.5));
-    }
-    for (let y = 306; y < GROUND; y += 12) {
-      const off = Math.sin(y * 0.3) * 20;
-      rect(g, off, y, W, 4, mix(P.water3, P.water1, 0.4));
-      rect(g, 60 + off, y, 200, 4, mix(P.gold, P.water2, 0.5));
-    }
+    // THE SKY AND THE SEA ARE THE SHARED ONES (render/ocean.js). Five flat bands and a sea
+    // of horizontal stripes with a gold stripe laid over them: the same gradient-plus-dashes
+    // this whole art pass has been unpicking, in the scene the player sees after every fight
+    // they win.
+    drawSky(g, 0, 300, 'dusk', 0, { sun: { x: 150, y: 250 }, cx: 560, clouds: 3 });
+    drawSea(g, {
+      top: 300, bottom: GROUND, t: 0, calm: 0.2, tint: 'gold',
+      sun: { x: 150, k: 0.7 },
+    });
     // the beach: wet sand, then dry
     for (let y = GROUND; y < H; y++) {
       const fk = (y - GROUND) / (H - GROUND);
       rect(g, 0, y, W, 1, fk < 0.14 ? mix(P.sand, P.water1, 0.35)
         : fk < 0.5 ? 'sand' : mix(P.sand, P.wood1, 0.25));
     }
-    rect(g, 0, GROUND, W, 4, 'ink');
+    // and the surf where the sea meets the sand, because the beach had a hard cut in it
+    drawSurf(g, 0, GROUND - 2, W, 0, { inland: 1, amp: 4, band: 5 });
+    rect(g, 0, GROUND + 6, W, 3, mix(P.sand, P.wood1, 0.45));
     for (let i = 0; i < 40; i++) {
       const sx = (i * 137) % W, sy = GROUND + 12 + ((i * 53) % 80);
       rect(g, sx, sy, 8 + (i % 3) * 6, 4, mix(P.sand, P.wood1, 0.4));
@@ -347,20 +339,31 @@ export function makeFeedScene() {
 
     const left = queue.filter((q) => q.k <= 0).length;
     const free = v ? berthsFree(v) : 0;
-    const title = !left ? 'THAT IS ALL OF THEM'
-      : !free ? `${left} STILL LYING THERE  ·  THE PENS ARE FULL`
-        : `${left} STILL LYING THERE  ·  ${f.apples} APPLES  ·  ${free} BERTHS`;
-    text(g, title, 26, 14, 'brass3', { font: 7 });
-    text(g, island ? island.name.toUpperCase() : '', W - 26, 8, 'wood2', { font: 3, right: true });
+    // the three numbers as badges, so the one that matters -- how many are still lying there
+    // -- is the biggest thing on the bar rather than a word in a sentence
+    text(g, island ? island.name.toUpperCase() : '', 22, 12, 'wood2', { font: 5 });
+    text(g, !left ? 'THAT IS ALL OF THEM' : !free ? 'THE PENS ARE FULL' : 'FEED THEM',
+      22, 26, !left ? 'leaf3' : !free ? 'red2' : 'parch1', { font: 3 });
+    UI.statBadge(g, 300, 4, {
+      icon: 'paw', label: 'STILL DOWN', value: left, tone: 'wood2',
+      valueColor: left ? 'brass3' : 'grey2',
+    });
+    UI.statBadge(g, 440, 4, {
+      icon: 'drop', label: 'APPLES', value: f.apples, tone: 'brass1', valueColor: 'cream',
+    });
+    UI.statBadge(g, 560, 4, {
+      icon: 'boat', label: 'BERTHS', value: free, tone: 'wood2',
+      valueColor: free ? 'brass3' : 'red2',
+    });
 
     if (noteT > 0 && note) {
       const a = clamp(noteT, 0, 1);
       const prev = g.globalAlpha;
       g.globalAlpha = a;
-      text(g, note, 26, H - 26, 'gold', { font: 5 });
+      text(g, note, 26, H - 28, 'gold', { font: 7 });
       g.globalAlpha = prev;
     } else {
-      text(g, 'CLICK ONE TO GIVE IT AN APPLE', 26, H - 26, 'wood2', { font: 3 });
+      text(g, 'CLICK ONE TO GIVE IT AN APPLE', 26, H - 26, 'parch1', { font: 3 });
     }
   }
 

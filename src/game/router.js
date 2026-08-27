@@ -5,7 +5,7 @@
 //        -> THE FILM     passing: the hand, the lantern, and what stood up out of it
 //        -> THE CAUSEWAY walk the ruins with his soul ahead of you, to the boat
 //        -> THE FILM     setsail
-//        -> OCEAN -> pick one of three -> ISLAND (a rescue)  -> OCEAN ...
+//        -> OCEAN -> pick one of three -> ISLAND (a rescue) -> THE RAMP (feed them) ...
 //                                     \-> CHERUBIM -> EDEN -> OCEAN ...
 //        -> HEAVEN at the end of every chapter, and once more at the end
 //        -> THE MANIFEST
@@ -26,6 +26,7 @@ import { newVoyage, departIsland, endVoyage, CHAPTERS } from './voyage.js';
 import { makeMenuScene } from '../scenes/menu.js';
 import { makeOceanScene } from '../scenes/ocean.js';
 import { makeIslandScene } from '../scenes/island.js';
+import { makeFeedScene } from '../scenes/feed.js';
 import { makeChoiceScene } from '../scenes/choice.js';
 import { makeEdenScene } from '../scenes/eden.js';
 import { makeGameOverScene } from '../scenes/gameover.js';
@@ -145,12 +146,27 @@ export function createRouter(app, o = {}) {
       });
     },
 
-    /** The rescue itself. Split out so an encounter can hand straight through to it. */
+    /**
+     * The rescue itself. Split out so an encounter can hand straight through to it.
+     *
+     * AND IT IS NOT OVER WHEN THE FIGHTING IS. Whatever is lying on the field goes to the
+     * ramp, where the apples are spent one at a time; the island scene hands its own field
+     * across so nothing has to be serialised between them.
+     */
     rescue(island) {
       go(makeIslandScene(), {
         voyage, island,
-        onDone: () => R.afterStop(),
+        onDone: (res, field) => R.feeding(island, field),
       }, 'curtain');
+    },
+
+    /** The quiet minute at the end of a stage. */
+    feeding(island, field) {
+      if (!field) { R.afterStop(); return; }
+      go(makeFeedScene(), {
+        voyage, island, field,
+        onDone: () => R.afterStop(),
+      }, 'light');
     },
 
     /** The garden: the only safe ground, and the only place anything is bought. */

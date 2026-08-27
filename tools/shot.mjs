@@ -529,6 +529,34 @@ switch (which) {
     scene = sc;
     break;
   }
+  case 'feed': {
+    // The ramp. HELD=n to put n animals on the sand, APPLES=n for the basket.
+    const V = await import('../src/game/voyage.js');
+    const I = await import('../src/data/islands.js');
+    const LA = await import('../src/game/lane.js');
+    const C = await import('../src/data/corrupted.js');
+    const { makeFeedScene } = await import('../src/scenes/feed.js');
+    const voyage = V.newVoyage(seed);
+    const island = I.ISLAND_BY_ID[process.env.ISLE || 'meadow'] || I.ISLANDS[0];
+    const f = LA.newLane(voyage, island, 'shot');
+    const A = await import('../src/data/animals.js');
+    const n = Number(process.env.HELD || 6);
+    for (let i = 0; i < n; i++) {
+      const def = C.CORRUPTED[i % C.CORRUPTED.length];
+      f.held.push({
+        def, baseId: def.base, a: A.ANIMAL_BY_ID[def.base],
+        row: i % 5, col: 1 + (i % 7), t: 0,
+      });
+    }
+    f.apples = Number(process.env.APPLES || 4);
+    f.over = true;
+    scene = makeFeedScene();
+    scene.enter({ voyage, island, field: f, onDone: () => {} }, app);
+    for (let i = 0; i < 60 * Number(process.env.SECS || 1); i++) scene.update(1 / 60, app, 1 / 60);
+    mouse(Number(process.env.MX || 470), Number(process.env.MY || 440));
+    for (let i = 0; i < 8; i++) scene.update(1 / 60, app, 1 / 60);
+    break;
+  }
   case 'cellar': {
     // The basement, at a phase. PHASE=intro|build|wake|lion|apple|tame|last|soul
     const V = await import('../src/game/voyage.js');

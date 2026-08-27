@@ -30,7 +30,7 @@ const DT = 1 / 60;
 
 let errors = [];
 // what the island rig managed with the new levers, printed on the tally line
-let grabbedTotal = 0, calledTotal = 0, bossTotal = 0;
+let grabbedTotal = 0, calledTotal = 0, bossTotal = 0, fedTotal = 0;
 let shotIx = 0;
 let app = null;
 
@@ -112,6 +112,7 @@ function where() {
   const d = dbg();
   if (d.film) return 'film';
   if (d.basement) return 'basement';
+  if (d.feeding) return 'feed';
   if (d.scriptId !== undefined) return 'cutscene';
   if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
   if (d.heaven) return 'heaven';
@@ -305,11 +306,7 @@ function playIsland() {
     // a ripe apple, then an apple thrown at anything dazed
     const ripe = f.trees.find((tr) => tr.ripe);
     if (ripe) { put(ripe.row, ripe.col); continue; }
-    if (f.stunned.length && f.apples > 0) {
-      const st = f.stunned[0];
-      put(st.row, Math.round(st.col));
-      continue;
-    }
+
     tick(60);
   }
 
@@ -419,6 +416,44 @@ function playBasement() {
   if (!took) errors.push('cellar: never got to take the apple');
   if (!threw) errors.push('cellar: never got to throw it');
   if (where() === 'basement') errors.push('cellar: it never ended');
+  return true;
+}
+
+/**
+ * THE RAMP. Feed until the basket is empty, then cast off -- and check the arithmetic the
+ * scene is built on: an apple is spent per animal, and what is left goes back to the water.
+ */
+function playFeed() {
+  paint();
+  snap('feed');
+  const start = dbg();
+  const apples0 = start.apples;
+  const left0 = start.left;
+  let guard = 0;
+  while (where() === 'feed' && guard++ < 80) {
+    const d = dbg();
+    const next = (d.queue() || []).find((q) => !q.fed);
+    if (next && d.apples > 0) {
+      paint();
+      clickAt(Math.round(next.x), Math.round(next.y));
+      tick(4);
+      continue;
+    }
+    // nothing left to feed: cast off with a real click on the button
+    paint();
+    const cr = dbg().rects && dbg().rects.cast;
+    if (cr) { const [cx, cy] = centre(cr); clickAt(cx, cy); }
+    tick(20);
+  }
+  const after = dbg();
+  if (where() === 'feed') errors.push('feed: never cast off');
+  else {
+    const fed = Math.min(apples0, left0);
+    if (fed > 0 && start.fed === after.fed && after.fed === 0) {
+      errors.push('feed: clicking an animal fed nothing');
+    }
+    fedTotal += fed;
+  }
   return true;
 }
 
@@ -594,7 +629,8 @@ function playVoyage(seed) {
   tick(4);
 
   const seen = {
-    film: 0, cellar: 0, cutscene: 0, walk: 0, heaven: 0, ocean: 0, island: 0, eden: 0, choice: 0,
+    film: 0, cellar: 0, cutscene: 0, walk: 0, heaven: 0, ocean: 0, island: 0, feed: 0,
+    eden: 0, choice: 0,
   };
   // click NEW RUN to prove the button works, then start OUR seed on purpose: the menu's
   // own seed is derived from a fixed string, so every voyage the bot played by clicking
@@ -616,6 +652,7 @@ function playVoyage(seed) {
     if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
     if (w === 'choice') { seen.choice++; playChoice(); continue; }
     if (w === 'island') { seen.island++; playIsland(); continue; }
+    if (w === 'feed') { seen.feed = (seen.feed || 0) + 1; playFeed(); continue; }
     if (w === 'eden') { seen.eden++; playEden(); continue; }
     if (w === 'summary') { playSummary(); break; }
     if (w === 'menu') break;
@@ -644,10 +681,10 @@ for (let i = 0; i < SEEDS; i++) {
   const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
     + `  paths ${s.obstaclesCleared}`
-    + `  [clay ${grabbedTotal} called ${calledTotal} boss ${bossTotal ? 'met' : '-'}]`
+    + `  [clay ${grabbedTotal} called ${calledTotal} fed ${fedTotal} boss ${bossTotal ? 'met' : '-'}]`
     + `  [film ${out.seen.film} cellar ${out.seen.cellar}`
     + ` walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
-    + ` island ${out.seen.island} eden ${out.seen.eden}`
+    + ` island ${out.seen.island} feed ${out.seen.feed} eden ${out.seen.eden}`
     + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;
   if (errors.length) {
     failed++;

@@ -454,13 +454,23 @@ with the pens full meant the first thing the game did was refuse to let you play
 ### An island stage (`src/game/lane.js`)
 
 Five rows, nine columns, and everything the flood ruined walking down them at the ark. The
-animals are the enemy AND the reward: knock one down and it stands there dazed and ordinary
-again, and an apple in that window keeps it — aboard the boat, and available as a blessed
-clay beast next island.
+animals are the enemy AND the reward: knock one down and it stays down, its own animal
+again, HELD — and when the line holds you walk the ark's ramp and feed them one at a time
+(`src/scenes/feed.js`). An apple each, a berth each, and what you cannot feed goes back to
+the water.
+
+**Why the apple moved out of the fight.** It used to be thrown mid-wave into an eight-second
+window before the dazed animal wandered off. That sounds like tension and played like an
+interruption: the correct move was always to stop watching the lanes, and the reward for the
+whole stage was collected in a panic while something ate a wall. Holding them costs nothing
+in drama — they are still only yours if you knocked them down, and still only as many as you
+have apples and berths for — and it buys the game the one thing it did not have: a quiet
+minute at the end where you kneel down and feed what you saved.
 
 ```
 field        864 × 330 px      tile 96 × 66     rows 5   cols 9
 clay         75 to open        drip 5/s         a mote 20, one every ~6s, gone in 9s
+apples       4 in the basket   a tree ripens every 16s     spent on the ramp, not in the fight
 waves        4 + (danger>=2) + (danger>=4), then a last one at 3.1x with a CHAMPION in it
 row guards   one per row       danger>=3 opens one row short, danger>=4 two (never on water)
 the ark      2 breaches        each one also costs an animal off the deck

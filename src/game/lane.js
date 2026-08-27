@@ -17,8 +17,18 @@
 //     up out of the churned ground for you to grab before they sink back.
 //   BLESSED BEASTS are the towers. Each does exactly one thing (see data/beasts.js).
 //   CORRUPTED BEASTS are the waves, and every one is an animal you are trying to collect.
-//   APPLES are how you collect them, and some islands grow them.
+//   ANYTHING YOU KNOCK DOWN STAYS DOWN. It lies there, its own animal again, HELD.
+//   APPLES are what you feed them WHEN THE FIGHT IS OVER, on the ark's ramp, one at a
+//     time (see scenes/feed.js). Some islands grow the apples.
 //   THE ARK has three lives. A beast that reaches it takes one of them AND one animal.
+//
+// WHY THE APPLE MOVED OUT OF THE FIGHT. It used to be thrown mid-wave, into an eight-second
+// window before the dazed animal wandered off -- which sounds like tension and played like
+// an interruption: the correct move was always to stop watching the lanes, and the reward
+// for the whole stage was collected in a panic while something ate a wall. Holding them
+// instead costs nothing in drama (they are still only yours if you knocked them down and
+// still only as many as you have apples for) and it buys the game the thing it was missing
+// entirely: a quiet minute at the end where you kneel down and feed what you saved.
 //
 // WHAT MADE THE FIGHTS GOOD, on the third pass. The waves were arithmetic you could do
 // once and then repeat: the same table, thicker, and a stage whose last thirty seconds were
@@ -149,7 +159,7 @@ export function newLane(v, island, tag) {
   const f = {
     seed, rng, island, tag: tag || 'lane', voyage: v, t: 0,
     terrain: new Uint8Array(N),
-    plants: [], beasts: [], shots: [], bees: [], stunned: [], trees: [], puffs: [],
+    plants: [], beasts: [], shots: [], bees: [], trees: [], puffs: [],
     waterRows: [],
 
     // THE ECONOMY. A drip so a bad opening is recoverable, and wells for everything else.
@@ -160,7 +170,11 @@ export function newLane(v, island, tag) {
     // difference between a player and a spectator is about one extra plant a wave.
     clay: 75, clayAcc: 0, clayDrip: 5,
     motes: [], moteIn: 5, moteEvery: 7.5, moteAmount: 20, grabbed: 0, missed: 0,
-    apples: 1,
+    // FOUR IN THE BASKET, and the trees on the island are worth more than they were: the
+    // feeding is where a stage is scored, and one apple made it a formality. What should
+    // usually stop you is the number of PENS -- that is the whole story -- with the apples
+    // biting only on a stage where you knocked down half the island.
+    apples: 4,
 
     waves: wavesFor(island, rng),
     // waveT starts at the FIRST wave's lead. At zero the loop advanced on the very first
@@ -174,6 +188,7 @@ export function newLane(v, island, tag) {
     // mistake you have already understood, and taking the run for it teaches nothing. A
     // guard stops one beast per row -- and knocks it DOWN, so the mistake still hands you
     // something to tame.
+    held: [],                 // knocked down and waiting for an apple, after the fight
     guards: new Array(ROWS).fill(true),
     ark: { hp: 2, max: 2 },
     // THE CHAMPION, walked in behind the last wave. See data/corrupted.js.
@@ -371,32 +386,32 @@ export function harvest(f, r, c) {
 }
 
 /**
- * Throw an apple at a beast you have already knocked down.
+ * FEED ONE HELD ANIMAL, which is the whole reward of a stage and now happens after it.
  *
- * THIS IS HOW YOU KEEP ANYTHING. A defeated corrupted beast stands there ordinary and dazed
- * for a few seconds; an apple in that window tames it for good. Miss the window and it
- * wanders off -- not a loss, but not a gain either, and the whole tension of a wave is
- * whether you can spare the attention.
+ * An apple, a berth, and the shape it teaches: the three things a rescue is made of. The
+ * apple is spent whether or not there was a berth, because the apple is what makes the
+ * animal follow you -- and a full ark is a real wall, which is where this bites.
  */
-export function tame(f, r, c) {
+export function feed(f, s) {
+  if (!s) return { ok: false, why: 'nothing there' };
+  const i = f.held.indexOf(s);
+  if (i < 0) return { ok: false, why: 'not held' };
   if (f.apples <= 0) return { ok: false, why: 'no apples' };
-  let best = null, bd = 1.4;
-  for (const s of f.stunned) {
-    const dd = Math.hypot(s.col - c, s.row - r);
-    if (dd < bd) { bd = dd; best = s; }
-  }
-  if (!best) return { ok: false, why: 'nothing to throw it to' };
+
+  // A FULL ARK REFUSES BEFORE THE APPLE IS SPENT. Feeding something a berth cannot hold
+  // and charging you the apple for it is the game taking a swing at the player: the pens
+  // being too small is the story, not a trap.
+  const a = ANIMAL_BY_ID[s.baseId];
+  if (!a) return { ok: false, why: 'nothing to keep' };
+  if (!berthsFree(f.voyage)) return { ok: false, why: 'the pens are full' };
 
   f.apples--;
-  f.stunned.splice(f.stunned.indexOf(best), 1);
-  const a = ANIMAL_BY_ID[best.baseId];
-  const gives = best.def.gives;
+  f.held.splice(i, 1);
+  const gives = s.def.gives;
 
-  // aboard, if there is a berth. A full ark is a real wall and this is where it bites.
   let boarded = false;
-  if (a && takeAboard(f.voyage, a.id)) { boarded = true; f.saved.push(a.id); }
+  if (takeAboard(f.voyage, a.id)) { boarded = true; f.saved.push(a.id); }
 
-  // and the shape it teaches, which is permanent for the run
   let learned = false;
   if (gives && BEAST_BY_ID[gives]) {
     f.voyage.beasts = f.voyage.beasts || STARTER_BEASTS.slice();
@@ -406,12 +421,31 @@ export function tame(f, r, c) {
       f.hand = handFor(f.voyage);
     }
   }
-  f.tamed.push(best.baseId);
+  f.tamed.push(s.baseId);
   const nm = (a && a.name.toUpperCase()) || 'IT';
-  note(f, learned ? `${nm} TAMED — ${BEAST_BY_ID[gives].name.toUpperCase()} LEARNED`
-    : boarded ? `${nm} IS ABOARD` : `${nm} TAMED, BUT NO BERTH`, learned ? 'gold' : 'leaf3');
-  for (let i = 0; i < 8; i++) f.puffs.push({ r: best.row, c: best.col, t: 0, i, kind: 'bless' });
-  return { ok: true, learned, boarded };
+  note(f, learned ? `${nm} FED — ${BEAST_BY_ID[gives].name.toUpperCase()} LEARNED`
+    : boarded ? `${nm} IS ABOARD` : `${nm} FED, BUT NO BERTH`, learned ? 'gold' : 'leaf3');
+  return { ok: true, learned, boarded, animal: a ? a.id : null };
+}
+
+/**
+ * The old verb, kept as the way the harnesses and the feeding scene point at one: find the
+ * held animal nearest a tile and give it the apple.
+ *
+ * IT REFUSES WHILE THE FIGHT IS ON. That is the change: mid-wave there is nothing to throw
+ * an apple at, because nothing wanders off any more -- they are all still lying there when
+ * the line holds, and that is when you feed them.
+ */
+export function tame(f, r, c) {
+  if (!f.over) return { ok: false, why: 'after the fight' };
+  if (f.apples <= 0) return { ok: false, why: 'no apples' };
+  let best = null, bd = 1e9;
+  for (const s of f.held) {
+    const dd = Math.hypot(s.col - c, s.row - r);
+    if (dd < bd) { bd = dd; best = s; }
+  }
+  if (!best) return { ok: false, why: 'nothing to feed' };
+  return feed(f, best);
 }
 
 /** What a click on the field does, given what is selected. */
@@ -425,13 +459,7 @@ export function actAt(f, r, c) {
   // a ripe tree is always worth a click, selection or not
   const tree = f.trees.find((x) => x.row === r && x.col === c);
   if (tree && tree.ripe) return harvest(f, r, c);
-  if (!f.sel) {
-    // no selection: a click on a stunned beast throws an apple, because that is the thing
-    // you are always in a hurry to do
-    if (f.stunned.some((s) => s.row === r && Math.abs(s.col - c) < 1.2)) return tame(f, r, c);
-    return { ok: false, why: 'pick something first' };
-  }
-  if (f.sel.kind === 'apple') { const res = tame(f, r, c); if (res.ok) f.sel = null; return res; }
+  if (!f.sel) return { ok: false, why: 'pick something first' };
   const res = plant(f, f.sel.id, r, c);
   if (res.ok && !canAfford(f, f.hand.find((b) => b.id === f.sel.id))) f.sel = null;
   return res;
@@ -490,7 +518,7 @@ function tickTrees(f, dt) {
   for (const tr of f.trees) {
     if (tr.ripe) continue;
     tr.t += dt;
-    if (tr.t > 24) { tr.t = 0; tr.ripe = true; note(f, 'AN APPLE HAS RIPENED', 'red2'); }
+    if (tr.t > 16) { tr.t = 0; tr.ripe = true; note(f, 'AN APPLE HAS RIPENED', 'red2'); }
   }
 }
 
@@ -754,31 +782,31 @@ function blockerFor(f, b) {
  * seconds, and an apple in that window keeps it. That window is the entire game: the reason
  * you cannot simply build the strongest wall and watch.
  */
+/**
+ * A corrupted beast goes down, and STAYS down.
+ *
+ * It does not die and it does not wander off: it lies where it fell, its own animal again,
+ * held until the fight is over and you can kneel down with an apple. The eight-second
+ * window this used to have was the game's worst minute -- it took your eyes off the lanes
+ * at exactly the moment the lanes mattered, and it punished the player for winning a fight
+ * with both hands full.
+ */
 function fell(f, b) {
   const a = ANIMAL_BY_ID[b.def.base];
-  f.stunned.push({
+  f.held.push({
     def: b.def, baseId: b.def.base, a, boss: !!b.boss,
     row: b.row, col: clamp(b.x - 0.5, 0, COLS - 1),
-    // A CHAMPION WAITS LONGER. You put everything you had into that and there is a
-    // fair chance you have no apple in hand at the moment it goes down -- fourteen
-    // seconds is time to run to a tree and back, which is a better last minute than
-    // watching the prize wander off.
-    t: 0, life: b.boss ? 14 : 8,
+    t: 0,
   });
   if (b.boss) f.bossDown = true;
-  note(f, b.boss ? `${b.def.name} IS DOWN — AN APPLE, NOW`
-    : `${b.def.name.toUpperCase()} IS DOWN — THROW AN APPLE`, 'gold');
+  note(f, b.boss ? `${b.def.name} IS DOWN — IT IS YOURS TO FEED`
+    : `${b.def.name.toUpperCase()} IS DOWN AND HELD`, 'gold');
   for (let i = 0; i < 6; i++) f.puffs.push({ r: b.row, c: b.x - 0.5, t: 0, i, kind: 'free' });
 }
 
 function tickStunned(f, dt) {
-  for (let i = f.stunned.length - 1; i >= 0; i--) {
-    const s = f.stunned[i];
-    s.t += dt;
-    if (s.t < s.life) continue;
-    f.stunned.splice(i, 1);
-    note(f, `${(s.a && s.a.name.toUpperCase()) || 'IT'} WANDERED OFF`, 'grey2');
-  }
+  // they only breathe now: nothing here can take one away from you
+  for (const s of f.held) s.t += dt;
 }
 
 /** Something reached the ark. */
@@ -968,24 +996,33 @@ function tickBees(f, dt) {
 
 /* ------------------------------------------------------------------- outcomes */
 
+/**
+ * The fight ends. NOTHING IS COLLECTED HERE.
+ *
+ * What is lying on the field goes to the feeding (scenes/feed.js), which is where the
+ * apples are spent and the ledger is written. This used to hand every dazed animal aboard
+ * for free at the bell, which quietly made the apple optional: hold the line and you got
+ * the lot anyway.
+ */
 export function endLane(f, why) {
   if (f.over) return;
   f.over = true;
   f.why = why || 'clear';
-  // anything still dazed on the field when the fight ends is kept for free: you earned it
-  for (const s of f.stunned.slice()) {
-    const a = ANIMAL_BY_ID[s.baseId];
-    if (a && takeAboard(f.voyage, a.id)) f.saved.push(a.id);
-    const gives = s.def.gives;
-    if (gives && BEAST_BY_ID[gives]) {
-      f.voyage.beasts = f.voyage.beasts || STARTER_BEASTS.slice();
-      if (f.voyage.beasts.indexOf(gives) < 0) f.voyage.beasts.push(gives);
-    }
-  }
-  f.stunned.length = 0;
+  say(f.voyage, `${f.island.name}: ${f.held.length} held, ${f.lost.length} taken.`,
+    f.held.length >= f.lost.length ? 'leaf4' : 'rust');
+  return f;
+}
+
+/** Called by the feeding scene when it is finished, so the ledger is written once. */
+export function endFeeding(f) {
   if (f.saved.length > f.voyage.stats.bestRescue) f.voyage.stats.bestRescue = f.saved.length;
-  say(f.voyage, `${f.island.name}: ${f.saved.length} tamed, ${f.lost.length} taken.`,
-    f.saved.length >= f.lost.length ? 'leaf4' : 'rust');
+  const left = f.held.length;
+  if (left) {
+    say(f.voyage, `${left} went back into the water. There were not enough apples.`, 'rust');
+  }
+  if (f.saved.length) {
+    say(f.voyage, `${f.saved.length} fed and aboard.`, 'leaf4');
+  }
   return f;
 }
 
@@ -995,6 +1032,7 @@ export function result(f) {
     saved: f.saved.slice(), lost: f.lost.slice(), tamed: f.tamed.slice(),
     why: f.why, seconds: f.t, waves: f.wave + 1,
     boss: f.bossDown, called: f.called, grabbed: f.grabbed,
+    held: f.held.length, apples: f.apples,
   };
 }
 

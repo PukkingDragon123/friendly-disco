@@ -73,6 +73,7 @@ async function sceneKind(page) {
     if (d.heaven) return 'heaven';
     if (d.lane) return 'island';
     if (d.encounter) return 'choice';
+    if (d.feeding) return 'feed';
     if (d.rects && d.rects.gates) return 'garden';
     if (d.at && d.at.isles) return 'ocean';
     if (d.won !== undefined) return 'summary';
@@ -416,6 +417,64 @@ const islandT = await drawTime(page);
 console.log('island draw:', JSON.stringify(islandT));
 if (islandT && islandT.drawMs > 16.6) errors.push(`island draw ${islandT.drawMs}ms exceeds a 60fps frame`);
 await page.screenshot({ path: `${OUT}-7-rescue.png` });
+
+// THE RAMP, with a real mouse: knock the island's waves down, then feed what is lying
+// there. This is the scene the whole stage is for, so it gets clicked rather than skipped.
+const ramp = await page.evaluate(async () => {
+  const app = window.__ARK.app;
+  const d = app.scene.debug();
+  // end the fight where it stands and hand the field to the feeding, the way the island
+  // does when you cast off
+  const f = d.lane;
+  const C = await import('/src/data/corrupted.js');
+  const A = await import('/src/data/animals.js');
+  for (let i = 0; i < 4; i++) {
+    const def = C.CORRUPTED[i % C.CORRUPTED.length];
+    f.held.push({ def, baseId: def.base, a: A.ANIMAL_BY_ID[def.base], row: i, col: 2 + i, t: 0 });
+  }
+  f.apples = 3;
+  d.finish();
+  return { held: f.held.length, apples: f.apples };
+});
+console.log('ramp in:', JSON.stringify(ramp));
+for (let i = 0; i < 12 && (await sceneKind(page)) === 'island'; i++) {
+  await page.mouse.click(480 * (await page.evaluate(() => window.__ARK.app.scale)), 400);
+  await page.waitForTimeout(200);
+}
+if ((await sceneKind(page)) === 'feed') {
+  await page.screenshot({ path: `${OUT}-7b-ramp.png` });
+  const scale = await page.evaluate(() => window.__ARK.app.scale);
+  const box = await page.evaluate(() => {
+    const r = document.getElementById('game').getBoundingClientRect();
+    return { left: r.left, top: r.top };
+  });
+  const before = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return { apples: d.apples, left: d.left, aboard: d.voyage.aboard.length };
+  });
+  for (let i = 0; i < 6; i++) {
+    const q = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug();
+      if (!d.feeding) return null;
+      const n = (d.queue() || []).find((x) => !x.fed);
+      return n ? { x: n.x, y: n.y, apples: d.apples } : null;
+    });
+    if (!q || q.apples <= 0) break;
+    await page.mouse.click(box.left + q.x * scale, box.top + q.y * scale);
+    await page.waitForTimeout(260);
+  }
+  const after = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return d.feeding ? { apples: d.apples, fed: d.fed, aboard: d.voyage.aboard.length } : null;
+  });
+  console.log('ramp:', JSON.stringify(before), '->', JSON.stringify(after));
+  if (after && after.fed <= 0) errors.push('clicking an animal on the ramp fed nothing');
+  const rampT = await drawTime(page);
+  console.log('ramp draw:', JSON.stringify(rampT));
+  if (rampT && rampT.drawMs > 16.6) errors.push(`ramp draw ${rampT.drawMs}ms exceeds a frame`);
+} else {
+  errors.push('the island never handed over to the ramp');
+}
 
 // and the garden, which is the heaviest static scene
 await page.evaluate(() => window.__ARK.eden());

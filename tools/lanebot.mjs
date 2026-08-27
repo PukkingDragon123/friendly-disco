@@ -70,11 +70,15 @@ function play(isl, seed) {
     }
     // and a breather it has nothing left to spend on is a breather worth selling
     if (f.clay >= 300 && LA.callable(f)) LA.callWave(f);
-    if (f.stunned.length && f.apples > 0) {
-      const st = f.stunned[0];
-      if (LA.tame(f, st.row, Math.round(st.col)).ok) tamed++;
-    }
+
   }
+  // THE RAMP: what it kept is what it could feed, not what it knocked down
+  while (f.apples > 0 && f.held.length) {
+    const st = f.held[0];
+    if (!LA.tame(f, st.row, Math.round(st.col)).ok) break;
+    tamed++;
+  }
+  LA.endFeeding(f);
   return { f, tamed, v };
 }
 
@@ -85,7 +89,8 @@ for (const isl of ISLANDS) {
   console.log(
     isl.id.padEnd(10), ('d' + isl.danger).padEnd(3), f.why.padEnd(8),
     'guards', f.guards.filter(Boolean).length, 'ark', f.ark.hp,
-    '| tamed', String(tamed).padStart(2), 'kept', String(f.saved.length).padStart(2),
+    '| held', String(f.held.length + tamed).padStart(2),
+    'fed', String(tamed).padStart(2), 'kept', String(f.saved.length).padStart(2),
     'lost', f.lost.length, '| plants', String(f.plants.length).padStart(2),
     '| knows', (v.beasts || []).length, '| boss', f.bossSeen ? (f.bossDown ? 'down' : 'alive') : '-',
     '| t', f.t.toFixed(0) + 's',

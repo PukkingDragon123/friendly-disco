@@ -445,11 +445,18 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
       }
       // a breather it has nothing left to spend on is a breather worth selling
       if (f.clay >= 300 && LA.callable(f)) LA.callWave(f);
-      if (f.stunned.length && f.apples > 0) {
-        const st = f.stunned[0];
-        LA.tame(f, st.row, Math.round(st.col));
-      }
+      // NOTHING IS TAMED MID-FIGHT ANY MORE. What it knocks down stays down; the feeding
+      // happens below, once the stage is over, which is what the ramp scene does.
+
     }
+    // AND THEN THE RAMP: feed as many as the basket allows, which is what the feeding scene
+    // does with a mouse. A stage's score is not what it knocked down, it is what it kept.
+    while (f.apples > 0 && f.held.length) {
+      const st = f.held[0];
+      if (!LA.tame(f, st.row, Math.round(st.col)).ok) break;
+    }
+    LA.endFeeding(f);
+
     return f;
   }
 
@@ -703,26 +710,42 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     });
     let guard = 0;
     while (f.beasts.length && guard++ < 60 * 20) LA.update(f, 1 / 60);
-    ok(f.stunned.length === 1, 'a felled beast stands there dazed rather than dying');
-    const s = f.stunned[0];
+    ok(f.held.length === 1, 'a felled beast lies there rather than dying');
+    const s = f.held[0];
     const knew = (v.beasts || []).length;
+
+    // AND IT CANNOT BE FED WHILE THE FIGHT IS ON. That is the change: the apple is spent on
+    // the ark's ramp afterwards, so mid-wave there is nothing to throw it at.
+    const early = LA.tame(f, s.row, Math.round(s.col));
+    ok(!early.ok && /after the fight/.test(early.why), 'no feeding mid-fight', early.why);
+    ok(f.apples === 2, 'and the refusal costs nothing', String(f.apples));
+
+    LA.endLane(f, 'clear');
+    ok(f.held.length === 1, 'and it is still there when the fight ends');
     const res = LA.tame(f, s.row, Math.round(s.col));
-    ok(res.ok, 'an apple tames it', JSON.stringify(res));
+    ok(res.ok, 'an apple on the ramp keeps it', JSON.stringify(res));
     ok(v.aboard.indexOf('boar') >= 0, 'and it is aboard');
     ok((v.beasts || []).length >= knew, 'and the shape it teaches is remembered');
     ok(f.apples === 1, 'and the apple is spent');
+    ok(f.held.length === 0, 'and it is off the field');
   }
 
-  // --- the dazed window closes
+  // --- NOTHING WANDERS OFF ANY MORE
   {
     const v = V.newVoyage('LWIND');
     const f = LA.newLane(v, ISLANDS[0], 'd');
-    f.stunned.push({
+    f.held.push({
       def: M.corrupted.CORRUPT_BY_ID.c_boar, baseId: 'boar',
-      a: M.animals.ANIMAL_BY_ID.boar, row: 2, col: 4, t: 0, life: 8,
+      a: M.animals.ANIMAL_BY_ID.boar, row: 2, col: 4, t: 0,
     });
-    for (let i = 0; i < 60 * 10; i++) LA.update(f, 1 / 60);
-    ok(f.stunned.length === 0, 'a dazed beast wanders off if you leave it');
+    for (let i = 0; i < 60 * 30; i++) LA.update(f, 1 / 60);
+    ok(f.held.length === 1, 'a held animal is still there half a minute later');
+
+    // and the fight does not hand it to you for free at the bell
+    const deck0 = v.aboard.length;
+    LA.endLane(f, 'clear');
+    ok(v.aboard.length === deck0, 'the bell does not board it for you', String(v.aboard.length));
+    ok(f.held.length === 1, 'it is waiting for an apple');
   }
 
   // --- a row guard is a one-shot save that still hands you the animal
@@ -737,7 +760,7 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     for (let i = 0; i < 60 * 4; i++) LA.update(f, 1 / 60);
     ok(f.guards[0] === false, 'the row guard is spent');
     ok(f.ark.hp === hp0, 'and the ark is untouched');
-    ok(f.stunned.length === 1, 'and the beast it stopped is there to be tamed');
+    ok(f.held.length === 1, 'and the beast it stopped is there to be fed');
   }
 
   // --- and once the guard is gone, a breach costs an animal off the deck

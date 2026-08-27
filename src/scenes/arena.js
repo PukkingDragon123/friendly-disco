@@ -309,107 +309,127 @@ export function makeArenaScene() {
 
   /* --------------------------------------------------------------------- draw */
 
+  /**
+   * THE TOP BAR, and it is a row of BADGES rather than a paragraph.
+   *
+   * What was here was eleven pieces of five-pixel text on a flat brown strip: the island's
+   * name, the wave, two lists of faces, the clay, the round and a button, all at the same
+   * weight. Every value was the same size as its own label, which means at a glance the
+   * player reads none of it. Now: an icon to find each thing by, a small label to name it,
+   * and the number at twice the label's height.
+   */
   function drawHud(g) {
-    UI.panel(g, 0, 0, W, 46, { style: 'wood', shadow: false });
     const foes = livingFoes(f);
-    const beaten = foes.filter((x) => x.dazed).length;
-    text(g, `${f.island.name.toUpperCase()}`, 14, 9, 'brass3', { font: 7 });
+    const wild = foes.filter((x) => !x.dazed);
+    const beaten = foes.filter((x) => x.dazed);
+    UI.panel(g, 0, 0, W, 52, { style: 'wood', shadow: false });
+    rect(g, 0, 50, W, 2, mix(P.wood0, P.ink, 0.4));
+
+    // the place, top left, big -- it is the one label that is a title
+    text(g, `${f.island.name.toUpperCase()}`, 14, 8, 'brass3', { font: 7, scale: 2 });
     text(g, `WAVE ${Math.min(f.waveIx + 1, f.waves.length)} OF ${f.waves.length}`,
-      14, 28, 'parch1', { font: 3 });
+      16, 34, 'parch1', { font: 3 });
 
-    // what is left, as a row of pips: a number is a number and a row of faces is a threat
-    let px = 250;
-    text(g, 'STILL WILD', px, 6, 'parch0', { font: 3 });
-    foes.filter((x) => !x.dazed).slice(0, 9).forEach((foe, i) => {
-      drawAnimalIcon(g, foe.a, px + 10 + i * 22, 28, { size: 20 });
-    });
-    if (beaten) {
-      text(g, 'BEATEN — HERD THEM', 470, 6, 'gold', { font: 3 });
-      foes.filter((x) => x.dazed).slice(0, 8).forEach((foe, i) => {
-        drawAnimalIcon(g, foe.a, 480 + i * 22, 28, { size: 20 });
-        rect(g, 470 + i * 22, 38, 20, 2, 'gold');
+    // WHO IS LEFT, as faces on a plate. A count is a number; a row of faces is a threat.
+    const facePlate = (x, label, list, tone, mark) => {
+      const n = Math.min(7, list.length);
+      const w = 30 + n * 24;
+      UI.roundRect(g, x - 2, 6, w + 4, 42, 6, 'ink');
+      UI.roundRect(g, x, 8, w, 38, 5, mix(P[tone], P.ink, 0.35));
+      text(g, label, x + 6, 10, 'parch1', { font: 3 });
+      list.slice(0, n).forEach((foe, i) => {
+        drawAnimalIcon(g, foe.a, x + 18 + i * 24, 32, { size: 22 });
+        if (mark) rect(g, x + 8 + i * 24, 42, 20, 2, 'gold');
       });
-    }
+      if (list.length > n) text(g, `+${list.length - n}`, x + w - 14, 34, 'brass3', { font: 3 });
+      return w;
+    };
+    let fx = 250;
+    if (wild.length) fx += facePlate(fx, 'STILL WILD', wild, 'red0', false) + 10;
+    if (beaten.length) facePlate(fx, 'BEATEN - HERD THEM', beaten, 'brass0', true);
 
-    // clay, apples, round
-    text(g, `CLAY ${f.clay}`, W - 250, 9, 'brass3', { font: 5 });
-    text(g, `ROUND ${f.round}`, W - 250, 28, 'parch1', { font: 3 });
-    appleRect = UI.rectOf(W - 130, 6, 116, 34);
-    UI.button(g, appleRect, `APPLE ${f.apples}`, {
-      hot: UI.hover(appleRect, Input.mouse) || appleMode,
-      color: appleMode ? 'red1' : 'wood2', font: 5,
-      sub: appleMode ? 'PICK A BEAST' : '[A] TAMES ONE',
+    // the counters and the apple, top right
+    const ar = UI.statBadge(g, W - 146, 7, {
+      icon: 'drop', label: 'APPLES', value: f.apples, tone: appleMode ? 'red1' : 'brass1',
+      valueColor: 'cream', glow: appleMode || UI.hover(UI.rectOf(W - 146, 7, 132, 38), Input.mouse)
+        ? 'gold' : null,
     });
+    appleRect = ar;
+    UI.statBadge(g, W - 290, 7, { icon: 'gem', label: 'CLAY', value: f.clay, tone: 'wood2' });
+    UI.statBadge(g, W - 400, 7, {
+      icon: 'clock', label: 'ROUND', value: f.round, tone: 'wood2', valueColor: 'parch1',
+    });
+    if (appleMode) {
+      text(g, 'PICK A BEAST', W - 140, 46, 'red2', { font: 3 });
+    }
 
     // THE TIDE, and it is only on the bar when it is actually coming
     if (f.round >= FIGHT.tideFrom - 3) {
       const away = FIGHT.tideFrom - f.round;
-      const label = away > 0 ? `THE TIDE IN ${away}` : 'THE TIDE IS IN';
-      const wpx = textW(label, { font: 5 }) + 16;
-      rect(g, W / 2 - wpx / 2, 50, wpx, 20, away > 0 ? 'wood0' : 'red1');
-      text(g, label, W / 2, 55, away > 0 ? 'parch1' : 'white', { font: 5, center: true });
+      UI.banner(g, 72, away > 0 ? `THE TIDE IN ${away}` : 'THE TIDE IS IN', {
+        tone: away > 0 ? 'wood1' : 'red1', color: away > 0 ? 'brass3' : 'white',
+      });
     }
   }
 
+  /**
+   * THE TRAY: one card per animal, and the card is the readable unit.
+   *
+   * The old card was a flat cream rectangle with the name in ink, the skill in five-pixel
+   * rust, a green rect for health and the health NUMBER underneath it in grey. The number the
+   * player needs most was the least visible thing on it. Now the portrait sits on a sunken
+   * plate, the skill is a pill, and the health is a bar with its own number ON it.
+   */
   function drawTray(g) {
     UI.panel(g, 0, TRAY_Y, W, H - TRAY_Y, { style: 'wood', shadow: false });
     const dim = f.phase !== 'aim';
     const list = f.mine;
-    const cw = 118, gap = 6;
+    const cw = 158, ch = 76, gap = 8;
     const total = list.length * cw + (list.length - 1) * gap;
-    let x = Math.max(10, (W - total) / 2);
+    let x = Math.max(8, (W - total) / 2);
     cardRects = [];
     list.forEach((m, i) => {
-      const r = UI.rectOf(x, TRAY_Y + 8, cw, 88);
+      const r = UI.rectOf(x, TRAY_Y + 8, cw, ch);
       cardRects.push(r);
       const on = i === f.picked && !m.out && !m.aboard;
       const gone = m.out || m.aboard;
-      const lift = on ? -5 : 0;
-      UI.panel(g, r.x, r.y + lift, r.w, r.h, {
-        style: gone ? 'slate' : on ? 'brass' : 'paper', shadow: true,
-      });
-      if (!gone) {
-        drawAnimalIcon(g, m.a, r.x + 26, r.y + lift + 34, { size: 34 });
-      } else {
-        drawAnimalIcon(g, m.a, r.x + 26, r.y + lift + 34, { size: 34, alpha: 0.3 });
-      }
-      const nm = m.a.name.toUpperCase();
-      text(g, nm.length > 9 ? `${nm.slice(0, 8)}.` : nm, r.x + 48, r.y + lift + 10,
-        gone ? 'grey1' : 'ink', { font: 5 });
       const sk = SKILLS[m.skill];
-      text(g, sk ? sk.name : '', r.x + 48, r.y + lift + 26, gone ? 'grey0' : 'rust',
-        { font: 3 });
-      // health
-      const hk = clamp(m.hp / m.maxHp, 0, 1);
-      rect(g, r.x + 8, r.y + lift + 58, cw - 16, 10, 'ink');
-      rect(g, r.x + 9, r.y + lift + 59, (cw - 18) * hk, 8,
-        hk > 0.6 ? 'leaf2' : hk > 0.3 ? 'gold' : 'red2');
-      text(g, gone ? (m.aboard ? 'ABOARD' : 'DOWN') : `${Math.max(0, m.hp)}`,
-        r.x + cw / 2, r.y + lift + 71, gone ? 'grey2' : 'parch1', { font: 3, center: true });
+      UI.critterCard(g, r.x, r.y, cw, ch, {
+        name: m.a.name,
+        skill: sk ? sk.name : '',
+        hp: m.hp, maxHp: m.maxHp, index: i + 1,
+        state: gone ? 'spent' : on ? 'picked' : 'ready',
+        spentLabel: m.aboard ? 'ABOARD' : 'DOWN',
+        draw: (cx, cy, size) => drawAnimalIcon(g, m.a, cx, cy, {
+          size: Math.round(size * 0.92), alpha: gone ? 0.35 : 1,
+        }),
+      });
+      const lift = on ? -6 : 0;
       if (m.flash > 0) wash(g, r.x, r.y + lift, r.w, r.h, 'red2', m.flash * 0.5);
-      if (m.planted > 0) {
-        rect(g, r.x + 4, r.y + lift + 4, 6, 6, 'brass3');
-      }
-      text(g, `${i + 1}`, r.x + cw - 12, r.y + lift + 8, 'wood1', { font: 3 });
+      // the mark for an animal that has already been played this round
+      if (m.planted > 0) UI.roundRect(g, r.x + 6, r.y + lift - 4, 10, 10, 3, 'brass3');
       x += cw + gap;
     });
     if (dim) wash(g, 0, TRAY_Y, W, H - TRAY_Y, 'ink', 0.34);
 
-    // the one line of instruction, and it changes with what you are doing
+    // ONE LINE OF INSTRUCTION, centred under the cards, and it changes with what you are
+    // doing. It used to be two lines pinned to opposite corners of the frame, both of them
+    // five pixels tall, and the right-hand one ran under the last card.
     const me = picked(f);
+    const sk = me && SKILLS[me.skill];
     const hint = f.phase !== 'aim' ? 'WATCH'
       : appleMode ? 'CLICK A BEAST TO THROW THE APPLE'
-        : me ? `DRAG FROM ${me.a.name.toUpperCase()} — FAR IS HARD` : '';
-    text(g, hint, 14, H - 14, 'parch0', { font: 3 });
-    const sk = me && SKILLS[me.skill];
-    if (sk && f.phase === 'aim') {
-      // the rule, and it is TRIMMED to the frame: three of the eight run off the right edge
-      // at full length and a rule you cannot read the end of is worse than no rule
-      let line2 = `${sk.name}: ${sk.rule}`;
-      while (textW(line2, { font: 3 }) > W - 380 && line2.length > 12) {
+        : me ? `DRAG FROM ${me.a.name.toUpperCase()} - FAR IS HARD` : '';
+    const rule = sk && f.phase === 'aim' ? `${sk.name}: ${sk.rule}` : '';
+    const y = H - 13;
+    text(g, hint, 14, y, appleMode ? 'red2' : 'parch1', { font: 3 });
+    if (rule) {
+      let line2 = rule;
+      const room = W - 40 - textW(hint, { font: 3 });
+      while (textW(line2, { font: 3 }) > room && line2.length > 12) {
         line2 = `${line2.slice(0, -5)}...`;
       }
-      text(g, line2, W - 14 - textW(line2, { font: 3 }), H - 14, 'brass3', { font: 3 });
+      text(g, line2, W - 14, y, 'brass3', { font: 3, right: true });
     }
   }
 
@@ -617,22 +637,21 @@ export function makeArenaScene() {
    */
   function drawBanner(g) {
     if (bannerT <= 0 || !banner) return;
+    // the same in-and-out envelope as before -- a banner that pops in reads as a bug -- on
+    // the shared rounded banner, so the arena's callouts match the map's and the shop's
     const k = 1 - bannerT / 1.9;
     const inK = Ease.outCubic(clamp(k * 4, 0, 1));
     const outK = Ease.inCubic(clamp((k - 0.62) / 0.38, 0, 1));
     const a = clamp(inK - outK, 0, 1);
     if (a <= 0.01) return;
-    const tw = textW(banner, { font: 7 }) * 2;
-    const bw = tw + 56;
-    const y = GROUND.nearY - 74;
-    const x0 = W / 2 - bw / 2 + (1 - inK) * 60 - outK * 60;
-    rect(g, x0, y, bw, 30, 'ink');
-    rect(g, x0 + 2, y + 2, bw - 4, 26, mix(P.rust, P.ink, 0.42));
-    rect(g, x0 + 2, y + 2, bw - 4, 2, 'gold');
-    rect(g, x0 + 2, y + 26, bw - 4, 2, mix(P.gold, P.ink, 0.5));
-    text(g, banner, x0 + bw / 2, y + 7, 'gold',
-      { font: 7, center: true, scale: 2, alpha: a });
+    const prev = g.globalAlpha;
+    g.globalAlpha = a;
+    UI.banner(g, GROUND.nearY - 62 - Math.round(inK * 6), banner,
+      { tone: 'wood0', color: 'gold', scale: 2 });
+    g.globalAlpha = prev;
   }
+
+
 
   function drawOver(g) {
     if (f.phase !== 'won' && f.phase !== 'lost' && f.phase !== 'left') return;

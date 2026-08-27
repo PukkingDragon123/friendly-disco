@@ -14,6 +14,7 @@ import {
 } from '../core/pixel.js';
 import { makeRng } from '../core/rng.js';
 import { makeBuf, bset, btri, outline, flush } from './pixbuf.js';
+import { drawSea } from './ocean.js';
 
 export const TIME_OF_DAY = { dawn: 0, day: 0.25, dusk: 0.5, night: 0.75 };
 
@@ -623,43 +624,29 @@ export function createSeascape(seed, o = {}) {
       const n = keys.length;
       const step = opt.step || 12;
 
-      // the flat ground of the sea: the palest water, right up to the horizon
-      rect(g, x, hy, w, waterH, keys[0]);
-
-      // then the bands, near-horizon first, each one darker and each one's edge bigger and
-      // slower. BANDS ARE BUNCHED TOWARD THE HORIZON (the 0.62 power) because that is what
-      // makes a flat plane read as receding.
-      const bands = 4;
-      for (let b = 1; b <= bands; b++) {
-        const k = Math.pow(b / bands, 0.62);
-        const edgeY = hy + Math.round(k * waterH * 0.92);
-        if (edgeY >= bottom - 2) break;
-        const fill = keys[Math.min(n - 1, Math.round(k * (n - 1)))];
-        const amp = (1 + k * 5) * (1 + storm * 1.2);
-        const per = 190 + k * 280;
-        const drift = 0.4 + k * 1.1;
-        // foam on the edge, and a dark lip only on the two nearest bands: a lip on every
-        // one of them turns the sea into a stack of dark rules.
-        const foam = mix(P[foamC], P[fill], 0.2 + k * 0.3);
-        const lip = k > 0.5 ? mix(P[fill], P.ink, 0.28) : null;
-        drawBand(g, x, w, bottom, edgeY, t, b, amp, per, drift, fill, foam, lip, step);
-      }
-
-      // A LONG SWELL crossing the whole sea, which is the one thing that says "this water
-      // is moving" rather than "this water has a pattern on it".
-      for (let sw = 0; sw < (storm > 0.4 ? 2 : 1); sw++) {
-        const ph = ((t * (0.05 + sw * 0.02) + sw * 0.43) % 1);
-        const base = hy + Math.round(Math.pow(ph, 0.62) * waterH);
-        if (base < hy + 6 || base > bottom - 8) continue;
-        const k = (base - hy) / waterH;
-        const amp = 3 + k * 10 + storm * 6;
-        for (let i = 0; i < w; i += step) {
-          const yy = Math.round(bandEdge(x + i, base, t, sw * 3, amp, 190 + k * 200, 0.9));
-          if (yy < hy + 4 || yy > bottom - 8) continue;
-          rect(g, x + i, yy, step, 4, mix(P[foamC], P[keys[Math.min(n - 1, 2)]], 0.4 - k * 0.3));
-          rect(g, x + i, yy + 4, step, 4, mix(P[keys[Math.min(n - 1, 3)]], P.ink, 0.35));
-        }
-      }
+      // THE WATER IS THE SHARED SEA NOW (render/ocean.js).
+      //
+      // What was here: the palest water flooded flat, then four big bands with wavy edges
+      // bunched toward the horizon. It is a defensible way to draw a sea and it read as a
+      // STRIPED FLAG -- four stripes filling the frame, each one an eighth of the screen
+      // tall, with a slow six-pixel wobble on its edge. On the title screen, which is the
+      // first thing anybody sees, the ocean was bunting.
+      //
+      // The shared renderer gets this layer's own palette -- the time-of-day preset's palest
+      // and darkest water, and its foam -- so a night sea and a storm sea still look like
+      // themselves; what it brings is the perspective in the ripple scale, which is the thing
+      // that actually makes a flat plane read as water.
+      drawSea(g, {
+        x, w, top: hy, bottom, t,
+        // the preset's keys run from the horizon's REFLECTION to the deep, so the reflection
+        // is handed over as the glow and the water's own colour starts a few keys in
+        glow: P[keys[0]] || keys[0],
+        shallow: P[keys[Math.min(n - 1, 3)]] || keys[Math.min(n - 1, 3)],
+        deep: P[keys[n - 1]] || keys[n - 1],
+        foam: foamC,
+        calm: storm > 0.4 ? 0 : 0.25,
+      });
+      void step; void bandEdge; void drawBand;
 
       // THE SUN COLUMN, in chunks. A one-pixel glitter field is invisible at this grid and
       // was thousands of calls; eight blocks that jump about read as glare.

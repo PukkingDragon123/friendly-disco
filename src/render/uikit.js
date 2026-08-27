@@ -540,3 +540,191 @@ export function iconPlate(g, x, y, size, name, o = {}) {
   const s = Math.max(1, Math.floor((size - 6) / 9));
   icon(g, name, x + Math.round((size - 9 * s) / 2), y + Math.round((size - 9 * s) / 2), { color: o.color || 'brass3', scale: s });
 }
+
+/* ------------------------------------------------------- THE CUTE, READABLE SET
+
+Four widgets added for the readability pass, and one rule behind all of them: A NUMBER THE
+PLAYER NEEDS IS DRAWN BIG, and everything that is not a number is drawn ROUND.
+
+The HUD had eleven pieces of five-pixel text on a flat brown bar, and the tray cards carried
+their health as a grey three-digit number under a flat green rect. Every value in the game was
+the same size as every label, which means the player reads all of it or none of it -- and at a
+glance, none of it. These four are the same information with a hierarchy: an icon to find it
+by, a small label to name it, and a value at twice the height of the label.
+*/
+
+/** The corner inset of a rounded rect, row by row. Cached: it is the same eight numbers. */
+const ROUND_CACHE = new Map();
+function roundInsets(r) {
+  const key = String(r);
+  let a = ROUND_CACHE.get(key);
+  if (a) return a;
+  a = [];
+  for (let i = 0; i < r; i++) {
+    const dy = r - i - 0.5;
+    a.push(Math.max(0, Math.round(r - Math.sqrt(Math.max(0, r * r - dy * dy)))));
+  }
+  ROUND_CACHE.set(key, a);
+  return a;
+}
+
+/** A rounded rectangle, drawn as spans. `r` is the corner radius in pixels. */
+export function roundRect(g, x, y, w, h, r, c) {
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  const ins = roundInsets(Math.max(1, Math.min(r, Math.floor(Math.min(w, h) / 2))));
+  const n = ins.length;
+  for (let i = 0; i < n; i++) {
+    rect(g, x + ins[i], y + i, w - ins[i] * 2, 1, c);
+    rect(g, x + ins[i], y + h - 1 - i, w - ins[i] * 2, 1, c);
+  }
+  rect(g, x, y + n, w, h - n * 2, c);
+}
+
+/**
+ * A CUTE PANEL: rounded, inked, with a lit top and a shaded floor.
+ *
+ * o.style   a key into STYLES, as panel()
+ * o.tone    an explicit fill instead of a style
+ * o.r       corner radius (default 4)
+ * o.glow    a colour to ring it with, for the selected one
+ * o.shadow  a hard offset shadow, as panel()
+ */
+export function softPanel(g, x, y, w, h, o = {}) {
+  const s = STYLES[o.style] || STYLES.paper;
+  const r = o.r === undefined ? 4 : o.r;
+  const fill = o.tone || s.fill || 'parch1';
+  if (o.shadow) roundRect(g, x + 2, y + 3, w, h, r, 'ink');
+  if (o.glow) {
+    roundRect(g, x - 3, y - 3, w + 6, h + 6, r + 2, o.glow);
+    roundRect(g, x - 1, y - 1, w + 2, h + 2, r + 1, 'ink');
+  } else {
+    roundRect(g, x - 2, y - 2, w + 4, h + 4, r + 1, 'ink');
+  }
+  roundRect(g, x, y, w, h, r, fill);
+  // the light: two rows along the top, one along the bottom, inside the corners
+  rect(g, x + r, y, w - r * 2, 2, mix(col(fill), P.white, 0.3));
+  rect(g, x + r, y + h - 2, w - r * 2, 2, mix(col(fill), P.ink, 0.28));
+  rect(g, x, y + r, 2, h - r * 2, mix(col(fill), P.white, 0.14));
+  rect(g, x + w - 2, y + r, 2, h - r * 2, mix(col(fill), P.ink, 0.16));
+  return rectOf(x, y, w, h);
+}
+
+/**
+ * A STAT BADGE: icon plate, small label, big value. The unit of the new HUD.
+ *
+ * Sizes are fixed on purpose -- every badge in the game is the same height, so the top bar
+ * reads as a row of the same kind of thing rather than as a paragraph.
+ */
+export function statBadge(g, x, y, o = {}) {
+  // AUTO-WIDTH. A fixed width means the long labels overrun the panel and the short ones
+  // leave a hole: "STILL WILD" ran off the end of its own badge in the first cut.
+  const iw = o.icon && hasIcon(o.icon) ? 33 : 0;
+  const need = iw + Math.max(textW(o.label || '', { font: 3 }),
+    textW(String(o.value === undefined ? '' : o.value), { font: 7 }) * 2) + 18;
+  const w = Math.max(o.w || 0, need), h = o.h || 38;
+  const tone = o.tone || 'wood2';
+  softPanel(g, x, y, w, h, { tone, r: 5, shadow: !!o.shadow, glow: o.glow });
+  let tx = x + 8;
+  if (o.icon && hasIcon(o.icon)) {
+    roundRect(g, x + 5, y + 6, 26, 26, 4, mix(col(tone), P.ink, 0.45));
+    icon(g, o.icon, x + 9, y + 10, { color: o.iconColor || 'brass3', scale: 2 });
+    tx = x + 38;
+  }
+  if (o.label) text(g, o.label, tx, y + 6, o.labelColor || 'parch0', { font: 3 });
+  const v = String(o.value === undefined ? '' : o.value);
+  text(g, v, tx, y + (o.label ? 16 : 12), o.valueColor || 'brass3', { font: 7, scale: 2 });
+  return rectOf(x, y, w, h);
+}
+
+/**
+ * A HEALTH BAR WITH ITS NUMBER ON IT, and a heart so it is unmistakable.
+ *
+ * The number used to sit UNDER the bar in five-pixel grey, which is the one place a health
+ * number must never be: the player looks at the bar, so the number goes on the bar.
+ */
+export function lifeBar(g, x, y, w, h, hp, maxHp, o = {}) {
+  const k = clamp(maxHp > 0 ? hp / maxHp : 0, 0, 1);
+  const tone = k > 0.6 ? 'leaf2' : k > 0.3 ? 'gold' : 'red2';
+  roundRect(g, x - 2, y - 2, w + 4, h + 4, 3, 'ink');
+  roundRect(g, x, y, w, h, 2, mix(P.wood0, P.ink, 0.4));
+  if (k > 0) {
+    roundRect(g, x, y, Math.max(3, Math.round(w * k)), h, 2, tone);
+    rect(g, x + 2, y + 1, Math.max(1, Math.round(w * k) - 4), 1,
+      mix(col(tone), P.white, 0.45));
+  }
+  if (o.icon !== false) {
+    icon(g, 'heart', x + 2, y + Math.round((h - 9) / 2), { color: 'red2', shade: 'red0' });
+  }
+  const v = o.label || `${Math.max(0, Math.round(hp))}`;
+  text(g, v, x + w - 4, y + Math.round((h - 7) / 2), o.color || 'white',
+    { font: 7, right: true, shadow: 'ink' });
+  return rectOf(x, y, w, h);
+}
+
+/** A little coloured pill with a word in it: a skill, a trait, a tag. */
+export function tag(g, x, y, label, o = {}) {
+  const f = o.font || 3;
+  const w = textW(label, { font: f }) + 12;
+  const h = f === 3 ? 14 : 18;
+  roundRect(g, x, y, w, h, Math.floor(h / 2), 'ink');
+  roundRect(g, x + 1, y + 1, w - 2, h - 2, Math.floor(h / 2), o.tone || 'rust');
+  rect(g, x + 4, y + 1, w - 8, 1, mix(col(o.tone || 'rust'), P.white, 0.4));
+  text(g, label, x + w / 2, y + Math.round((h - (f === 3 ? 5 : 7)) / 2),
+    o.color || 'cream', { font: f, center: true });
+  return rectOf(x, y, w, h);
+}
+
+/**
+ * THE ANIMAL CARD, as used by the arena tray and the draft.
+ *
+ * o.draw(x, y, size)  paints the portrait -- the card does not know what an animal is
+ * o.name, o.skill, o.hp, o.maxHp, o.index, o.state ('ready' | 'picked' | 'spent')
+ */
+export function critterCard(g, x, y, w, h, o = {}) {
+  const state = o.state || 'ready';
+  const spent = state === 'spent';
+  const on = state === 'picked';
+  const lift = on ? -6 : 0;
+  const yy = y + lift;
+  softPanel(g, x, yy, w, h, {
+    tone: spent ? mix(P.stone0, P.ink, 0.25) : on ? 'brass2' : 'parch',
+    r: 6, shadow: true, glow: on ? 'gold' : null,
+  });
+  // the portrait sits on its own sunken plate, which is what makes the face read as a face
+  const ps = Math.min(46, h - 34);
+  roundRect(g, x + 6, yy + 6, ps + 8, ps + 8, 5, mix(P.wood1, P.ink, spent ? 0.5 : 0.15));
+  roundRect(g, x + 7, yy + 7, ps + 6, ps + 6, 4,
+    spent ? mix(P.stone0, P.ink, 0.4) : mix(P.parch, P.white, 0.35));
+  if (o.draw) o.draw(x + 10 + ps / 2, yy + 10 + ps / 2, ps);
+  const tx = x + ps + 20;
+  const nm = String(o.name || '').toUpperCase();
+  text(g, nm.length > 8 ? `${nm.slice(0, 7)}.` : nm, tx, yy + 8,
+    spent ? 'grey2' : 'ink', { font: 7 });
+  if (o.skill) {
+    tag(g, tx, yy + 22, o.skill, { tone: spent ? 'grey0' : on ? 'red1' : 'rust' });
+  }
+  if (spent) {
+    text(g, o.spentLabel || 'DOWN', x + w / 2, yy + h - 20, 'grey2',
+      { font: 7, center: true });
+  } else {
+    lifeBar(g, x + 8, yy + h - 20, w - 16, 14, o.hp, o.maxHp);
+  }
+  if (o.index !== undefined) {
+    roundRect(g, x + w - 20, yy + 4, 16, 16, 4, 'ink');
+    text(g, String(o.index), x + w - 12, yy + 8, 'brass3', { font: 5, center: true });
+  }
+  return rectOf(x, y, w, h);
+}
+
+/** A banner across the frame: rounded, inked, with the text big. For "THE TIDE IS IN". */
+export function banner(g, cy, label, o = {}) {
+  const f = o.font || 7;
+  const sc = o.scale || 1;
+  const tw = textW(label, { font: f }) * sc + 44;
+  const h = 20 + 12 * sc;
+  const x = Math.round((SCREEN_W - tw) / 2);
+  softPanel(g, x, cy - h / 2, tw, h, { tone: o.tone || 'wood1', r: 7, shadow: true });
+  text(g, label, SCREEN_W / 2, cy - (7 * sc) / 2 - 1, o.color || 'brass3',
+    { font: f, center: true, scale: sc, shadow: 'ink' });
+  return rectOf(x, cy - h / 2, tw, h);
+}

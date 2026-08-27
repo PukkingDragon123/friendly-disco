@@ -43,6 +43,7 @@ import {
 import { drawPlant, drawFoliage, bendAt, wind } from './flora.js';
 import { drawAnimal, drawAnimalShadow, SPRITE_SIZE, BALL_R as SPRITE_BALL_R } from './sprites.js';
 import { BALL_R } from '../game/physics.js';
+import { drawSea, drawSurf } from './ocean.js';
 
 /* ------------------------------------------------------------------ geometry */
 
@@ -165,6 +166,17 @@ function biomeOf(island) {
  * never does.
  */
 function bakeSea(g, y0, y1, seed, near) {
+  // THE SEA IS SHARED NOW (render/ocean.js). Four scenes each had their own version of this
+  // function and all four of them were a gradient with dashes on it; the arena's was the best
+  // of them and it was still a fault on a monitor. The base -- bands and haze -- bakes; the
+  // crests and the sun's road are drawn live over it by drawArenaWater, on the frame clock.
+  drawSea(g, {
+    top: y0, bottom: y1, layer: 'base', calm: near ? 0.1 : 0.3,
+    deep: near ? undefined : 'water1',
+  });
+  void seed;
+  return;
+  /* eslint-disable no-unreachable */
   const H2 = Math.max(1, y1 - y0);
   // THE DEPTH RAMP, and it runs the other way near and far. Water gets DARKER with depth,
   // so the open sea at the horizon is pale and the deep water in front of the camera is
@@ -196,14 +208,7 @@ function bakeSea(g, y0, y1, seed, near) {
       if (Math.cos(ph) > 0.72) rect(g, x, wy - 1, step, 1, 'foam');
     }
   }
-  // the sun's glare, a broken column down the middle of the far water
-  if (!near) {
-    for (let i = 0; i < 16; i++) {
-      const y = y0 + Math.round(((i + 0.4) / 16) * H2);
-      const w2 = 8 + i * 5;
-      rect(g, Math.round(W * 0.62) - w2 / 2, y, w2, 1, mix(P.foam, P.gold, 0.35));
-    }
-  }
+  /* eslint-enable no-unreachable */
 }
 
 /** One rock, as a shaded lump with a flat lit top. Posts on the arena are drawn with this. */
@@ -377,16 +382,28 @@ export function bakeArena(island, seed = 1) {
  * toward the bow and the stern, and the planks below it follow that curve. Six lines of
  * arithmetic, and the difference between a hull and a garden gate.
  */
+/**
+ * THE ARK'S RAIL, as a function of x, hoisted out of the hull painter.
+ *
+ * The far water has to know where the boat is. The live swells were drawn across the whole
+ * band above the island, which meant they were drawn across the HULL: the ark had waves
+ * running over its planking. The sea asks this where to stop.
+ */
+export function railYAt(x) {
+  const x0 = GROUND.farX - 58, x1 = GROUND.farX + GROUND.farW + 58;
+  const f = clamp((x - x0) / (x1 - x0), 0, 1);
+  return 74 - Math.round(Math.pow(Math.abs(f - 0.5) * 2, 1.7) * 26);
+}
+
 function drawArkHull(g, sd) {
   const x0 = GROUND.farX - 58, x1 = GROUND.farX + GROUND.farW + 58;
   const span = x1 - x0;
   const baseY = GROUND.farY + 3;
-  // the sheer: how far the rail rises above its lowest point, at a given x
   const sheer = (x) => {
     const f = clamp((x - x0) / span, 0, 1);
     return Math.round(Math.pow(Math.abs(f - 0.5) * 2, 1.7) * 26);
   };
-  const railY = (x) => 74 - sheer(x);
+  const railY = railYAt;
 
   // the hull, column by column, so the planking follows the sheer
   for (let x = x0; x < x1; x++) {
@@ -593,20 +610,23 @@ export function drawArenaGrass(g, island, t, seed = 1) {
   }
 }
 
-/** The water's shimmer, over the baked bands. Cheap, and it is what makes the sea alive. */
+/**
+ * The living sea, over the baked bands: the far water above the island and the near water in
+ * front of it, plus the SURF where the near water meets the beach.
+ *
+ * The old version was twenty-two one-pixel dashes drifting at a fixed rate, which is the
+ * fault this whole art pass exists to fix. It is the shared renderer now, on the frame clock,
+ * so the arena's water and the map's water and the prologue's water are the same water.
+ */
 export function drawArenaWater(g, t) {
-  for (let i = 0; i < 22; i++) {
-    const y = 56 + ((i * 29) % (GROUND.farY - 60));
-    const ph = t * (14 + (i % 5) * 6) + i * 31;
-    const x = ((ph % (W + 60)) | 0) - 30;
-    rect(g, x, y, 10 + (i % 3) * 6, 1, i % 2 ? 'foam' : 'water3');
-  }
-  for (let i = 0; i < 16; i++) {
-    const y = GROUND.nearY + 8 + ((i * 23) % (H - GROUND.nearY - 12));
-    const ph = t * (18 + (i % 4) * 8) + i * 47;
-    const x = ((ph % (W + 60)) | 0) - 30;
-    rect(g, x, y, 12 + (i % 3) * 8, 1, i % 2 ? 'foam' : 'water3');
-  }
+  drawSea(g, {
+    top: 47, bottom: GROUND.farY + 4, layer: 'swell', t, calm: 0.3, deep: 'water1',
+    sun: { x: Math.round(W * 0.62), k: 0.5 },
+    floor: (x) => railYAt(x),
+  });
+  drawSea(g, { top: GROUND.nearY + 2, bottom: H, layer: 'swell', t: t * 1.2, calm: 0.1 });
+  // and the beach: waves arrive rather than stopping at a hard line
+  drawSurf(g, 0, GROUND.nearY + 6, W, t, { inland: -1, amp: 4, band: 5 });
 }
 
 /**

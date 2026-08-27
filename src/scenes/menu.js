@@ -3,6 +3,7 @@
 import {
   rect, frame, box, px, line, disc, ring, ellipse, text, textW, wrap, wash, clamp, lerp, W, H,
 } from '../core/pixel.js';
+import { P, mix } from '../core/palette.js';
 import { Input } from '../core/input.js';
 import { Juice, Ease, approach } from '../core/juice.js';
 import { Audio } from '../core/audio.js';
@@ -62,9 +63,16 @@ export function makeMenuScene() {
       state: UI.hover(btn.mute, m) ? 'hover' : 'idle', color: Audio.muted ? 'grey0' : 'wood2',
     });
 
-    text(g, 'a cozy pixel-art rescue roguelike', W / 2, 492, 'foam', { font: 5, center: true });
-    text(g, 'Noah built the ark. Somebody has to decide who gets on it. You are the golem.',
-      W / 2, 508, 'water3', { font: 5, center: true });
+    // ON A PLATE. Two lines of pale type straight onto the water were unreadable the moment
+    // the sea got any structure in it: the strapline is the last thing anybody reads before
+    // they press New Run, so it gets a board to sit on.
+    const s1 = 'a cozy pixel-art rescue roguelike';
+    const s2 = 'Noah built the ark. Somebody has to decide who gets on it. You are the golem.';
+    const bw = Math.max(textW(s1, { font: 5 }), textW(s2, { font: 5 })) + 28;
+    UI.roundRect(g, W / 2 - bw / 2, 484, bw, 40, 6, 'ink');
+    UI.roundRect(g, W / 2 - bw / 2 + 1, 485, bw - 2, 38, 5, mix(P.wood0, P.ink, 0.35));
+    text(g, s1, W / 2, 490, 'brass3', { font: 5, center: true });
+    text(g, s2, W / 2, 506, 'parch1', { font: 5, center: true });
 
     parts.draw(g, 'front');
     if (showHelp) drawHelp(g);
@@ -84,7 +92,7 @@ export function makeMenuScene() {
     text(g, 'ARK', cx, y + 47, 'white', { center: true, scale: 6, shadow: 'brass1' });
 
     // a dark strip behind the strapline — engraved brass on brass is unreadable
-    const strap = 'ONE BOAT · ELEVEN ISLANDS · NO ROOM';
+    const strap = 'ONE BOAT · FOUR SEAS · NO ROOM';
     const sw = textW(strap, { font: 5 }) + 22;
     rect(g, cx - sw / 2, y + h - 26, sw, 15, 'wood0');
     rect(g, cx - sw / 2, y + h - 26, sw, 1, 'brass1');

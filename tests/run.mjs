@@ -925,6 +925,70 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
   }
 }
 
+/* -------------------------------------------------------------------- the cine kit
+
+The camera and the frame clock. Two things are worth asserting and both of them broke once:
+the camera has to be a PURE FUNCTION of u, because the film scene rewinds and re-renders and a
+camera with a timer inside it drifts out of step with its own picture; and every shot of every
+reel has to survive being rendered at any instant, because the screenshot tool does exactly
+that and so does a player who clicks fast.
+*/
+
+if (section('cine')) {
+  const CN = await import('../src/render/cine.js');
+  const keys = [
+    { at: 0, x: 0, zoom: 1 },
+    { at: 0.5, x: 100, zoom: 1.5, ease: 'linear' },
+    { at: 1, x: 40, zoom: 1.1, ease: 'out' },
+  ];
+  const at = (u) => CN.camKeys({ x: 0, y: 0, zoom: 1, roll: 0 }, keys, u);
+  ok(Math.abs(at(0).x) < 0.01, 'the camera starts where the first key says');
+  ok(Math.abs(at(0.5).x - 100) < 0.01, 'and hits the middle key exactly', at(0.5).x.toFixed(2));
+  ok(Math.abs(at(1).x - 40) < 0.01, 'and ends on the last one', at(1).x.toFixed(2));
+  ok(Math.abs(at(0.25).x - 50) < 0.01, 'a linear leg interpolates linearly', at(0.25).x.toFixed(2));
+  // PURE: same u, same camera, every time
+  let drift = 0;
+  for (let i = 0; i <= 20; i++) {
+    const u = i / 20;
+    const a = at(u), b = at(u);
+    drift += Math.abs(a.x - b.x) + Math.abs(a.zoom - b.zoom);
+  }
+  ok(drift === 0, 'the camera is a pure function of u — no state, no drift', drift);
+  ok(at(-1).x === at(0).x && at(2).x === at(1).x, 'and it clamps outside the shot');
+
+  // the frame clock quantises, which is the whole point of it
+  ok(CN.onTwos(0.0) === CN.onTwos(0.04), 'two frames at sixty are one pose at twelve');
+  ok(CN.onTwos(0.5) !== CN.onTwos(0.0), 'and half a second is not');
+  ok(CN.cyc(0.0, 1, 6) === CN.cyc(0.1, 1, 6), 'a cycle steps rather than slides');
+
+  // comic timing: the beats are ordered and the last one runs to the end
+  const marks = [[0, 'wait'], [0.3, 'bulge'], [0.52, 'hit'], [0.6, 'charge']];
+  ok(CN.beat(0.1, marks).kind === 'wait', 'the first beat holds');
+  ok(CN.beat(0.55, marks).kind === 'hit', 'the hit lands when it says');
+  ok(CN.beat(0.99, marks).kind === 'charge', 'and the last beat runs out the shot');
+  ok(CN.beat(0.6, marks).k < 0.02, 'a beat starts at zero');
+  ok(CN.beat(0.999, marks).k > 0.95, 'and ends at one');
+
+  // EVERY SHOT OF EVERY REEL, at twenty instants, must draw without throwing
+  const { installDom } = await import('../tools/stubdom.mjs');
+  installDom();
+  const PX = await import('../src/core/pixel.js');
+  const SP = await import('../src/render/setpieces.js');
+  const RL = await import('../src/render/reels.js');
+  const all = Object.assign({}, SP.SEQUENCES, RL.REELS);
+  const cv = PX.makeCanvas(PX.W, PX.H);
+  let threw = null, drawn = 0;
+  for (const id of Object.keys(all)) {
+    for (let i = 0; i <= 20; i++) {
+      try { SP.drawSequence(cv.g, all[id], i / 20, 1.7 + i * 0.11); drawn++; } catch (e) {
+        if (!threw) threw = `${id} at k=${(i / 20).toFixed(2)}: ${e && e.message}`;
+      }
+    }
+  }
+  ok(!threw, 'every reel draws at any instant', threw);
+  ok(drawn >= 7 * 21, 'and all of them were actually drawn', drawn);
+}
+
 /* ------------------------------------------------------------------- the chart
 
 The map. Three hundred generated charts get audited, because a lattice is exactly the kind of

@@ -20,6 +20,7 @@
 // Every shot is a pure function of (u, t): u is 0..1 through this shot, t is wall time
 // for idle motion. No state, so a screenshot tool can ask for any instant directly.
 
+import { camKeys } from './cine.js';
 import { P, mix } from '../core/palette.js';
 import {
   rect, px, line, disc, ellipse, ellipseFrame, tri, text, wash, clamp, lerp, W, H,
@@ -1321,13 +1322,49 @@ export function drawSequence(g, seq, k, t, o = {}) {
   const span = (nx ? nx.at : 1.0001) - sh.at;
   const u = clamp((k - sh.at) / span, 0, 1);
 
-  // A pan is an INTEGER translate, so the grid survives it.
+  /* THE CAMERA, and it is a PURE FUNCTION OF u.
+   *
+   * A shot can declare `cam` -- a short keyframe list of {at, x, y, zoom, roll} -- and `hits`,
+   * a list of [at, magnitude, flashColour] for the moments something lands. Both are evaluated
+   * from u alone and hold no state, which matters more than it sounds: the film scene rewinds,
+   * re-renders and cuts, and a camera with a decaying timer inside it would drift out of step
+   * with the picture it is supposed to be photographing. Same u, same frame, always.
+   *
+   * The transform is rounded to whole pixels and the zoom to whole eighths, because a
+   * sub-pixel translate resamples every edge in a pixel-art frame: a mathematically smooth
+   * push-in comes out as a shimmer.
+   */
+  let shakeX = 0, shakeY = 0, flashK = 0, flashCol = 'white';
+  for (const hit of sh.hits || []) {
+    const [at, mag, col] = hit;
+    if (u < at) continue;
+    const k = Math.max(0, 1 - (u - at) / 0.11);
+    if (k <= 0) continue;
+    const kk = k * k;
+    shakeX += Math.sin((u - at) * 320) * (mag || 6) * kk;
+    shakeY += Math.cos((u - at) * 271) * (mag || 6) * kk;
+    if (col) {
+      const fk = Math.max(0, 1 - (u - at) / 0.045);
+      if (fk > flashK) { flashK = fk; flashCol = col; }
+    }
+  }
   g.save();
+  if (sh.cam) {
+    const c = camKeys({ x: 0, y: 0, zoom: 1, roll: 0 }, sh.cam, u);
+    const z = Math.max(0.5, Math.round(c.zoom * 8) / 8);
+    g.translate(Math.round(W / 2 + shakeX), Math.round(H / 2 + shakeY));
+    if (c.roll) g.rotate(c.roll);
+    g.scale(z, z);
+    g.translate(Math.round(-W / 2 - c.x), Math.round(-H / 2 - c.y));
+  } else if (shakeX || shakeY) {
+    g.translate(Math.round(shakeX), Math.round(shakeY));
+  }
   if (sh.drift) {
     g.translate(Math.round(sh.drift[0] * u), Math.round(sh.drift[1] * u));
   }
   sh.draw(g, u, t);
   g.restore();
+  if (flashK > 0) wash(g, 0, 0, W, H, flashCol, flashK * 0.85);
 
   // vignette: the corners go down, which is most of what makes a frame look shot
   for (let j = 0; j < 5; j++) {

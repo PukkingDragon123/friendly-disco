@@ -20,37 +20,29 @@ export const H = 540;
 
 const R = Math.round;
 
-/* ----------------------------------------------------------- THE MACRO PIXEL
+/* ------------------------------------------------------------- ONE FINE GRID
 
-TWO RESOLUTIONS, ON PURPOSE, AND NOT ONE MORE.
+THE WORLD IS DRAWN AT FULL RESOLUTION, and it took three passes to get back here.
 
-The frame is 960x540 and nothing in the game is drawn at 960x540. There are exactly two
-scales and each one has a job:
+The frame is 960x540 and for a while nothing in the game was drawn at 960x540. First every
+asset went onto a TWO-pixel grid so the art would read as chunky and deliberate; then the
+world went to FOUR while the creatures stayed at two, on the theory that a coarse world with
+fine animals in it is a focal plane. Both of those are real ideas and both of them are
+arguments rather than pictures. What they actually produced was a poster: big flat shapes,
+thick contours, and nowhere for the eye to go. A wave became a shape and stopped being water.
+An island became a green rectangle with a black edge.
 
-  THE WORLD    a FOUR-PIXEL grid -- skies, seas, ground, props, ruins, chrome, the
-               set-pieces, every panel and every button. Big flat shapes, thick black
-               contours, no fine detail anywhere. This is the poster the game is printed
-               on, and at four pixels a wave is a shape rather than a texture.
-  THE LIVING   a TWO-PIXEL grid -- the animals and the folk, authored at half size in
-               render/pixbuf buffers and blitted at 2x. They are the only things in the
-               frame with eyes in them, so they are the only things allowed the extra
-               resolution, and that difference is what makes them read as ALIVE against
-               a coarse world rather than as stickers on it.
+So: ONE grid, and it is one pixel. Every surface in the game is allowed dither, texture,
+gradient bands, a highlight two pixels wide and a contour one pixel thick -- which is what
+pixel art at this size is FOR. The animals are authored at forty-eight and blitted 1:1, so
+they carry the same detail density as the ground they roll on and nothing in the frame reads
+as a sticker on anything else.
 
-It used to be one grid at two pixels everywhere, which was consistent and flat: the
-animals had nothing the ruins behind them did not have. Coarsening the world by one step
-and leaving the creatures alone costs nothing and does the whole job of a focal plane.
-
-The grid lives HERE, in the primitives everything draws through, rather than in several
-thousand call sites: positions snap, sizes round up, round things step a whole macro
-pixel at a time. A hairline becomes a four-pixel line and a speckle becomes a fleck, so a
-hundred small decisions about detail density come out consistent for free.
-
-Text is the one exception and stays on the fine grid: the fonts are authored shapes with
-their own stroke weights, and quadrupling them would quadruple every label in the game.
-Only the ORIGIN of a string snaps, so text sits on the same grid as the box it is in.
+GRID stays as a knob rather than being deleted, for two reasons: fine()/living() are called
+from a dozen bakes that would all have to be edited to remove it, and a coarse pass is one
+number away if a scene ever needs one. At 1 every helper below is exact and free.
 */
-export let GRID = 4;
+export let GRID = 1;
 const Q = (n) => Math.round(n / GRID) * GRID;                      // a position
 const QS = (n) => Math.max(GRID, Math.round(n / GRID) * GRID);     // a size, never zero
 const QN = (n) => Math.round(n / GRID);                            // in whole macro pixels

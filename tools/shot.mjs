@@ -324,6 +324,27 @@ switch (which) {
     };
     break;
   }
+  case 'chart': {
+    const { makeChartScene } = await import('../src/scenes/chart.js');
+    const { makeChart, travelTo, finishStop } = await import('../src/game/chart.js');
+    const { newVoyage } = await import('../src/game/voyage.js');
+    const v = newVoyage(process.env.SEED || 'shot');
+    v.aboard = ['lion', 'cow', 'horse', 'goat', 'raven', 'pig'];
+    const ch = makeChart(v.seed, 1);
+    // walk a few stops in so the wake and the greyed-out stops are on screen too
+    const steps = Number(process.env.WALK || 3);
+    for (let i = 0; i < steps; i++) {
+      const { reachable } = await import('../src/game/chart.js');
+      const open = reachable(ch);
+      if (!open.length) break;
+      travelTo(ch, open[Math.min(open.length - 1, i % 2)].id);
+      finishStop(ch);
+    }
+    scene = makeChartScene();
+    scene.enter({ voyage: v, chart: ch, onPick() {} });
+    for (let i = 0; i < 60; i++) scene.update(1 / 60);
+    break;
+  }
   case 'arena': {
     const { makeArenaScene } = await import('../src/scenes/arena.js');
     const { ISLANDS } = await import('../src/data/islands.js');

@@ -26,7 +26,8 @@ import {
   newVoyage, departIsland, endVoyage, CHAPTERS, berthsFree, takeAboard, lose, say,
 } from './voyage.js';
 import { makeMenuScene } from '../scenes/menu.js';
-import { makeOceanScene } from '../scenes/ocean.js';
+import { makeChartScene, islandFor } from '../scenes/chart.js';
+import { makeChart, finishStop, reachable } from '../game/chart.js';
 import { makeArenaScene } from '../scenes/arena.js';
 import { makeFeedScene } from '../scenes/feed.js';
 import { makeChoiceScene } from '../scenes/choice.js';
@@ -144,21 +145,54 @@ export function createRouter(app, o = {}) {
       go(makeCutscene(), { script, onDone: then }, script.boss ? 'clouds' : 'light');
     },
 
-    /** The map: three islands on the horizon and a tide that is not waiting. */
+    /**
+     * THE MAP, and it is a lattice now rather than three cards.
+     *
+     * The chart lives on the VOYAGE rather than in the scene, because the whole point of a
+     * route is that it survives the stop you just made: a map rebuilt every time you come
+     * back to it is three cards with extra steps. One chart a chapter, and clearing the boss
+     * at the top of it is what ends the chapter.
+     */
     ocean() {
       if (voyage.over) { R.summary(voyage.won); return; }
-      go(makeOceanScene(), {
+      if (!voyage.chart || voyage.chart.chapter !== voyage.chapter) {
+        voyage.chart = makeChart(voyage.seed, voyage.chapter);
+      }
+      // A CHART YOU CANNOT MOVE ON IS FINISHED, whatever the flag says. The flag is set when
+      // the boss is cleared, and it is set in one place, and one place is exactly the number of
+      // places a flag has to be missed in for the map to open with nowhere to go -- which is
+      // what it did, three times a voyage, standing on the boss. Reachability is the truth.
+      if (voyage.chart.finished || !reachable(voyage.chart).length) { R.afterStop(); return; }
+      go(makeChartScene(), {
         voyage,
-        onArrive: (island) => (island && island.teleport ? R.eden() : R.island(island)),
-        onOver: () => R.summary(false),
+        chart: voyage.chart,
+        onPick: (node) => R.stop(node),
       }, 'wave');
+    },
+
+    /**
+     * What a stop on the chart actually is. One switch, and it is the only place in the game
+     * that knows a node kind maps to a scene.
+     */
+    stop(node) {
+      if (!node) { R.ocean(); return; }
+      // MARKED DONE ON ARRIVAL, not on completion. It used to be marked by whichever scene the
+      // stop led to, which meant every new destination had to remember to do it and the boss
+      // -- the one that ends the chapter -- was reached through two scenes and a script and
+      // did not. You were there; the stop is spent.
+      finishStop(voyage.chart);
+      const kind = node.kind;
+      if (kind === 'shop') { R.eden(); return; }
+      if (kind === 'rest') { R.ocean(); return; }
+      const island = islandFor(node, voyage.seed);
+      R.island(island, node);
     },
 
     /**
      * A rescue. The two verbs get explained once, before the first one -- after the map,
      * not before it, because the lesson is about ground you have now chosen to stand on.
      */
-    island(island) {
+    island(island, node) {
       R.play(getScript('tutorial'), () => {
         // something on the way in, about every other leg. It happens AFTER the crossing
         // is committed, so a decision can never be dodged by choosing a different
@@ -167,11 +201,11 @@ export function createRouter(app, o = {}) {
         if (enc) {
           go(makeChoiceScene(), {
             voyage, island, encounter: enc,
-            onDone: () => R.rescue(island),
+            onDone: () => R.rescue(island, node),
           }, 'light');
           return;
         }
-        R.rescue(island);
+        R.rescue(island, node);
       });
     },
 
@@ -184,11 +218,11 @@ export function createRouter(app, o = {}) {
      * animal up the table and through a door, and it is aboard the moment it goes through --
      * so the quiet minute at the end has nowhere to be and nothing to do.
      */
-    rescue(island) {
+    rescue(island, node) {
       go(makeArenaScene(), {
         voyage, island,
         kind: island && island.boss ? 'boss' : island && island.elite ? 'elite' : 'fight',
-        seed: `${voyage.seed}:${voyage.leg}:${island && island.id}`,
+        seed: `${voyage.seed}:${voyage.leg}:${(node && node.id) || (island && island.id)}`,
         onDone: (res) => { applyFight(voyage, res); R.afterStop(); },
       }, 'curtain');
     },

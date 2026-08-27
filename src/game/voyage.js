@@ -23,7 +23,10 @@ import { ANIMAL_BY_ID, STARTER_STOCK } from '../data/animals.js';
 import { STARTER_BEASTS, UPGRADES as BEAST_UPGRADES } from '../data/beasts.js';
 import { rollLeg, ISLAND_BY_ID, CHERUBIM } from '../data/islands.js';
 
-export const LEGS_PER_CHAPTER = 4;
+// SIX, TO MATCH THE CHART. A chapter is one map and a map is six rows deep, so a chapter is
+// six stops: anything else and either the boss at the top of the water is unreachable or the
+// map runs out before the chapter does.
+export const LEGS_PER_CHAPTER = 6;
 export const CHAPTERS = 4;
 
 /* ---------------------------------------------------------------- boat tiers
@@ -112,7 +115,13 @@ export function hullMax(v) { return Math.max(1, tierValue(v, 'hull') + relicBonu
 export function floodPerLeg(v) {
   // the dove, if you let it go, flies ahead of the water
   const dove = v.flags && v.flags.dove ? 0.85 : 1;
-  return 0.062 * tierValue(v, 'speed') * Math.max(0.3, 1 - relicBonus(v, 'sail')) * dove;
+  // AND THE RATE IS SET BY THE LENGTH OF THE VOYAGE, not the other way round. At 0.062 a leg
+  // the water arrived exactly at the end of a sixteen-leg run; the chart made a chapter six
+  // legs instead of four, so a run is twenty-four and the same rate drowned every boat seven
+  // stops early. One number, and it is CHAPTERS * LEGS_PER_CHAPTER that decides it.
+  const legs = CHAPTERS * LEGS_PER_CHAPTER;
+  return (0.995 / legs) * tierValue(v, 'speed')
+    * Math.max(0.3, 1 - relicBonus(v, 'sail')) * dove;
 }
 
 /**
@@ -215,6 +224,11 @@ export function newVoyage(seed) {
 
     // --- the ledger
     money: 12,
+    // THE APPLES LIVE ON THE VOYAGE, not in a fight. They used to be a field on the lane's
+    // own state, which meant every stop started with the same number however many you had
+    // spent -- and the ledger panel on the map read `undefined`, which is the one word a
+    // player must never see.
+    apples: 3,
     lost: [],
     quests: [],
     flags: {},              // set by choices; read by later events

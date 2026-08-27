@@ -117,6 +117,7 @@ function where() {
   if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
   if (d.heaven) return 'heaven';
   if (d.arena) return 'arena';
+  if (d.chart) return 'chart';
   if (d.lane) return 'island';
   if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
@@ -203,6 +204,47 @@ function playOcean() {
  * mouse, so can a person.
  */
 /**
+ * THE CHART. Take a stop, and take a DIFFERENT one each time round so a long run of legs
+ * walks a real route rather than hugging one column.
+ *
+ * The bot uses the scene's own reachability rather than clicking a rect it guessed at: a
+ * harness that can click an unreachable stop is a harness that will one day report the map
+ * as broken because it clicked the wrong thing.
+ */
+function playChart() {
+  paint();
+  snap('chart');
+  let d = dbg();
+  // wait out a fade: the map is empty while it is handing over, and that is not a fault
+  for (let i = 0; i < 60 && d.leaving; i++) { tick(6); if (where() !== 'chart') return true; d = dbg(); }
+  const open = d.open();
+  if (!open.length) {
+    if (d.leaving) return true;
+    errors.push(`chart: nowhere to go (at ${d.at}, rows ${d.rows})`);
+    return false;
+  }
+  // rotate, and prefer a shore early so the run gets some animals before it gets clever
+  const want = shotIx % 3 === 0 ? (open.find((n) => n.kind === 'fight') || open[0])
+    : open[shotIx % open.length];
+  const r = (d.rects.nodes || []).find((nr) => nr.id === want.id);
+  if (r) { const [ax, ay] = centre(r.rect); clickAt(ax, ay); }
+  else d.go(want.id);
+  tick(70);
+  paint();
+  if (where() === 'chart') {
+    // a cove is not a scene: it resolves on the map, so take another stop
+    const d2 = dbg();
+    const open2 = d2.open();
+    if (open2.length) {
+      const r2 = (d2.rects.nodes || []).find((nr) => nr.id === open2[0].id);
+      if (r2) { const [bx, by] = centre(r2.rect); clickAt(bx, by); }
+      tick(70);
+    }
+  }
+  return true;
+}
+
+/**
  * THE ARENA. Pick one of yours, aim it at a beast, fire, and do it until the shore is clear.
  *
  * The bot herds with a GHOST BALL, exactly as a person has to: to send a beaten animal toward
@@ -216,6 +258,7 @@ function playArena() {
   snap('arena');
   const start = dbg();
   const foes0 = start.foes().length;
+  if (start.foes().some((x) => x.hp > 300)) bossTotal++;
   let guard = 0;
   let stuck = 0;
   while (['won', 'lost', 'left'].indexOf(dbg().phase) < 0 && guard++ < 900) {
@@ -595,6 +638,7 @@ function playVoyage(seed) {
     if (w === 'heaven') { seen.heaven = (seen.heaven || 0) + 1; playHeaven(); continue; }
     if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
     if (w === 'choice') { seen.choice++; playChoice(); continue; }
+    if (w === 'chart') { seen.chart = (seen.chart || 0) + 1; playChart(); continue; }
     if (w === 'arena') { seen.arena = (seen.arena || 0) + 1; playArena(); continue; }
     if (w === 'island') { seen.island++; playIsland(); continue; }
     if (w === 'feed') { seen.feed = (seen.feed || 0) + 1; playFeed(); continue; }
@@ -626,11 +670,12 @@ for (let i = 0; i < SEEDS; i++) {
   const line = `  ${seed}  ch${v.chapter} leg${v.leg}  saved ${s.rescued}  lost ${s.drowned}`
     + `  garden ${v.eden.length}  deck ${v.aboard.length}  $${v.money}`
     + `  paths ${s.obstaclesCleared}`
-    + `  [clay ${grabbedTotal} called ${calledTotal} fed ${fedTotal} boss ${bossTotal ? 'met' : '-'}]`
-    + `  [film ${out.seen.film} cellar ${out.seen.cellar}`
-    + ` walk ${out.seen.walk} heaven ${out.seen.heaven} ocean ${out.seen.ocean}`
-    + ` island ${out.seen.island} feed ${out.seen.feed} eden ${out.seen.eden}`
-    + ` choice ${out.seen.choice}]  flags ${Object.keys(v.flags).join('/') || '-'}`;
+    + `  [caught ${fedTotal} boss ${bossTotal ? 'met' : '-'}]`
+    + `  [chart ${out.seen.chart || 0} arena ${out.seen.arena || 0}`
+    + ` film ${out.seen.film} cellar ${out.seen.cellar}`
+    + ` walk ${out.seen.walk} heaven ${out.seen.heaven}`
+    + ` eden ${out.seen.eden} choice ${out.seen.choice}]`
+    + `  flags ${Object.keys(v.flags).join('/') || '-'}`;
   if (errors.length) {
     failed++;
     console.log(`  ${line}   <-- ${errors.length} error(s)`);

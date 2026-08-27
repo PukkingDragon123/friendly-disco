@@ -18,6 +18,7 @@ async function sceneKind(page) {
     if (d.film) return 'film';
     if (d.basement) return 'cellar';
     if (d.arena) return 'arena';
+    if (d.chart) return 'chart';
     if (d.heaven) return 'heaven';
     if (d.sights !== undefined) return 'walk';
     if (d.queue) return 'feed';
@@ -44,7 +45,7 @@ async function sceneKind(page) {
 async function skipDialogue(page, tries = 60) {
   for (let i = 0; i < tries; i++) {
     const kind = await sceneKind(page);
-    if (kind === 'ocean') return true;
+    if (kind === 'chart' || kind === 'ocean') return true;
     if (kind === 'film' || kind === 'cellar' || kind === 'walk' || kind === 'heaven') {
       await page.evaluate(() => {
         const d = window.__ARK.app.scene.debug();

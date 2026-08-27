@@ -68,6 +68,7 @@ async function sceneKind(page) {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.film) return 'film';
     if (d.arena) return 'arena';
+    if (d.chart) return 'chart';
     if (d.basement) return 'cellar';
     if (d.scriptId !== undefined) return 'cutscene';
     if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
@@ -91,7 +92,7 @@ async function sceneKind(page) {
 async function skipDialogue(page, tries = 120) {
   for (let i = 0; i < tries; i++) {
     const kind = await sceneKind(page);
-    if (kind === 'ocean') return true;
+    if (kind === 'chart' || kind === 'ocean') return true;
     if (kind === 'walk') {
       await walkCauseway(page);
       continue;
@@ -254,25 +255,46 @@ if (!await skipDialogue(page)) errors.push('never reached the map through the di
 await page.waitForTimeout(600);
 await page.screenshot({ path: `${OUT}-4-ocean.png` });
 
-const ocean = await page.evaluate(() => {
+const chart = await page.evaluate(() => {
   const d = window.__ARK.app.scene.debug();
-  const v = d.voyage;
-  return {
-    choices: (v.choices || []).map((c) => c && c.id),
-    aboard: v.aboard.length, capacity: v.tiers && v.aboard.length,
-    flood: +v.flood.toFixed(3), cards: (d.rects.cards || []).filter(Boolean).length,
-  };
+  return { rows: d.rows, open: d.open(), at: d.at,
+    stops: (d.rects.nodes || []).length };
 });
-console.log('ocean:', JSON.stringify(ocean));
-if (ocean.cards < 3) errors.push(`the map offered ${ocean.cards} destinations, not three`);
+console.log('chart:', JSON.stringify(chart));
+// six rows: a chapter is one chart and a chapter is six legs
+if (chart.rows < 6) errors.push(`the chart is only ${chart.rows} rows deep`);
+if (!chart.open.length) errors.push('the chart offered nowhere to sail');
+if (chart.stops < 12) errors.push(`the chart drew only ${chart.stops} stops`);
 
 const oceanT = await drawTime(page);
-console.log('ocean draw:', JSON.stringify(oceanT));
-if (oceanT && oceanT.drawMs > 16.6) errors.push(`ocean draw ${oceanT.drawMs}ms exceeds a 60fps frame`);
+console.log('chart draw:', JSON.stringify(oceanT));
+if (oceanT && oceanT.drawMs > 16.6) errors.push(`chart draw ${oceanT.drawMs}ms exceeds a frame`);
 
-// sail somewhere by clicking a card, then get through whatever is on the way in
-await clickRect(page, ['rects', 'cards', 0]);
-await page.waitForTimeout(3200);
+// SAIL TO A SHORE, by clicking the stop rather than by asking the scene to go there: the
+// click has to land on a reachable node's own rect, which is the thing that breaks when a
+// layout changes and the thing a debug call would hide.
+{
+  const target = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    const open = d.open();
+    const want = open.find((n) => n.kind === 'fight') || open[0];
+    if (!want) return null;
+    const nr = (d.rects.nodes || []).find((x) => x.id === want.id);
+    if (!nr) return null;
+    const c = document.getElementById('game').getBoundingClientRect();
+    const s = window.__ARK.app.scale;
+    return { x: c.left + (nr.rect.x + nr.rect.w / 2) * s,
+      y: c.top + (nr.rect.y + nr.rect.h / 2) * s, kind: want.kind };
+  });
+  if (!target) errors.push('no reachable stop had a rect to click');
+  else {
+    console.log('sailing to:', target.kind);
+    await page.mouse.move(target.x, target.y);
+    await page.waitForTimeout(140);
+    await page.mouse.click(target.x, target.y);
+  }
+}
+await page.waitForTimeout(3600);
 let kind = await sceneKind(page);
 if (kind === 'cutscene') {
   // Two presses a line -- one to finish the typing, one to advance -- so the budget has

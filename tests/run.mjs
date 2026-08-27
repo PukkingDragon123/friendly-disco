@@ -281,7 +281,8 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
   const v1 = V.newVoyage('VOY-TIDE');
   let legs = 0;
   while (!v1.over && legs < 40) { V.sailTo(v1, v1.choices[0]); V.departIsland(v1); legs++; }
-  ok(legs >= 14 && legs <= 18, 'an unupgraded voyage ends within a leg or two of the finish',
+  // twenty-four now: four chapters of six, because a chapter is one six-row chart
+  ok(legs >= 22 && legs <= 26, 'an unupgraded voyage ends within a leg or two of the finish',
     `${legs} legs`);
   ok(v1.flood > 0.9, 'and it finishes with the water at its heels', v1.flood.toFixed(3));
   const v2 = V.newVoyage('VOY-SAIL');
@@ -921,6 +922,84 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
     ok(w.length === 5, 'five waves');
     ok(w[w.length - 1].big, 'and the last one is the big one');
     ok(w[0].lead >= 16, 'with a real opening in front of the first');
+  }
+}
+
+/* ------------------------------------------------------------------- the chart
+
+The map. Three hundred generated charts get audited, because a lattice is exactly the kind of
+structure that is right in the seed you looked at and orphaned in one seed in forty -- and an
+orphaned stop is a run that dead-ends with no message and no way back.
+*/
+
+if (section('chart')) {
+  const CH = await import('../src/game/chart.js');
+  let bad = 0, firstBad = null;
+  const kinds = Object.create(null);
+  let rowsSeen = 0;
+  for (let i = 0; i < 300; i++) {
+    const c = CH.makeChart(`s${i}`, 1 + (i % 4));
+    const complaints = CH.auditChart(c);
+    if (complaints.length) { bad++; if (!firstBad) firstBad = `s${i}: ${complaints[0]}`; }
+    rowsSeen = c.rows.length;
+    for (const row of c.rows) for (const n of row) kinds[n.kind] = (kinds[n.kind] || 0) + 1;
+  }
+  ok(bad === 0, 'three hundred charts, every stop reachable and no crossings', firstBad);
+  ok(rowsSeen === CH.totalRows(), 'and all of them the same depth', rowsSeen);
+  for (const k of Object.keys(CH.KINDS)) {
+    ok((kinds[k] || 0) > 0, `${k} stops turn up at all`, String(kinds[k] || 0));
+  }
+  ok(kinds.fight > kinds.elite, 'ordinary shores outnumber bad ones');
+  ok(kinds.fight > kinds.shop, 'and outnumber shops');
+
+  // you may only ever go up, and only along a line you are on
+  {
+    const c = CH.makeChart('route', 1);
+    ok(CH.reachable(c).length === c.rows[0].length, 'before you embark, the whole first row');
+    const first = CH.reachable(c)[0];
+    ok(CH.travelTo(c, first.id) === first, 'and you can take one');
+    ok(CH.travelTo(c, first.id) === null, 'but not the same one twice');
+    const far = c.rows[5][0];
+    ok(CH.canGo(c, far.id) === false, 'nothing five rows up is reachable');
+    ok(CH.reachable(c).every((n) => n.row === first.row + 1),
+      'everything reachable is exactly one row on');
+  }
+
+  // a whole route, walked to the boss, always ends
+  {
+    let hung = 0;
+    for (let i = 0; i < 40; i++) {
+      const c = CH.makeChart(`walk${i}`, 1);
+      let n = 0;
+      while (!c.finished && n++ < 40) {
+        const open = CH.reachable(c);
+        if (!open.length) break;
+        CH.travelTo(c, open[n % open.length].id);
+        CH.finishStop(c);
+      }
+      if (!c.finished) hung++;
+    }
+    ok(hung === 0, 'every route reaches the boss in under forty stops', hung);
+  }
+
+  // the fixed rows, because arriving at a boss with nothing spent is a coin flip
+  {
+    const c = CH.makeChart('fixed', 2);
+    ok(c.rows[0].every((n) => n.kind === 'fight'), 'the first row is always a shore');
+    ok(c.rows[c.rows.length - 2].every((n) => n.kind === 'rest'), 'a cove before the boss');
+    ok(c.rows[c.rows.length - 1].length === 1, 'and one boss');
+    // DANGER RISES WITH THE ROW -- but an elite is a row and a half harder than its
+    // neighbours by design, so the run of numbers to check is the ORDINARY shores. Testing
+    // the row maximum said danger fell from four to two, which is true and is the elite bump
+    // wearing off rather than a bug.
+    let last = 0;
+    for (const row of c.rows) {
+      const plain = row.filter((n) => n.kind !== 'elite' && n.kind !== 'boss');
+      if (!plain.length) continue;
+      const d = Math.max(...plain.map((n) => n.danger));
+      ok(d >= last, 'ordinary danger never falls as you go up', `${last} -> ${d}`);
+      last = d;
+    }
   }
 }
 

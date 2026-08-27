@@ -17,6 +17,7 @@ async function sceneKind(page) {
     if (d.scriptId !== undefined) return 'cutscene';
     if (d.film) return 'film';
     if (d.basement) return 'cellar';
+    if (d.arena) return 'arena';
     if (d.heaven) return 'heaven';
     if (d.sights !== undefined) return 'walk';
     if (d.queue) return 'feed';
@@ -153,50 +154,78 @@ async function run(label, viewport, isPortrait) {
     }
     kind = await sceneKind(page);
   }
-  if (kind !== 'island') { errors.push(`${label}: tapping a card led to "${kind}"`); await ctx.close(); return; }
+  if (kind !== 'arena') { errors.push(`${label}: tapping a card led to "${kind}"`); await ctx.close(); return; }
   await page.waitForTimeout(900);
 
-  // THE WHOLE GAME IS TWO TAPS: a beast in the tray, then a tile. Prove both on glass with
-  // real touch events -- a card that is comfortable with a mouse can still be under a thumb,
-  // and a tile you cannot hit is a game you cannot play.
+  // THE WHOLE GAME IS ONE GESTURE: press on one of yours and drag. Prove it on glass with
+  // real touch events, because a drag is exactly the interaction a mouse test cannot stand in
+  // for -- a card that is comfortable under a cursor can still be under a thumb, and a swipe
+  // that the scene reads as a tap is a game that never fires a shot.
   const pts = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
-    if (!d.rects.cards.length) return null;
-    d.lane.clay = 400;
-    const card = d.rects.cards[0].rect;
-    const tile = d.at(2, 1);
+    const mine = d.mine().filter((m) => !m.out && !m.aboard);
+    const foes = d.foes();
+    if (!mine.length || !foes.length) return null;
     const c = document.getElementById('game').getBoundingClientRect();
     const s = window.__ARK.app.scale;
+    const card = (d.rects.cards || [])[0];
     return {
-      bx: c.left + (card.x + card.w / 2) * s, by: c.top + (card.y + card.h / 2) * s,
-      tx: c.left + tile.x * s, ty: c.top + tile.y * s,
-      plants: d.lane.plants.length, cardH: card.h * s, cardW: card.w * s,
+      mx: c.left + mine[0].x * s, my: c.top + mine[0].y * s,
+      fx: c.left + foes[0].x * s, fy: c.top + foes[0].y * s,
+      cardH: card ? card.h * s : 0,
+      cardX: card ? c.left + (card.x + card.w / 2) * s : 0,
+      cardY: card ? c.top + (card.y + card.h / 2) * s : 0,
+      hp: foes[0].hp, foes: foes.length, scale: s,
     };
   });
-  if (!pts) { errors.push(`${label}: no beasts in the tray to plant`); await ctx.close(); return; }
-  if (pts.cardH < 32) errors.push(`${label}: a beast card is ${Math.round(pts.cardH)}px tall, under a thumb`);
+  if (!pts) { errors.push(`${label}: nothing on the table to shoot with`); await ctx.close(); return; }
+  if (pts.cardH && pts.cardH < 32) {
+    errors.push(`${label}: a tray card is ${Math.round(pts.cardH)}px tall, under a thumb`);
+  }
   const cdp = await page.context().newCDPSession(page);
   const tap = async (x, y) => {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    await page.waitForTimeout(60);
+    await page.waitForTimeout(70);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await page.waitForTimeout(180);
+    await page.waitForTimeout(200);
   };
-  await tap(pts.bx, pts.by);
-  const sel = await page.evaluate(() => JSON.stringify(window.__ARK.app.scene.debug().sel));
-  if (sel === 'null') errors.push(`${label}: tapping a beast card selected nothing`);
+  // tap the first tray card: picking with a finger has to work
+  if (pts.cardX) await tap(pts.cardX, pts.cardY);
+  await page.screenshot({ path: `shots/mobile-${label}-arena.png` });
+
+  // then the drag: touchStart on the animal, move toward the beast, touchEnd
+  const ang = Math.atan2(pts.fy - pts.my, pts.fx - pts.mx);
+  const far = { x: pts.mx + Math.cos(ang) * 150 * pts.scale, y: pts.my + Math.sin(ang) * 150 * pts.scale };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts.mx, y: pts.my }] });
+  await page.waitForTimeout(90);
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: pts.mx + (far.x - pts.mx) * (i / 6), y: pts.my + (far.y - pts.my) * (i / 6) }],
+    });
+    await page.waitForTimeout(45);
+  }
   await page.screenshot({ path: `shots/mobile-${label}-aiming.png` });
-  await tap(pts.tx, pts.ty);
-  await page.waitForTimeout(1200);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(400);
+  for (let i = 0; i < 40; i++) {
+    const ph = await page.evaluate(() => window.__ARK.app.scene.debug().phase);
+    if (ph !== 'roll') break;
+    await page.waitForTimeout(200);
+  }
   const after = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
-    return { plants: d.lane.plants.length, clay: d.lane.clay, fps: window.__ARK.app.fps };
+    const f0 = d.foes()[0];
+    return { round: d.round, foes: d.foes().length, hp: f0 ? f0.hp : 0, fps: window.__ARK.app.fps };
   });
-  if (after.plants <= pts.plants) errors.push(`${label}: a tap on a tile planted nothing`);
-  console.log(`${label}: sel=${sel} -> ${JSON.stringify(after)}`);
+  if (after.round === 0 && after.foes === pts.foes && after.hp >= pts.hp) {
+    errors.push(`${label}: a drag on glass fired nothing`);
+  }
+  console.log(`${label}: drag -> ${JSON.stringify(after)}`);
   await page.screenshot({ path: `shots/mobile-${label}-rescue.png` });
   await ctx.close();
 }
+
 
 await run('iphone', { width: 844, height: 390 }, false);
 await run('pixel', { width: 915, height: 412 }, false);

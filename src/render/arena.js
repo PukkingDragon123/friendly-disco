@@ -208,15 +208,38 @@ function bakeSea(g, y0, y1, seed, near) {
 
 /** One rock, as a shaded lump with a flat lit top. Posts on the arena are drawn with this. */
 export function drawRock(g, sx, sy, pr, tone = 'grey0') {
+  // A BOULDER, NOT A SAUCER. Five ellipses stacked at 0.52 of their own width with the top
+  // ones lighter came out as a flying saucer parked on the grass: the silhouette was a disc
+  // and discs read as flat. A rock is a MASS -- taller than it is deep, one lit facet on the
+  // top-left, one dark facet under it, a hard contour, and a shadow that is separate from it.
   const base = P[tone] || P.grey0;
-  ellipse(g, sx, sy, pr * 1.05, pr * 0.42, mix(base, P.ink, 0.55));
-  for (let i = 0; i < 5; i++) {
-    const f = i / 4;
-    const rr = pr * (1 - f * 0.42);
-    ellipse(g, sx, sy - f * pr * 0.72, rr, rr * 0.52,
-      mix(base, i > 2 ? P.white : P.ink, i > 2 ? (f - 0.5) * 0.5 : (0.4 - f) * 0.6));
+  ellipse(g, sx + pr * 0.14, sy + pr * 0.34, pr * 1.02, pr * 0.3, mix(P.ink, P.shadow, 0.3));
+  // the mass: an egg standing up
+  for (let dy = -Math.round(pr * 1.15); dy <= Math.round(pr * 0.3); dy++) {
+    const f = (dy + pr * 1.15) / (pr * 1.45);
+    const wob = Math.sin(f * 5.2 + sx * 0.31) * pr * 0.06;
+    const hw = pr * (0.42 + Math.sin(f * Math.PI * 0.92) * 0.62) + wob;
+    const lit = f > 0.62 ? mix(base, P.ink, (f - 0.62) * 0.9)
+      : mix(base, P.white, (0.62 - f) * 0.42);
+    rect(g, sx - hw, sy + dy, hw * 2, 1, lit);
+    // the contour, one pixel each side, so it never dissolves into the turf
+    rect(g, sx - hw - 1, sy + dy, 1, 1, 'ink');
+    rect(g, sx + hw, sy + dy, 1, 1, 'ink');
   }
-  ellipseFrame(g, sx, sy - pr * 0.06, pr, pr * 0.46, 'ink');
+  rect(g, sx - pr * 0.5, sy - pr * 1.16, pr, 1, 'ink');
+  // two cracks, which is what makes it stone rather than a potato
+  for (let i = 0; i < 2; i++) {
+    const cx2 = sx - pr * 0.3 + i * pr * 0.6;
+    for (let k = 0; k < Math.round(pr * 0.8); k++) {
+      rect(g, cx2 + Math.round(Math.sin(k * 0.9 + i) * 2), sy - pr * 0.9 + k, 1, 1,
+        mix(base, P.ink, 0.55));
+    }
+  }
+  // moss on the lit shoulder
+  for (let i = 0; i < 5; i++) {
+    rect(g, sx - pr * 0.62 + i * pr * 0.22, sy - pr * (1.0 - (i % 2) * 0.12), 3, 2,
+      mix(P.moss1, base, 0.35));
+  }
 }
 
 /**

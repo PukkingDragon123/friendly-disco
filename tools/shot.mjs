@@ -324,6 +324,25 @@ switch (which) {
     };
     break;
   }
+  case 'arena': {
+    const { makeArenaScene } = await import('../src/scenes/arena.js');
+    const { ISLANDS } = await import('../src/data/islands.js');
+    const { newVoyage } = await import('../src/game/voyage.js');
+    const v = newVoyage('shot');
+    v.aboard = ['lion', 'cow', 'horse', 'goat', 'raven'];
+    scene = makeArenaScene();
+    scene.enter({
+      voyage: v, island: ISLANDS[Number(process.env.ISLE || 0)],
+      kind: process.env.KIND || 'fight', onDone() {},
+    });
+    for (let i = 0; i < Number(process.env.STEPS || 40); i++) scene.update(1 / 60);
+    if (process.env.SHOOT) {
+      const d = scene.debug();
+      d.fire(-1.35, Number(process.env.SHOOT));
+      for (let i = 0; i < Number(process.env.AFTER || 30); i++) scene.update(1 / 60);
+    }
+    break;
+  }
   case 'sprites': {
     const { ANIMALS } = await import('../src/data/animals.js');
     const { drawAnimal, SPRITE_SIZE, SPRITE_H } = await import('../src/render/sprites.js');

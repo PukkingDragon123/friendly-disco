@@ -245,7 +245,16 @@ export function createFight(o = {}) {
   const island = o.island || { id: 'green', name: 'GREEN REACH', danger: 1, biome: 'grassland' };
   const kind = o.kind || 'fight';
   const rng = makeRng(`${o.seed || 'arena'}:${island.id}:${kind}`);
-  const world = createWorld({ w: AW, h: AH, lookup: (id) => ANIMAL_BY_ID[id] || null });
+  // FRICTION IS THE PACE OF THE GAME, and it is set here rather than in physics because
+  // physics is shared and self-tested against its own defaults. At the default a full-power
+  // shot on this table travelled two table lengths and took THREE AND A QUARTER SECONDS to
+  // stop -- which is correct for snooker and unplayable for a fight, because a round is your
+  // shot plus their charge and both of them have to settle. At 2.6 a hard shot crosses the
+  // table about once and stops in a second and a half: long enough to bank off a shore and
+  // mean it, short enough that a round is under three seconds.
+  const world = createWorld({
+    w: AW, h: AH, friction: 2.6, lookup: (id) => ANIMAL_BY_ID[id] || null,
+  });
   const posts = buildPosts(island, rng);
   setPosts(world, posts);
   setGates(world, buildGates());

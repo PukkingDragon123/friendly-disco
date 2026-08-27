@@ -22,10 +22,12 @@
 // it plus a single callback. No scene knows what comes after it, which is what lets the
 // order of the run change here without touching a scene.
 
-import { newVoyage, departIsland, endVoyage, CHAPTERS } from './voyage.js';
+import {
+  newVoyage, departIsland, endVoyage, CHAPTERS, berthsFree, takeAboard, lose, say,
+} from './voyage.js';
 import { makeMenuScene } from '../scenes/menu.js';
 import { makeOceanScene } from '../scenes/ocean.js';
-import { makeIslandScene } from '../scenes/island.js';
+import { makeArenaScene } from '../scenes/arena.js';
 import { makeFeedScene } from '../scenes/feed.js';
 import { makeChoiceScene } from '../scenes/choice.js';
 import { makeEdenScene } from '../scenes/eden.js';
@@ -43,6 +45,33 @@ import { rollEncounter } from './choices.js';
  *  app — the object returned by createGame(), or any {replace(scene,args)} shim
  *  o.onRun(voyage) — optional; called when a voyage starts
  */
+/**
+ * What a fight did to the voyage.
+ *
+ * ONE PLACE, and it is not inside the scene. A scene that mutates the run while it is still
+ * drawing is a scene you cannot replay, cannot test headless and cannot roll back when the
+ * player quits mid-animation -- and every bug of the "I caught it and it was not there
+ * afterwards" kind lives in that gap. The fight hands back a plain object; this reads it.
+ */
+export function applyFight(v, res) {
+  if (!v || !res) return v;
+  for (const c of res.caught || []) {
+    if (!c) continue;
+    if (berthsFree(v) > 0) takeAboard(v, c.animal);
+    else say(v, 'THE PENS WERE FULL', 'red2');
+    if (c.beast && v.beasts && v.beasts.indexOf(c.beast) < 0) v.beasts.push(c.beast);
+  }
+  // anything of yours that went down is gone, and it is said out loud
+  for (const id of res.downed || []) lose(v, id, 'the shore');
+  for (const id of res.lostToWater || []) lose(v, id, 'the water');
+  v.money = (v.money || 0) + Math.round((res.clay || 0) / 7);
+  v.apples = res.apples;
+  if (res.won) say(v, `${(res.caught || []).length} ABOARD`, 'gold');
+  else if (res.left) say(v, 'YOU PULLED BACK', 'brass3');
+  else say(v, 'THEY TOOK THE SHORE', 'red2');
+  return v;
+}
+
 export function createRouter(app, o = {}) {
   let voyage = null;
 
@@ -147,26 +176,21 @@ export function createRouter(app, o = {}) {
     },
 
     /**
-     * The rescue itself. Split out so an encounter can hand straight through to it.
+     * The fight itself. Split out so an encounter can hand straight through to it.
      *
-     * AND IT IS NOT OVER WHEN THE FIGHTING IS. Whatever is lying on the field goes to the
-     * ramp, where the apples are spent one at a time; the island scene hands its own field
-     * across so nothing has to be serialised between them.
+     * AND THERE IS NO SEPARATE FEEDING SCENE ANY MORE. There used to be: the lane defence
+     * left a field of knocked-down animals lying about and a second screen where you spent
+     * an apple on each of them. On a pool table the loading IS the fight -- you roll a beaten
+     * animal up the table and through a door, and it is aboard the moment it goes through --
+     * so the quiet minute at the end has nowhere to be and nothing to do.
      */
     rescue(island) {
-      go(makeIslandScene(), {
+      go(makeArenaScene(), {
         voyage, island,
-        onDone: (res, field) => R.feeding(island, field),
+        kind: island && island.boss ? 'boss' : island && island.elite ? 'elite' : 'fight',
+        seed: `${voyage.seed}:${voyage.leg}:${island && island.id}`,
+        onDone: (res) => { applyFight(voyage, res); R.afterStop(); },
       }, 'curtain');
-    },
-
-    /** The quiet minute at the end of a stage. */
-    feeding(island, field) {
-      if (!field) { R.afterStop(); return; }
-      go(makeFeedScene(), {
-        voyage, island, field,
-        onDone: () => R.afterStop(),
-      }, 'light');
     },
 
     /** The garden: the only safe ground, and the only place anything is bought. */

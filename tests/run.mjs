@@ -924,6 +924,108 @@ if (section('lane') && M.lane && M.voyage && M.islands && M.beasts) {
   }
 }
 
+/* ------------------------------------------------------------------ the arena
+
+The pool fight. What is checked here is not the physics -- physics has eighty-three self-tests
+of its own -- but the four numbers that decide whether "beaten, not killed" is a rule the
+player can act on, and the two loops that used to hang the game. Every assertion below stands
+for a bug that shipped in one of the three tunings this went through.
+*/
+
+if (section('arena')) {
+  const AR = await import('../src/game/arena.js');
+  const { CORRUPT_BY_ID } = await import('../src/data/corrupted.js');
+  const { ANIMALS } = await import('../src/data/animals.js');
+  const isle = { id: 'green', name: 'GREEN REACH', danger: 2, biome: 'grassland' };
+
+  const f = AR.createFight({ seed: 'unit', island: isle });
+  ok(f.phase === 'aim', 'a fight opens on your shot');
+  ok(f.mine.length >= 3, 'you always have something to shoot', f.mine.length);
+  ok(f.foes.length >= 2, 'and something to shoot at', f.foes.length);
+  ok(f.waves.length === 3, 'an ordinary landing is three waves', f.waves.length);
+  ok(AR.createFight({ seed: 'u', island: isle, kind: 'boss' }).waves.length === 5,
+    'a boss is five');
+  ok(f.spots.length >= 4, 'there is something on the ground worth going to get');
+  ok(f.world.gates.length === 3, 'three doors, and all of them at the far end');
+  ok(f.world.gates.every((g) => g.y < 4), 'the doors are along the ark, not round the table');
+
+  let noSkill = 0;
+  for (const a of ANIMALS) if (!AR.SKILLS[AR.skillFor(a)]) noSkill++;
+  ok(noSkill === 0, 'every animal in the roster has one of the eight skills', noSkill);
+
+  // THE CAPTURE WINDOW, which is the whole design in two inequalities
+  {
+    const g = AR.createFight({ seed: 'w', island: isle });
+    const foe = g.foes[0];
+    const full = 400 * AR.FIGHT.hitScale * 1.1;
+    ok(full < foe.maxHp * (1 - AR.FIGHT.dazedAt),
+      'a full hit cannot take a beast from fresh to beaten in one contact',
+      `${full.toFixed(0)} vs ${foe.maxHp}`);
+    ok(full * AR.FIGHT.dazedResist * 3 < foe.maxHp * AR.FIGHT.dazedAt,
+      'and a beaten beast survives three more nudges while you herd it',
+      (CORRUPT_BY_ID[foe.def.id] || foe.def).id);
+  }
+
+  // a shot leaves, the table moves, and the round comes back to you
+  {
+    const g = AR.createFight({ seed: 's', island: isle });
+    const m = AR.picked(g);
+    const y0 = m.ball.y;
+    ok(AR.shoot(g, -Math.PI / 2, 0.9) === true, 'a shot goes off');
+    ok(g.phase === 'roll', 'and the phase says so');
+    let n = 0;
+    while (g.phase === 'roll' && n++ < 6000) AR.update(g, 1 / 60);
+    ok(n < 6000, 'the table always settles', n);
+    ok(m.ball.y < y0 - 5 || m.ball.sunk, 'the animal actually went up the table');
+    ok(['foes', 'aim', 'won'].indexOf(g.phase) >= 0, 'and the round moved on', g.phase);
+  }
+
+  // the apple is the one guaranteed answer in the game
+  {
+    const g = AR.createFight({ seed: 'a', island: isle });
+    const before = g.apples;
+    ok(AR.throwApple(g, 0).ok, 'an apple can be thrown');
+    ok(g.foes[0].dazed, 'and it beats what it hits outright');
+    ok(g.apples === before - 1, 'and it costs one');
+    ok(AR.throwApple(g, 0).ok === false, 'never twice on the same beast');
+  }
+
+  // NOTHING MAY HANG. Both of the loops this caught were real: a healthy animal captured and
+  // waved back inside the same capture disc, for ever, and a wave that could not be cleared.
+  {
+    let hung = 0, caught = 0, ended = 0;
+    for (let i = 0; i < 4; i++) {
+      const g = AR.createFight({ seed: `hang${i}`, island: isle });
+      let n = 0;
+      while (['won', 'lost', 'left'].indexOf(g.phase) < 0 && n++ < 26000) {
+        if (g.phase === 'aim') {
+          const foes = AR.livingFoes(g);
+          const me = AR.picked(g);
+          if (foes.length && me) {
+            const tgt = foes[0].ball;
+            AR.shoot(g, Math.atan2(tgt.y - me.ball.y, tgt.x - me.ball.x), 0.9);
+          }
+        }
+        AR.update(g, 1 / 60);
+      }
+      if (n >= 26000) hung++; else ended++;
+      caught += g.caught.length;
+    }
+    ok(hung === 0, 'a fight always ends — the waved-back rule used to loop for ever', hung);
+    ok(ended === 4, 'all four of them', ended);
+    ok(caught > 0, 'and something comes aboard', caught);
+  }
+
+  // the result is a plain object, so the router can read it without touching the fight
+  {
+    const res = AR.result(AR.createFight({ seed: 'r', island: isle }));
+    for (const k of ['won', 'left', 'lost', 'caught', 'fallen', 'clay', 'apples', 'rounds']) {
+      ok(k in res, `the result carries ${k}`);
+    }
+    ok(Array.isArray(res.caught), 'caught is a list');
+  }
+}
+
 /* ----------------------------------------------------------------- garden */
 
 if (section('garden') && M.garden && M.gear && M.quests && M.npcs) {

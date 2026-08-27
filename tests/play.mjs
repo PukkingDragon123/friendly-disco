@@ -116,6 +116,7 @@ function where() {
   if (d.scriptId !== undefined) return 'cutscene';
   if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
   if (d.heaven) return 'heaven';
+  if (d.arena) return 'arena';
   if (d.lane) return 'island';
   if (d.encounter) return 'choice';
   if (d.rects && d.rects.gates) return 'eden';
@@ -201,130 +202,62 @@ function playOcean() {
  * one of those is a real click on a real rect -- if the bot can hold an island with a
  * mouse, so can a person.
  */
-function playIsland() {
+/**
+ * THE ARENA. Pick one of yours, aim it at a beast, fire, and do it until the shore is clear.
+ *
+ * The bot herds with a GHOST BALL, exactly as a person has to: to send a beaten animal toward
+ * a door you have to arrive on the far side of it, so the point to aim at is its centre pushed
+ * back along the line to the door by the two radii. A bot that aims at the beast itself sends
+ * it wherever the geometry felt like and catches nothing -- which is also the single most
+ * useful thing this harness ever proved about the design, because it is true for the player.
+ */
+function playArena() {
   paint();
-  let d0 = dbg();
-  const f = d0.lane;
-  snap('island');
-
-  const pick = (id) => {
-    const cr = (dbg().rects.cards || []).find((x) => x.id === id);
-    if (!cr) return false;
-    const [bx, by] = centre(cr.rect);
-    clickAt(bx, by);
-    paint();
-    return !!dbg().sel;
-  };
-  const put = (r, c) => {
-    const p = d0.at(r, c);
-    clickAt(p.x, p.y);
-    tick(2);
-  };
-
-  // A LANE STAGE IS NINETY SECONDS OF GAME TIME, which is 5,400 frames, and a full software
-  // paint is tens of milliseconds. Painting on every iteration put one island at half a
-  // minute of wall clock and the whole harness past any sane timeout. Paint when the bot
-  // actually needs to see the tray, and tick in big chunks the rest of the time.
-  const def = (id) => f.hand.find((b) => b.id === id);
-  let planted = 0;
+  snap('arena');
+  const start = dbg();
+  const foes0 = start.foes().length;
   let guard = 0;
-  let moteTries = 0;
-  while (!f.over && guard++ < 300) {
-    // CLAY LYING ON THE FIELD, clicked where it is DRAWN rather than on its tile -- which
-    // is the same pixel-space hit test the player's cursor uses, and the only way this rig
-    // ever exercises it.
-    // THE FRESHEST ONE, not the first: a mote at the end of its nine seconds sinks away
-    // between reading the field and the click landing, and that is the game working.
-    const motes = ((d0.motes && d0.motes()) || []).filter((q) => q.k < 0.7);
-    if (motes.length && moteTries < 60) {
-      moteTries++;
-      const purse = f.clay;
-      clickAt(Math.round(motes[0].x), Math.round(motes[0].y));
-      if (f.clay > purse) { grabbedTotal++; continue; }
-      if (!f.over) {
-        errors.push('island: clicking a mote where it is drawn did not take it');
-        moteTries = 60;
-      }
+  let stuck = 0;
+  while (['won', 'lost', 'left'].indexOf(dbg().phase) < 0 && guard++ < 900) {
+    const d = dbg();
+    if (d.phase !== 'aim') { tick(20); continue; }
+    const mine = d.mine().filter((m) => !m.out && !m.aboard);
+    const foes = d.foes();
+    if (!mine.length || !foes.length) { tick(6); continue; }
+    mine.sort((a, b) => b.hp - a.hp);
+    d.pick(mine[0].i);
+    const beaten = foes.filter((x) => x.dazed);
+    const before = d.caught;
+    if (beaten.length) {
+      // aim past it, at the door side: the arena's own ghost-ball geometry in screen space
+      const b = beaten[0];
+      // the three doors, in screen pixels, are along the top; nearest by x
+      const doors = [211, 480, 749];
+      let dx0 = doors[0];
+      for (const dd of doors) if (Math.abs(dd - b.x) < Math.abs(dx0 - b.x)) dx0 = dd;
+      const ang = Math.atan2(150 - b.y, dx0 - b.x);
+      d.aimAt(b.x - Math.cos(ang) * 46, b.y - Math.sin(ang) * 30);
+    } else {
+      const t0 = foes[0];
+      d.aimAt(t0.x, t0.y);
     }
-    // and a breather with nothing left to spend on is worth selling back
-    if (f.clay > 260 && LA.callable(f)) {
-      paint();
-      const cr = dbg().rects && dbg().rects.call;
-      if (cr) {
-        const [cx0, cy0] = centre(cr);
-        clickAt(cx0, cy0);
-        if (f.called) calledTotal++;
-        else errors.push('island: the call button did not bring the wave on');
-      }
-    }
-    if (f.beasts.some((b) => b.boss)) bossTotal++;
-    // wells first, then a thorn and a wall in each row
-    const wells = f.plants.filter((p) => p.def.kind === 'gen').length;
-    let want = null, wr = 0, wc = 0;
-    if (wells < 4 && f.clay >= 50) {
-      for (let r = 0; r < LA.ROWS; r++) if (!LA.plantable(f, r, 0, def('well'))) { want = 'well'; wr = r; wc = 0; break; }
-    }
-    if (!want && f.clay >= 100) {
-      for (let r = 0; r < LA.ROWS && !want; r++) {
-        if (f.plants.some((p) => p.row === r && p.def.kind === 'shoot')) continue;
-        for (let c = 1; c <= 3; c++) if (!LA.plantable(f, r, c, def('thorn'))) { want = 'thorn'; wr = r; wc = c; break; }
-      }
-    }
-    if (!want && f.clay >= 50) {
-      for (let r = 0; r < LA.ROWS && !want; r++) {
-        if (f.plants.some((p) => p.row === r && p.def.kind === 'wall')) continue;
-        for (let c = 7; c >= 5; c--) if (!LA.plantable(f, r, c, def('boar'))) { want = 'boar'; wr = r; wc = c; break; }
-      }
-    }
-    if (want) {
-      const before = f.plants.length;
-      if (!pick(want)) { errors.push('island: clicking a beast card selected nothing'); break; }
-      put(wr, wc);
-      // ASK WHAT THE CLICK DID, not what the field looks like afterwards. Counting plants
-      // was wrong the moment the waves got heavy enough to eat one during the four frames
-      // the click takes: the thorn went in, something else was chewed to bits, the count
-      // came out level and the rig called a working game broken.
-      const act = dbg().lastAct;
-      const did = act && act.res && act.res.ok && !act.res.mote;
-      void before;
-      if (did) planted++;
-      else if (f.clay >= def(want).cost && !f.over
-        && !(act && act.res && act.res.mote)) {
-        // A refusal is only a bug if the beast was still affordable when the click
-        // landed: the drought event halves the bank between the card and the tile, and
-        // the game is right to say no.
-        if (process.env.WHY) {
-          console.log('    WHY: plant', want, 'at', wr, wc, 'clay', f.clay,
-            'sel', JSON.stringify(dbg().sel), 'plantable', LA.plantable(f, wr, wc, def(want)),
-            'lastAct', JSON.stringify(dbg().lastAct), 'hover', JSON.stringify(dbg().hover));
-        }
-        errors.push('island: clicking a tile with a beast selected planted nothing');
-        break;
-      }
-      continue;
-    }
-    // a ripe apple, then an apple thrown at anything dazed
-    const ripe = f.trees.find((tr) => tr.ripe);
-    if (ripe) { put(ripe.row, ripe.col); continue; }
-
-    tick(60);
-  }
-
-  if (planted === 0) errors.push('island: the bot never managed to plant anything');
-  paint();
-  const cast = dbg().rects && dbg().rects.cast;
-  if (cast) {
-    const [cx, cy] = centre(cast);
-    clickAt(cx, cy);
     tick(30);
-    paint();
-    snap('island-done');
+    if (dbg().caught === before && dbg().phase === 'aim') stuck++; else stuck = 0;
+    if (stuck > 40) { errors.push('arena: nothing changed for forty shots'); break; }
   }
-  for (let i = 0; i < 4 && where() === 'island'; i++) {
-    const c3 = dbg().rects && dbg().rects.cast;
-    if (c3) { const [ax, ay] = centre(c3); clickAt(ax, ay); }
-    tick(60);
+  const end = dbg();
+  const res = end.result();
+  if (foes0 <= 0) errors.push('arena: no beasts on the table');
+  if (guard >= 900) errors.push(`arena: never finished (${end.phase})`);
+  paint();
+  snap('arena-over');
+  // and out through the button, so the panel and its rect are exercised too
+  for (let i = 0; i < 6 && where() === 'arena'; i++) {
+    const dr = dbg().rects && dbg().rects.done;
+    if (dr) { const [ax, ay] = centre(dr); clickAt(ax, ay); }
+    tick(40);
   }
+  fedTotal += res.caught.length;
   return true;
 }
 
@@ -662,6 +595,7 @@ function playVoyage(seed) {
     if (w === 'heaven') { seen.heaven = (seen.heaven || 0) + 1; playHeaven(); continue; }
     if (w === 'ocean') { seen.ocean++; if (!playOcean()) break; continue; }
     if (w === 'choice') { seen.choice++; playChoice(); continue; }
+    if (w === 'arena') { seen.arena = (seen.arena || 0) + 1; playArena(); continue; }
     if (w === 'island') { seen.island++; playIsland(); continue; }
     if (w === 'feed') { seen.feed = (seen.feed || 0) + 1; playFeed(); continue; }
     if (w === 'eden') { seen.eden++; playEden(); continue; }

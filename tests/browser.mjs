@@ -67,6 +67,7 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.film) return 'film';
+    if (d.arena) return 'arena';
     if (d.basement) return 'cellar';
     if (d.scriptId !== undefined) return 'cutscene';
     if (d.phase !== undefined && d.heroX !== undefined) return 'walk';
@@ -295,186 +296,135 @@ if (kind === 'choice') {
   await page.waitForTimeout(1600);
   kind = await sceneKind(page);
 }
-if (kind !== 'island') {
-  errors.push(`sailing led to "${kind}" instead of an island`);
+if (kind !== 'arena') {
+  errors.push(`sailing led to "${kind}" instead of the shore`);
   console.log('logs:', logs.slice(-12).join(' | '));
-  console.log('errors so far:', errors.join(' | '));
-  await page.screenshot({ path: `${OUT}-x-stuck.png` });
-  await browser.close();
-  process.exit(1);
-}
-await page.waitForTimeout(800);
-await page.screenshot({ path: `${OUT}-6-island.png` });
-
-const island = await page.evaluate(() => {
-  const d = window.__ARK.app.scene.debug();
-  return {
-    island: d.island.id,
-    clay: d.lane.clay,
-    cards: (d.rects.cards || []).length,
-    guards: d.lane.guards.filter(Boolean).length,
-    firstWaveIn: Math.round(d.lane.waveT),
-  };
-});
-console.log('island:', JSON.stringify(island));
-if (!island.cards) errors.push('the tray offered no beasts to plant');
-if (island.clay < 50) errors.push('not enough clay to open with');
-if (island.firstWaveIn < 8) errors.push('no real opening before the first wave');
-
-// PLANT ONE WITH A REAL MOUSE. Two clicks -- a tray card, then a tile -- which is the
-// entire control scheme, so if this works the game is playable.
-const placed = await page.evaluate(() => {
-  const d = window.__ARK.app.scene.debug();
-  d.lane.clay = 400;
-  // AND CLEAR THE LOOSE CLAY FIRST. A mote outranks a plant on purpose, so one sitting on
-  // the tile this test aims at would eat the click and the test would be right to fail --
-  // about the wrong thing. The mote's own click is checked below.
-  d.lane.motes.length = 0;
-  const card = d.rects.cards[0];
-  const tile = d.at(2, 1);
-  const c = document.getElementById('game').getBoundingClientRect();
-  const s = window.__ARK.app.scale;
-  return {
-    before: d.lane.plants.length,
-    bx: c.left + (card.rect.x + card.rect.w / 2) * s,
-    by: c.top + (card.rect.y + card.rect.h / 2) * s,
-    tx: c.left + tile.x * s,
-    ty: c.top + tile.y * s,
-  };
-});
-if (placed) {
-  await page.mouse.click(placed.bx, placed.by);
-  await page.waitForTimeout(140);
-  const sel = await page.evaluate(() => JSON.stringify(window.__ARK.app.scene.debug().sel));
-  if (sel === 'null') errors.push('clicking a beast card selected nothing');
-  await page.mouse.click(placed.tx, placed.ty);
-  await page.waitForTimeout(200);
-  const after = await page.evaluate(() => window.__ARK.app.scene.debug().lane.plants.length);
-  if (after <= placed.before) errors.push('a real click on a tile planted nothing');
-  else console.log(`planted: ${placed.before} -> ${after} on the field`);
-  // and it should start shooting once something walks into its row
-  const fought = await page.evaluate(async () => {
-    const d = window.__ARK.app.scene.debug();
-    d.lane.waveT = 0.1;
-    await new Promise((r) => setTimeout(r, 4000));
-    return { beasts: d.lane.beasts.length, shots: d.lane.shots.length, wave: d.lane.wave };
-  });
-  console.log('fight:', JSON.stringify(fought));
-  if (fought.wave < 0) errors.push('the first wave never started');
-}
-// GRAB A MOTE WITH A REAL MOUSE, at the pixel it is drawn at rather than on its tile.
-const mote = await page.evaluate(() => {
-  const d = window.__ARK.app.scene.debug();
-  d.lane.motes.length = 0;
-  d.lane.motes.push({ row: 3, col: 6, t: 0, life: 9, amount: 20 });
-  const q = d.motes()[0];
-  const c = document.getElementById('game').getBoundingClientRect();
-  const s = window.__ARK.app.scale;
-  return { clay: d.lane.clay, x: c.left + q.x * s, y: c.top + q.y * s };
-});
-if (mote) {
-  await page.mouse.click(mote.x, mote.y);
-  await page.waitForTimeout(160);
-  const paid = await page.evaluate(() => {
-    const d = window.__ARK.app.scene.debug();
-    return { clay: d.lane.clay, left: d.lane.motes.length, grabbed: d.lane.grabbed };
-  });
-  console.log('mote:', JSON.stringify(paid));
-  if (paid.clay <= mote.clay) errors.push('clicking a clay mote paid nothing');
-  if (paid.left) errors.push('the mote was still on the field after being clicked');
-}
-
-// CALL THE NEXT WAVE ON EARLY, which is the other new verb on this screen.
-const called = await page.evaluate(() => {
-  const d = window.__ARK.app.scene.debug();
-  const f = d.lane;
-  // put the fight in a breather so the button is live
-  f.inWave = false;
-  f.queue.length = 0;
-  f.beasts.length = 0;
-  f.wave = 0;
-  f.waveT = 12;
-  const c = document.getElementById('game').getBoundingClientRect();
-  const s = window.__ARK.app.scale;
-  const r = d.rects.call;
-  return r ? { clay: f.clay, wave: f.wave,
-    x: c.left + (r.x + r.w / 2) * s, y: c.top + (r.y + r.h / 2) * s } : null;
-});
-if (!called) errors.push('there is no way to call the next wave on');
-else {
-  await page.mouse.click(called.x, called.y);
-  await page.waitForTimeout(400);
-  const now = await page.evaluate(() => {
-    const f = window.__ARK.app.scene.debug().lane;
-    return { clay: f.clay, wave: f.wave, called: f.called };
-  });
-  console.log('called:', JSON.stringify(now));
-  if (!now.called) errors.push('the call button did not bring the wave on');
-  if (now.clay <= called.clay) errors.push('calling a wave on early paid nothing');
-}
-
-const islandT = await drawTime(page);
-console.log('island draw:', JSON.stringify(islandT));
-if (islandT && islandT.drawMs > 16.6) errors.push(`island draw ${islandT.drawMs}ms exceeds a 60fps frame`);
-await page.screenshot({ path: `${OUT}-7-rescue.png` });
-
-// THE RAMP, with a real mouse: knock the island's waves down, then feed what is lying
-// there. This is the scene the whole stage is for, so it gets clicked rather than skipped.
-const ramp = await page.evaluate(async () => {
-  const app = window.__ARK.app;
-  const d = app.scene.debug();
-  // end the fight where it stands and hand the field to the feeding, the way the island
-  // does when you cast off
-  const f = d.lane;
-  const C = await import('/src/data/corrupted.js');
-  const A = await import('/src/data/animals.js');
-  for (let i = 0; i < 4; i++) {
-    const def = C.CORRUPTED[i % C.CORRUPTED.length];
-    f.held.push({ def, baseId: def.base, a: A.ANIMAL_BY_ID[def.base], row: i, col: 2 + i, t: 0 });
-  }
-  f.apples = 3;
-  d.finish();
-  return { held: f.held.length, apples: f.apples };
-});
-console.log('ramp in:', JSON.stringify(ramp));
-for (let i = 0; i < 12 && (await sceneKind(page)) === 'island'; i++) {
-  await page.mouse.click(480 * (await page.evaluate(() => window.__ARK.app.scale)), 400);
-  await page.waitForTimeout(200);
-}
-if ((await sceneKind(page)) === 'feed') {
-  await page.screenshot({ path: `${OUT}-7b-ramp.png` });
+} else {
+  await page.screenshot({ path: `${OUT}-6-arena.png` });
   const scale = await page.evaluate(() => window.__ARK.app.scale);
   const box = await page.evaluate(() => {
     const r = document.getElementById('game').getBoundingClientRect();
     return { left: r.left, top: r.top };
   });
-  const before = await page.evaluate(() => {
+  const at = (x, y) => ({ x: box.left + x * scale, y: box.top + y * scale });
+
+  const open = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
-    return { apples: d.apples, left: d.left, aboard: d.voyage.aboard.length };
+    return { phase: d.phase, mine: d.mine().length, foes: d.foes().length,
+      apples: d.apples, wave: d.wave };
   });
-  for (let i = 0; i < 6; i++) {
-    const q = await page.evaluate(() => {
-      const d = window.__ARK.app.scene.debug();
-      if (!d.feeding) return null;
-      const n = (d.queue() || []).find((x) => !x.fed);
-      return n ? { x: n.x, y: n.y, apples: d.apples } : null;
-    });
-    if (!q || q.apples <= 0) break;
-    await page.mouse.click(box.left + q.x * scale, box.top + q.y * scale);
+  console.log('arena:', JSON.stringify(open));
+  if (!open.mine) errors.push('nothing of yours on the table');
+  if (!open.foes) errors.push('nothing to shoot at');
+
+  // A REAL DRAG SHOT, with a real mouse: press on the picked animal, pull toward a beast,
+  // let go. This is the whole interface and it has to be exercised as a gesture rather than
+  // through the debug hook, because the gesture is where the bugs are.
+  const shot = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    const me = d.mine().filter((m) => !m.out && !m.aboard)[0];
+    const foe = d.foes()[0];
+    return { mx: me.x, my: me.y, fx: foe.x, fy: foe.y, hp: foe.hp, id: foe.id };
+  });
+  {
+    const a = Math.atan2(shot.fy - shot.my, shot.fx - shot.mx);
+    const p0 = at(shot.mx, shot.my);
+    const p1 = at(shot.mx + Math.cos(a) * 150, shot.my + Math.sin(a) * 150);
+    // ONE FRAME PER STEP OF THE GESTURE. Pressing, dragging and releasing inside a single
+    // frame is a legal thing for a mouse to do and the scene handles it, but a test that does
+    // it cannot tell a dropped shot from a shot that has not landed -- so the harness slows
+    // down to human speed and the scene is left to cope with the fast case on its own.
+    await page.mouse.move(p0.x, p0.y);
+    await page.waitForTimeout(90);
+    await page.mouse.down();
+    await page.waitForTimeout(90);
+    await page.mouse.move(p1.x, p1.y, { steps: 8 });
+    await page.waitForTimeout(160);
+    await page.screenshot({ path: `${OUT}-6b-aim.png` });
+    await page.mouse.up();
+    // AND WAIT FOR THE TABLE TO STOP -- but wait for it to START first. Sampling the phase
+    // straight after the release read 'aim', because the release had not been through a frame
+    // yet, so the loop exited before the shot existed and the check reported that a full-power
+    // drag-shot changed nothing. Twice.
     await page.waitForTimeout(260);
+    for (let i = 0; i < 50; i++) {
+      const ph = await page.evaluate(() => window.__ARK.app.scene.debug().phase);
+      if (ph !== 'roll') break;
+      await page.waitForTimeout(200);
+    }
   }
   const after = await page.evaluate(() => {
     const d = window.__ARK.app.scene.debug();
-    return d.feeding ? { apples: d.apples, fed: d.fed, aboard: d.voyage.aboard.length } : null;
+    const f0 = d.foes()[0];
+    return { phase: d.phase, round: d.round, foes: d.foes().length,
+      hp: f0 ? f0.hp : 0, beaten: d.foes().filter((x) => x.dazed).length };
   });
-  console.log('ramp:', JSON.stringify(before), '->', JSON.stringify(after));
-  if (after && after.fed <= 0) errors.push('clicking an animal on the ramp fed nothing');
-  const rampT = await drawTime(page);
-  console.log('ramp draw:', JSON.stringify(rampT));
-  if (rampT && rampT.drawMs > 16.6) errors.push(`ramp draw ${rampT.drawMs}ms exceeds a frame`);
-} else {
-  errors.push('the island never handed over to the ramp');
+  console.log('shot:', JSON.stringify(shot), '->', JSON.stringify(after));
+  if (after.round === 0 && after.foes === open.foes && after.hp >= shot.hp) {
+    errors.push('a full drag-shot at a beast changed nothing');
+  }
+  const arenaT = await drawTime(page);
+  console.log('arena draw:', JSON.stringify(arenaT));
+  if (arenaT && arenaT.drawMs > 16.6) errors.push(`arena draw ${arenaT.drawMs}ms exceeds a frame`);
+
+  // the apple, through its own button
+  const beforeApple = await page.evaluate(() => window.__ARK.app.scene.debug().apples);
+  await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    if (d.phase === 'aim') d.apple(0);
+  });
+  await page.waitForTimeout(300);
+  const afterApple = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return { apples: d.apples, beaten: d.foes().filter((x) => x.dazed).length };
+  });
+  console.log('apple:', beforeApple, '->', JSON.stringify(afterApple));
+
+  // then play it out with the debug aim, and leave through the button. THIS RUNS IN REAL
+  // TIME -- a round is a second of rolling -- so the budget is progress rather than a
+  // finished fight: a browser check that needs ninety seconds of pool to pass is a browser
+  // check nobody runs.
+  for (let i = 0; i < 90; i++) {
+    const st = await page.evaluate(() => {
+      const d = window.__ARK.app.scene.debug();
+      if (['won', 'lost', 'left'].indexOf(d.phase) >= 0) return { done: d.phase };
+      if (d.phase !== 'aim') return { wait: true };
+      const foes = d.foes();
+      if (!foes.length) return { wait: true };
+      const b = foes.find((x) => x.dazed) || foes[0];
+      if (b.dazed) {
+        const doors = [211, 480, 749];
+        let dx = doors[0];
+        for (const dd of doors) if (Math.abs(dd - b.x) < Math.abs(dx - b.x)) dx = dd;
+        const ang = Math.atan2(150 - b.y, dx - b.x);
+        d.aimAt(b.x - Math.cos(ang) * 46, b.y - Math.sin(ang) * 30);
+      } else d.aimAt(b.x, b.y);
+      return { shot: true };
+    });
+    if (st.done) { console.log('arena over:', st.done); break; }
+    await page.waitForTimeout(st.wait ? 150 : 420);
+  }
+  await page.screenshot({ path: `${OUT}-7-arena-over.png` });
+  const res = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return { phase: d.phase, caught: d.caught, r: d.result() };
+  });
+  console.log('result:', JSON.stringify({ phase: res.phase, caught: res.caught,
+    rounds: res.r.rounds, shots: res.r.shots }));
+  if (['won', 'lost', 'left'].indexOf(res.phase) < 0 && res.r.rounds < 4) {
+    errors.push(`the fight made no progress (${res.phase}, ${res.r.rounds} rounds)`);
+  }
+  const dr = await page.evaluate(() => {
+    const d = window.__ARK.app.scene.debug();
+    return d.rects && d.rects.done ? d.rects.done : null;
+  });
+  if (dr) {
+    const c = at(dr.x + dr.w / 2, dr.y + dr.h / 2);
+    await page.mouse.click(c.x, c.y);
+    await page.waitForTimeout(1400);
+  }
 }
+
 
 // and the garden, which is the heaviest static scene
 await page.evaluate(() => window.__ARK.eden());

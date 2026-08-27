@@ -54,6 +54,7 @@ const AW = 40;                            // art width ...
 const AH = 44;                            // ... and height, blitted at 2x
 const S = 2;
 const GROUND = 41;                        // the row the feet stand on
+const FISH_CY = 15;                       // ... and the row a swimmer floats on
 const PHASES = 4;
 
 export const PLANS = ['quad', 'bird', 'serpent', 'fish', 'bug'];
@@ -147,20 +148,36 @@ export function specFor(a, rc) {
   // A HEAD THIS SIZE IS A BLOB. At radius six the skull, the neck and the barrel come out
   // as one continuous mass and the animal has no outline anywhere -- and a head that big on
   // a horse is a cartoon. Four is a head.
-  let headR = 2.2 + size * 1.2;
+  // A LITTLE BIGGER THAN LOOKS RIGHT ON ITS OWN. The head carries the eye, the ear, the
+  // muzzle and the horn -- four of the five things that identify a species -- and at radius
+  // four on a big animal there is no room for any of them to be distinct. Up by about a
+  // sixth, which is one art pixel: at 2x that is a two-pixel wider face.
+  let headR = 2.6 + size * 1.35;
   if (has('smart') || has('primate') || has('cute')) headR += 0.5;
   if (has('tiny')) headR -= 0.8;
-  headR = clamp(headR, 2.2, 5);
+  headR = clamp(headR, 2.4, 5.6);
 
   // A BIRD IS NOT A SHORT QUADRUPED. Left on the generic numbers a raven came out with an
   // eighteen-pixel barrel and read as an odd dog: the body has to be compact and DEEP, and
   // the neck short unless the animal is a wader.
   if (plan === 'bird') {
-    bodyLen = clamp(bodyLen * 0.6, 8, 14);
-    bodyHigh = clamp(bodyHigh * 1.25, 5.5, 11);
-    if (!(has('tall') || has('majestic'))) { neckLen = clamp(neckLen * 0.65, 2, 5); }
-    neckUp = clamp(neckUp + 0.15, 0.3, 0.95);
-    headR = clamp(headR * 0.82, 2, 4);
+    // AND NOT AS SMALL AS IT WAS. At bodyLen * 0.6 a raven's body came out nine art pixels
+    // by eight -- so its wing was four pixels, its tail was longer than its body, and there
+    // was no room on the flank for either of them. A bird is COMPACT, which is not the same
+    // as tiny: it wants a deep body and long legs, and the depth is where the wing goes.
+    bodyLen = clamp(bodyLen * 0.82, 12, 17);
+    bodyHigh = clamp(bodyHigh * 1.3, 7, 12);
+    legLen = clamp(legLen * 1.15, 4, 12);
+    if (has('tall') || has('majestic')) {
+      neckUp = clamp(neckUp + 0.2, 0.3, 0.95);        // a heron, a swan, an ostrich
+    } else {
+      // UP AND FORWARD, not straight up. At neckUp 0.85 a raven's head sat directly on top
+      // of its own shoulders with the beak the only thing in front of the body, so the bird
+      // had no neck and no front -- it was a ball with a nose.
+      neckLen = clamp(neckLen * 0.72, 2.5, 5);
+      neckUp = 0.48;
+    }
+    headR = clamp(headR * 0.8, 2.4, 4);
   }
   if (plan === 'bug') {
     bodyLen = clamp(bodyLen * 0.62, 8, 14);
@@ -175,6 +192,12 @@ export function specFor(a, rc) {
     legs: plan === 'bug' ? 6 : plan === 'bird' ? 2 : plan === 'quad' ? 4 : 0,
     heavy: has('big') || has('armored') || has('pachyderm'),
     pachyderm: has('pachyderm'),
+    // WHICH FAMILY, because the extras have to know. Eight animals in the roster carry
+    // `extra: 'mane'` and no two of them wear it the same way -- a ruff round the skull, a
+    // crest along the neck, a ridge of hackles over the withers. One word in the data,
+    // three different animals out of it.
+    cat: has('cat'), equine: has('equine'), bovine: has('bovine'),
+    canine: has('canine'), primate: has('primate'), tags, id: (a && a.id) || '',
     ears: rc.ears || 'round', face: rc.face || 'muzzle',
     extra: rc.extra || 'none', pattern: rc.pattern || 'none',
     eyeStyle: rc.eyeStyle || 'dot',
@@ -185,6 +208,14 @@ export function specFor(a, rc) {
 
 function tinted(key, tint, amt) {
   return tint ? mix(P[key] || key, P[tint] || tint, amt) : (P[key] || key);
+}
+
+/** How bright a colour is, 0..1. Used only to decide whether an animal needs a rim. */
+function lumOf(hex) {
+  const h = String(hex).replace('#', '');
+  if (h.length < 6) return 0.5;
+  const r = parseInt(h.slice(0, 2), 16), g2 = parseInt(h.slice(2, 4), 16), b2 = parseInt(h.slice(4, 6), 16);
+  return (r * 0.299 + g2 * 0.587 + b2 * 0.114) / 255;
 }
 
 /**
@@ -204,8 +235,13 @@ const MATERIALS = {
     deep: 'clay0', shade: 'clay1', body: 'clay2', light: 'clay4', belly: 'clay3',
     pat: 'clay0', eye: 'gold',
   },
+  // CORRUPTION USED TO BE A HOLE IN THE SCREEN. Ink on night on purple0 is three tones of
+  // black: a corrupted lion had a silhouette and nothing inside it, so you could not tell
+  // WHICH animal was walking at you -- and being able to tell is the entire reason the
+  // same sprite is reused for all three states. It is a BRUISE now. The shape still reads,
+  // the colours are just wrong, and the red eye is what says it means it.
   corrupt: {
-    deep: 'ink', shade: 'night', body: 'purple0', light: 'purple1', belly: 'deep',
+    deep: 'ink', shade: 'purple0', body: 'purple1', light: 'pink', belly: 'night',
     pat: 'ink', eye: 'red2',
   },
 };
@@ -220,9 +256,25 @@ function tones(rc, o = {}) {
     };
   }
   const t = o.tint, amt = o.tintAmt || 0.4;
-  const body = tinted(rc.body || 'grey1', t, amt);
+  let body = tinted(rc.body || 'grey1', t, amt);
   const shade = tinted(rc.shade || 'grey0', t, amt);
-  const light = tinted(rc.light || 'grey2', t, amt);
+  let light = tinted(rc.light || 'grey2', t, amt);
+  // A BLACK ANIMAL IS NOT A SILHOUETTE, and the reason it kept coming out as one is the ink
+  // contour. Every sprite in this game is drawn with a black outline round it; when the
+  // animal's own body colour is also ink, the animal and its outline are the SAME COLOUR,
+  // so every bit of shading inside the shape has nowhere to sit and the raven, the penguin
+  // and the boar all came out as flat black cutouts with an eye on the front.
+  //
+  // So a very dark recipe gets lifted twice: the BODY comes up off the contour far enough
+  // that the contour reads as a line, and the LIGHT goes up much further so there is a rim.
+  // It is lifted toward the recipe's own light rather than toward grey, which is what keeps
+  // a raven purple-black and a penguin warm-black instead of making both of them slate.
+  const dark = 1 - lumOf(body);
+  if (dark > 0.66) {
+    const k = (dark - 0.66) * 1.5;
+    body = mix(body, light, k * 0.45);
+    light = mix(light, P.white, k * 1.2);
+  }
   return {
     deep: mix(shade, P.ink, 0.35),
     shade,
@@ -273,6 +325,19 @@ function barrel(b, x0, y0, x1, y1, C, o = {}) {
       bset(b, x, y, sh(tx, ty));
     }
   }
+  // THE SPINE. One lit pixel along the very top of the barrel, front to back. Every animal
+  // in this game is drawn against something -- grass, sand, wet sand, the dark of a hold --
+  // and a black bear on a night field has no top edge at all without it. Two screen pixels
+  // of light is a back, and it costs one pass down the width.
+  if (o.spine !== false) {
+    for (let x = Math.round(cx - rx * 0.74); x <= Math.round(cx + rx * 0.74); x++) {
+      for (let y = Math.floor(y0); y <= Math.ceil(y1); y++) {
+        if (bget(b, x, y) === null) continue;
+        bset(b, x, y, C.light);
+        break;
+      }
+    }
+  }
   // the belly: the bottom row or two only, and narrower than the barrel. Any more and it
   // is a light stripe across the middle of the animal rather than an underside.
   if (o.belly !== false) {
@@ -300,7 +365,11 @@ function limb(b, x0, y0, x1, y1, r0, r1, C, o = {}) {
     for (let i = 0; i <= n; i++) {
       const f = i / n;
       const cx = x0 + (x1 - x0) * f, cy = y0 + (y1 - y0) * f;
-      const r = (r0 + (r1 - r0) * f) + (pass === 0 ? 0.9 : 0);
+      // THE EDGE PASS USED TO BE AS THICK AS THE LIMB. At +0.9 on a leg of radius one the
+      // contour grew the limb from two pixels to four, three of which were the contour --
+      // so every leg and every neck in the game came out a black stick with a hint of
+      // colour trapped in the middle of it. Half that, and a leg is a leg with a line on it.
+      const r = (r0 + (r1 - r0) * f) + (pass === 0 ? 0.55 : 0);
       for (let y = -Math.ceil(r); y <= Math.ceil(r); y++) {
         for (let x = -Math.ceil(r); x <= Math.ceil(r); x++) {
           if (x * x + y * y > r * r) continue;
@@ -342,10 +411,18 @@ function wedge(b, x0, y0, x1, y1, x2, y2, key, edge) {
   btri(b, x0, y0, x1, y1, x2, y2, key);
 }
 
-/** A hoof or a paw: two rows, dark, wider than the leg. */
+/**
+ * A hoof or a paw: three rows, dark, wider than the leg, with a toe at the front.
+ *
+ * TWO ROWS WAS A SMUDGE. A leg two pixels thick ending in a foot two pixels tall has no
+ * ankle and no foot -- it is a stick that stops. Three rows and one pixel wider is the
+ * difference between an animal standing on the ground and an animal hovering over it.
+ */
 function foot(b, x, y, w, C) {
-  brect(b, x - (w >> 1), y, w, 2, C.deep);
-  brect(b, x - (w >> 1), y, w, 1, C.shade);
+  const w2 = w + 1;
+  brect(b, x - (w2 >> 1), y - 1, w2, 3, C.deep);
+  brect(b, x - (w2 >> 1), y - 1, w2, 1, C.shade);
+  bset(b, x + (w2 >> 1), y, C.deep);
 }
 
 /* --------------------------------------------------------------- the geometry
@@ -359,16 +436,32 @@ function frame(sp) {
   if (sp.plan === 'fish') {
     // a fish has no legs and no neck: its "head" is the front third of its own body, so
     // the head layer is told to put the eye there rather than on a disc of its own
-    const cy = GROUND - 14, high = sp.bodyHigh + 2;
+    //
+    // AND IT FLOATS AT ROW FIFTEEN. This used to say GROUND - 14, which is twenty-seven,
+    // while fishBody drew the animal at fifteen from a local of its own -- so for every
+    // swimmer in the roster the head layer was baked TWELVE ROWS BELOW THE BODY. Thirteen
+    // animals had an eye, a muzzle and a nostril floating in the water underneath them,
+    // which is exactly what it looked like. One number, read by both.
+    const cy = FISH_CY, high = sp.bodyHigh + 2;
     const back = 4, front = back + sp.bodyLen + 3;
     return {
       back, front, bodyTop: cy - high / 2, bodyBottom: cy + high / 2,
       nx: front, ny: cy, headCx: front - 4, headCy: cy - 1, legLen: 0, noSkull: true,
     };
   }
+  if (sp.plan === 'serpent') {
+    // THE HEAD RIDES THE TOP OF THE S. serpentBody draws a sine climbing from the coil at
+    // GROUND - 3 to the raised front, and the head layer was being told to put the skull
+    // where a quadruped's shoulder would be -- so a rattlesnake's head sat in the middle of
+    // its own body. These two numbers are the last point of that sine, and nothing else.
+    const tipY = GROUND - 3 - (sp.bodyHigh + 4);
+    return {
+      back: 3, front: 29, bodyTop: tipY, bodyBottom: GROUND - 1,
+      nx: 27, ny: tipY + 1, headCx: 30, headCy: tipY, legLen: 0,
+    };
+  }
   const legLen = sp.legLen;
   const bodyBottom = GROUND - legLen;
-  void 0;
   const bodyTop = bodyBottom - sp.bodyHigh;
   const back = Math.round((AW - sp.bodyLen) / 2) - 1;
   const front = back + sp.bodyLen;
@@ -407,7 +500,7 @@ const SWING = [[3, -3], [0, 0], [-3, 3], [0, 0]];
 function leg(b, f, sp, C, x, swing, near, lift) {
   const hipY = f.bodyBottom - 1;
   const footY = GROUND - lift;
-  limb(b, x, hipY, x + swing, footY - 1, near ? 1.0 : 0.7, near ? 0.8 : 0.6, C,
+  limb(b, x, hipY, x + swing, footY - 1, near ? 1.3 : 0.9, near ? 1.0 : 0.7, C,
     { near, noEdge: !near });
   foot(b, x + swing, footY - 1, near ? (sp.heavy ? 3 : 2) : 2, C);
 }
@@ -435,33 +528,92 @@ function quadBody(b, sp, C, phase, far) {
   patternOn(b, f, sp, C, bob);
 }
 
-/** BIRD: a round body low over two thin legs, with a wing folded onto it. */
+/**
+ * BIRD: a body up on two legs, a folded wing that catches the light, a short cocked tail.
+ *
+ * THE TWENTY WORST SPRITES IN THE GAME WERE ALL BIRDS, and every one of them failed the
+ * same three ways. The tail was a ten-pixel fan off the back of a ten-pixel body, so half
+ * the silhouette was tail and it read as a wing pointing backwards. The wing was drawn in
+ * the SHADE tone, which on a raven -- ink body, shadow shade -- is a black shape on a black
+ * shape, so the bird came out as a hole in the frame with a beak on it. And the legs were
+ * two straight sticks, so the bird sat on the ground like a bag.
+ *
+ * Fixed in that order: a five-pixel tail, a wing in the LIGHT tone with its primaries cut
+ * back past the body, and one bend in the leg. A bird is a shape standing UP.
+ */
 function birdBody(b, sp, C, phase, far) {
   const f = frame(sp);
   const sw = SWING[phase % PHASES];
   const bob = BOB[phase % PHASES];
+  const cy = (f.bodyTop + f.bodyBottom) / 2;
   if (far) {
-    limb(b, f.back + 5, f.bodyBottom - 1, f.back + 5 + sw[1], GROUND - 1, 0.8, 0.6, C,
+    // the tail, cocked up and back, with the feather lines cut into it
+    const tx = f.back + 2, ty = cy - 1;
+    const plume = sp.extra === 'plume';
+    if (plume) {
+      // A PEACOCK'S TRAIN, and an ostrich's, and a flamingo's: the one bird whose tail IS
+      // the animal gets a real fan, five feathers wide, and nothing else in the roster does.
+      // THREE FEATHERS, OVERLAPPING. Five at eight pixels long and three rows apart came
+      // out as a spiky teal star behind the peacock, because at this size five separated
+      // wedges are five separated wedges and not a fan. Three that touch read as one train.
+      for (let i = -1; i <= 1; i++) {
+        wedge(b, tx, ty + 1, tx - 7, ty - 1 + i * 3.4, tx - 5, ty + 3 + i * 3.4,
+          i === 0 ? C.body : C.shade, C.deep);
+      }
+      for (let i = -1; i <= 1; i++) bset(b, tx - 6, ty + i * 3, C.light);
+    } else {
+      wedge(b, tx, ty - 1, tx - 6, ty - 3, tx - 4, ty + 2, C.shade, C.deep);
+      bline(b, tx - 1, ty - 1, tx - 5, ty - 2, mix(C.body, C.light, 0.4));
+      bline(b, tx - 1, ty + 1, tx - 4, ty, mix(C.body, C.deep, 0.35));
+    }
+    // the far leg
+    const lx = f.back + 4;
+    limb(b, lx, f.bodyBottom - 1, lx + sw[1], GROUND - 2, 0.8, 0.6, C,
       { near: false, noEdge: true });
-    foot(b, f.back + 5 + sw[1], GROUND - 1, 2, C);
-    // ONE tail wedge. Three tapering limbs in a fan merged into a slab that read as a
-    // second wing pointing the wrong way.
-    const ty = (f.bodyTop + f.bodyBottom) / 2;
-    wedge(b, f.back + 3, ty - 2, f.back - 7, ty - 5, f.back - 5, ty + 3, C.shade, C.deep);
-    bline(b, f.back + 1, ty - 2, f.back - 6, ty - 3, C.deep);
-    bline(b, f.back + 1, ty + 1, f.back - 5, ty + 1, C.deep);
+    foot(b, lx + sw[1], GROUND - 1, 2, C);
     return;
   }
-  barrel(b, f.back + 1, f.bodyTop + bob, f.front, f.bodyBottom + bob, C);
-  limb(b, f.back + 7, f.bodyBottom - 1 + bob, f.back + 7 + sw[0], GROUND - 1, 1.1, 0.9, C, { near: true });
-  foot(b, f.back + 7 + sw[0], GROUND - 1, 3, C);
+  // the body: an EGG with the fat end FORWARD. A symmetrical ellipse is a ball, and a ball
+  // on two legs is a toy chicken whatever you put on the front of it.
+  barrel(b, f.back + 1, f.bodyTop + bob + 1, f.front, f.bodyBottom + bob, C);
+  // the breast, pulled toward the belly colour -- which is what draws a penguin's shirt and
+  // a raven's dark chest out of the same two lines.
+  blob(b, f.front - 3, cy + bob, sp.bodyHigh * 0.38, sp.bodyHigh * 0.46,
+    mix(C.belly, C.body, 0.3));
+  // the near leg, WITH A HOCK. One bend is the entire difference between a bird standing on
+  // the ground and a bird resting on it.
+  const lx = f.back + 6;
+  limb(b, lx, f.bodyBottom - 1 + bob, lx + 1, GROUND - 4, 1.0, 0.8, C, { near: true });
+  limb(b, lx + 1, GROUND - 4, lx + 1 + sw[0], GROUND - 1, 0.8, 0.6, C, { near: true });
+  foot(b, lx + 1 + sw[0], GROUND - 1, 3, C);
+  // the neck
   limb(b, f.nx - 1, f.ny + 1 + bob, f.headCx, f.headCy + bob,
-    Math.max(1.4, sp.bodyHigh * 0.26), Math.max(1.2, sp.headR * 0.4), C, { near: true });
-  // the folded wing: a shaded wedge with two covert lines, which is what makes it a wing
-  const wx = f.back + 4, wy = f.bodyTop + bob + 3;
-  wedge(b, wx, wy, wx + sp.bodyLen * 0.6, wy + 1, wx + 2, wy + sp.bodyHigh * 0.6, C.shade, C.deep);
-  bline(b, wx + 1, wy + 2, wx + sp.bodyLen * 0.5, wy + 2, C.deep);
-  bline(b, wx + 2, wy + 4, wx + sp.bodyLen * 0.42, wy + 4, C.deep);
+    Math.max(1.4, sp.bodyHigh * 0.26), Math.max(1.2, sp.headR * 0.42), C, { near: true });
+  // THE FOLDED WING, AND IT GETS THE LIGHT. Not the shade: the wing is the one part of a
+  // bird you can always see from the side, so it takes the top of the value range and the
+  // body takes the middle. Its primaries run BACK PAST the body, which is the only part of
+  // a folded wing that has a shape you can read at four pixels.
+  // and on the darkest birds it keeps ALL of the light: pulling the wing tone a third of
+  // the way back toward the body is fine on a dove and puts a raven's wing back in the dark.
+  const wingTone = lumOf(C.body) < 0.34 ? C.light : mix(C.light, C.body, 0.3);
+  const covert = mix(C.body, C.deep, 0.45);
+  // AND IT IS MOST OF THE FLANK. Three art pixels across is a patch of paint; the wing has
+  // to be the biggest single shape on the bird after the body, because it is.
+  const wl = Math.max(3.2, sp.bodyLen * 0.36), wh = Math.max(2.0, sp.bodyHigh * 0.27);
+  const wcx = f.back + 3 + wl, wcy = f.bodyTop + bob + wh + 2.2;
+  blob(b, wcx, wcy, wl, wh, wingTone, { edge: C.deep });
+  // the primaries, running back off the wing and past the tail-end of the body
+  for (let i = 0; i < 3; i++) {
+    bline(b, wcx - wl * 0.2, wcy + i, wcx - wl - 2.5, wcy + 1.6 + i * 1.4, covert);
+  }
+  // the leading edge, one pale row, which is what turns the oval into a wing
+  bline(b, wcx - wl * 0.5, wcy - wh, wcx + wl * 0.7, wcy - wh + 0.6, C.light);
+  // A FLIPPER IS A WING THAT GAVE UP: a penguin gets a hard-edged paddle low on the body
+  // instead of a feathered one, and that is the whole difference in the silhouette.
+  if (sp.extra === 'flipper') {
+    wedge(b, f.back + 6, f.bodyTop + bob + 4, f.back + 2, f.bodyBottom + bob + 1,
+      f.back + 9, f.bodyBottom + bob - 1, C.shade, C.deep);
+  }
   patternOn(b, f, sp, C, bob);
 }
 
@@ -490,7 +642,7 @@ function serpentBody(b, sp, C, phase, far) {
 
 /** FISH: a teardrop with fins, floating. Whales, seals, octopus, anything that swims. */
 function fishBody(b, sp, C, phase, far) {
-  const cy = 15;
+  const cy = FISH_CY;
   const back = 4, front = back + sp.bodyLen + 3;
   const high = sp.bodyHigh + 2;
   const wag = [0, 2, 0, -2][phase % PHASES];
@@ -501,13 +653,17 @@ function fishBody(b, sp, C, phase, far) {
     return;
   }
   barrel(b, back, cy - high / 2, front, cy + high / 2, C, { belly: true });
-  // dorsal
-  wedge(b, back + 5, cy - high / 2, back + 9, cy - high / 2 - 4, back + 12, cy - high / 2 + 1,
-    C.shade, C.deep);
+  // THE DORSAL, AND IT IS SMALL. Drawn four pixels tall with a contour on both sides it came
+  // out as a lump on the animal's back bigger than its own head, and every swimmer in the
+  // roster looked like it was carrying something.
+  const top = cy - high / 2;
+  wedge(b, back + 6, top, back + 9, top - 2.6, back + 11, top + 1, C.shade, C.deep);
   // near pectoral
-  wedge(b, back + 8, cy + 1, back + 5, cy + 6, back + 12, cy + 3, C.shade, C.deep);
-  // gill line
+  wedge(b, back + 8, cy + 1, back + 5, cy + 5, back + 11, cy + 3, C.shade, C.deep);
+  // the gill, and the lateral line -- the one marking every fish has and the only thing
+  // that says which way a teardrop is swimming
   bline(b, front - 6, cy - 2, front - 7, cy + 2, C.deep);
+  bline(b, back + 4, cy, front - 7, cy - 1, mix(C.light, C.body, 0.35));
   patternOn(b, { back, front, bodyTop: cy - high / 2, bodyBottom: cy + high / 2 }, sp, C, 0);
 }
 
@@ -541,33 +697,111 @@ function bugBody(b, sp, C, phase, far) {
 
 /* ----------------------------------------------------------------- decoration */
 
+/**
+ * A TAIL, HUNG THE WAY THE ANIMAL HANGS IT.
+ *
+ * The first version drew every tail as a stub going UP and BACK with a two-pixel ball on
+ * the end of it -- which is a cat, and is wrong for the twenty-odd animals in the roster
+ * that are not one. A cow's tail hangs. On a cow, that ball came off the rump at the height
+ * of the shoulder and read, unmistakably, as a second head.
+ */
+function tailWhip(b, f, sp, C, swish) {
+  const bx = f.back + 1, by = f.bodyTop + 2;
+  const bushy = sp.cat || sp.tags.includes('bushy') || sp.tags.includes('rodent');
+  // FLAT, NOT SHADED. A lit disc puts its highlight on the upper left, so a two-pixel tuft
+  // out behind a tawny animal came out as a pale dot on a dark ball -- an eye, in other
+  // words, hanging off the animal's rump. A tail tuft is one value.
+  const T = Object.assign({}, C, { body: C.shade, light: C.shade, belly: C.shade });
+  if (bushy) {
+    limb(b, bx, by + 2, bx - 5, by - 2 + swish, 1.0, 0.7, C, { near: false });
+    disc(b, bx - 6, by - 3 + swish, 1.5, T, { edge: C.deep });
+  } else {
+    // down the back of the leg, and the tuft at the bottom of it
+    limb(b, bx, by + 1, bx - 2 + swish, f.bodyBottom + 2, 1.0, 0.6, C, { near: false });
+    disc(b, bx - 2 + swish, f.bodyBottom + 3, 1.3, T, { edge: C.deep });
+  }
+}
+
 function tailOf(b, f, sp, C, phase) {
   const swish = [0, 1, 0, -1][phase % PHASES];
   const k = sp.extra;
   const bx = f.back + 1, by = f.bodyTop + 2;
   if (k === 'tail') {
-    limb(b, bx, by + 1, bx - 6, by - 2 + swish, 1.1, 0.6, C, { near: false });
-    disc(b, bx - 7, by - 3 + swish, 2, C, { edge: C.deep });
+    tailWhip(b, f, sp, C, swish);
   } else if (k === 'plume') {
     for (let i = -1; i <= 1; i++) {
       limb(b, bx, by, bx - 5, by - 6 + i * 3 + swish, 1.2, 0.6, C, { near: false });
     }
   } else if (k === 'mane') {
-    // A MANE IS A RING ROUND THE SKULL. It used to be six strands laid up the neck, which
-    // at this size is a scarf: a lion reads because its head is twice as wide as its
-    // muzzle, and the only way to say that in eight pixels is a collar of dark fur drawn
-    // BEFORE the head lands on top of it.
-    const M = Object.assign({}, C, { body: C.shade, light: C.body, belly: C.shade });
-    const rr = sp.headR + 1.8;
-    // the collar, from the top of the head round the BACK to the chest. The front is left
-    // open on purpose: a full ring buries the muzzle and the animal loses its face.
-    for (let i = 0; i <= 12; i++) {
-      const a = -Math.PI * 0.42 + (i / 12) * Math.PI * 1.32;
-      disc(b, f.headCx - Math.cos(a) * rr, f.headCy - Math.sin(a) * rr, i % 2 ? 2.2 : 1.8, M,
-        { edge: C.deep });
+    // ONE WORD, THREE ANIMALS. `mane` in the roster means lion, horse, wolf, boar, yak,
+    // hyena, gorilla and qilin, and the first pass gave all eight of them a lion's ruff:
+    // a ring of dark discs at headR + 2, every one of them with an edge, which came out as
+    // a sixteen-pixel helmet with a face lost somewhere inside it. The horse had no head.
+    //
+    // So it is read off the FAMILY instead. A cat wears a RUFF round the skull. An equine
+    // wears a CREST along the top of its neck and nothing at all on its face. Everything
+    // else wears HACKLES -- a ridge of raised fur over the withers, which is what a wolf,
+    // a boar and a yak actually have and none of them had.
+    // AND IT HAS TO BE A TONE YOU CAN SEE. Built out of C.shade alone, a wolf's hackles
+    // and a boar's bristle were shadow-on-shadow inside an ink contour: drawn, costed, and
+    // invisible. The strands take a MID tone with the shade behind them, so the ridge has
+    // light and dark in it and reads as fur at four pixels.
+    const M = Object.assign({}, C, {
+      body: mix(C.shade, C.body, 0.45), light: C.body, belly: C.shade,
+    });
+    if (sp.cat || sp.primate) {
+      // the ruff: from the nape, over the crown, down to the cheek, and it STOPS there.
+      // Tips a tone off the mass, so it reads as fur rather than as a hood.
+      // AND IT IS SMALLER THAN A LION'S REALLY IS. At headR + 2 with two-pixel discs the
+      // ruff was wider than the animal's own barrel, which is true of a lion and unusable
+      // in a sprite: the head has to be the biggest thing about the head.
+      const rr = sp.headR + 0.6;
+      for (let i = 0; i <= 10; i++) {
+        const a = -Math.PI * 0.3 + (i / 10) * Math.PI * 1.0;
+        const dx = -Math.cos(a) * rr, dy = -Math.sin(a) * rr;
+        disc(b, f.headCx + dx, f.headCy + dy, i % 2 ? 1.6 : 1.2, M, { edge: C.deep });
+      }
+      for (let i = 0; i < 2; i++) disc(b, f.nx - 1 + i, f.ny + 3 + i * 1.4, 1.5, M, { edge: C.deep });
+    } else if (sp.equine) {
+      // the crest, laid ALONG the neck as a sawtooth, and a forelock between the ears. A
+      // horse's mane falls on the far side of its neck from you, which is why it is drawn
+      // in the back pass -- the near side of the neck goes over it and only the top shows.
+      const steps = 6;
+      for (let i = 0; i <= steps; i++) {
+        // STOPS AT THE POLL. Run it all the way to the head and the crest lands on the
+        // skull, which is how the first cut of this buried a horse's face in its own mane.
+        const u = (i / steps) * 0.74;
+        const x = f.nx + (f.headCx - f.nx) * u;
+        const y = f.ny + (f.headCy - f.ny) * u;
+        const h = 2.4 + Math.sin(u * 4.2) * 1.1;
+        limb(b, x, y + 1, x - 1.5, y - h, 1.3, 0.7, M, { near: false });
+      }
+    } else {
+      // hackles: tallest just BEHIND the withers, dying out toward the hips. Starting them
+      // at the shoulder put a five-pixel lump directly behind the wolf's head, and what the
+      // wolf grew out of it was a mohawk.
+      for (let i = 0; i < 8; i++) {
+        const u = i / 7;
+        const x = f.front - 5 - u * (sp.bodyLen * 0.62);
+        const h = 4.2 - u * 2.6;
+        limb(b, x, f.bodyTop + 2, x - 1, f.bodyTop + 2 - h, 1.3, 0.7, M, { near: false });
+      }
+      // and a THROAT RUFF on a canine, which is where a wolf's mane actually is and is the
+      // one part of it you can see from the side.
+      if (sp.canine) {
+        for (let i = 0; i < 3; i++) disc(b, f.nx - 1, f.ny + 2 + i * 1.7, 1.8, M, { edge: C.deep });
+      }
+      if (sp.bovine) {
+        // and a yak's skirt, hanging off the barrel: most of its outline is coat.
+        for (let i = 0; i < 7; i++) {
+          const x = f.back + 2 + i * 2.6;
+          limb(b, x, f.bodyBottom - 2, x - 1, f.bodyBottom + 2, 1.5, 0.9, M, { near: false });
+        }
+      }
     }
-    // and a bib, where the mane meets the chest
-    for (let i = 0; i < 3; i++) disc(b, f.nx - 1 + i, f.ny + 2 + i * 1.5, 2.1, M, { edge: C.deep });
+    // AND A TAIL, because a lion and a wolf both have one and neither of them got one:
+    // `extra` is a single slot and the mane was sitting in it.
+    tailWhip(b, f, sp, C, swish);
   } else if (k === 'shell') {
     barrel(b, f.back - 1, f.bodyTop - 3, f.front - 2, f.bodyBottom - 2, C, { belly: false });
     for (let i = 0; i < 4; i++) bline(b, f.back + 2 + i * 3, f.bodyTop - 2, f.back + 1 + i * 3, f.bodyBottom - 3, C.deep);
@@ -610,7 +844,10 @@ function patternOn(b, f, sp, C, bob) {
   } else if (k === 'spots') {
     for (let i = 0; i < 4; i++) blk(x0 + 1 + i * 4, y0 + ((i % 2) ? 1 : 3), 2, 2);
   } else if (k === 'patches') {
-    blk(x0 + 1, y0, 5, 4); blk(x1 - 5, y1 - 3, 5, 3);
+    // A FRIESIAN'S PATCHES ARE BIG, AND THERE ARE TWO OF THEM WITH A GAP. Three of them
+    // covered so much of the barrel that a cream cow came out a dark cow with cream on it,
+    // which is the opposite animal. Two, offset, with the light running between them.
+    blk(x0 + 1, y0, 6, 4); blk(x1 - 5, y1 - 3, 6, 4);
   } else if (k === 'freckles') {
     for (let i = 0; i < 6; i++) put(x0 + 2 + i * 3, y0 + (i % 3));
   } else if (k === 'plates') {
@@ -633,55 +870,125 @@ gait stops being a face.
 
 function headLayer(b, sp, C, mood) {
   const f = frame(sp);
-  const cx = f.headCx, cy = f.headCy, r = sp.headR;
+  const cx = f.headCx, cy = f.headCy;
   const facing = 1;                       // always drawn facing right; drawAnimal flips
+  // A LONG FACE IS NOT A BIG BALL. A horse, a cow and a wolf all have a skull longer than
+  // it is deep, and drawing them as a disc of radius five gave a horse a head a third the
+  // length of its own body -- a cartoon pony, not a horse. The long-faced families get a
+  // SMALLER skull and a LONGER muzzle, and it is the length that says which animal it is.
+  const longFace = sp.equine || sp.bovine || sp.canine;
+  const r = longFace ? Math.max(2.4, sp.headR - 1.4) : sp.headR;
+  const snoutLong = longFace ? 1.15 : 0.62;
+
+  // A FACE IS LIGHTER THAN A FLANK. Not because that is how light falls, but because it is
+  // how you FIND a face: the head is the smallest part of the animal and it carries four of
+  // the five things that say which animal it is, so it gets the top of the value range and
+  // the barrel gets the middle. On the dark half of the roster -- wolf, raven, boar, brown
+  // bear -- this is the whole difference between an animal and a shadow with an eye in it.
+  const H = Object.assign({}, C, {
+    shade: mix(C.shade, C.light, 0.34),
+    body: mix(C.body, C.light, 0.36),
+    light: mix(C.light, P.white, 0.3),
+  });
 
   // the skull -- unless the plan says the head IS the body's front, which is what a fish
   // is. A disc stuck on the nose of a whale reads as a bubble it is about to swallow.
   // An elephant's ear is the biggest thing on its head and half the reason you know what
   // you are looking at -- so it goes on FIRST, behind the skull, like a plate.
   if (!f.noSkull && sp.pachyderm && sp.ears === 'round') {
-    blob(b, cx - r * 0.7, cy + 1, r * 1.05, r * 1.3, C.shade, { edge: C.deep });
-    blob(b, cx - r * 0.9, cy + 1, r * 0.7, r * 0.95, mix(C.shade, C.deep, 0.4));
+    // AND IT IS NOT A BALLOON. At rx 1.05r by ry 1.3r the ear alone was thirteen pixels by
+    // seventeen -- wider than the elephant's own barrel -- so the animal read as a head with
+    // a body hanging off it. Big is the point; bigger than the body is not.
+    blob(b, cx - r * 0.6, cy + r * 0.3, r * 0.82, r * 1.02, H.shade, { edge: C.deep });
+    blob(b, cx - r * 0.8, cy + r * 0.3, r * 0.52, r * 0.72, mix(H.shade, C.deep, 0.4));
   }
   if (!f.noSkull) {
-    disc(b, cx, cy, r, C, { edge: C.deep });
-    blob(b, cx - r * 0.4, cy + r * 0.3, r * 0.7, r * 0.55, C.body);   // a cheek
+    disc(b, cx, cy, r, H, { edge: C.deep });
+    blob(b, cx - r * 0.4, cy + r * 0.3, r * 0.7, r * 0.55, H.body);   // a cheek
     // A JAW. A skull drawn as one disc is a ball on a stick whatever you put in front of
     // it; the line from the ear down to the chin is what makes a head a head.
-    blob(b, cx + r * 0.15, cy + r * 0.62, r * 0.66, r * 0.34, mix(C.shade, C.body, 0.5));
+    blob(b, cx + r * 0.15, cy + r * 0.62, r * 0.66, r * 0.34, mix(H.shade, H.body, 0.5));
     bline(b, cx - r * 0.5, cy + r * 0.9, cx + r * 0.8, cy + r * 0.95, C.deep);
   }
 
   // --- the muzzle or beak, forward of the skull
-  const mx = cx + Math.round(r * (f.noSkull ? 0.5 : 0.85)) * facing;
+  // A BEAK STARTS AT THE FRONT OF THE SKULL, not two-thirds of the way along it, or the
+  // eye socket -- which is drawn after everything -- takes the first column of it back.
+  const mx = cx + Math.round(r * (f.noSkull ? 0.5 : sp.face === 'beak' ? 1.0 : 0.85)) * facing;
   const my = cy + Math.round(r * 0.35);
-  const snout = mix(C.belly, C.body, 0.25);
+  // THE MUZZLE HAS TO BE A DIFFERENT VALUE FROM THE FACE, and WHICH WAY depends on the
+  // animal. A cow is bone with a white belly and a white light, so a pale muzzle on a cow
+  // is three shades of nothing and the animal reads as a big dog; a wolf is charcoal, so a
+  // dark one does the same to the wolf. Away from the face, whichever way away is.
+  const snout = lumOf(C.body) > 0.5
+    ? mix(C.body, C.shade, 0.6)
+    : mix(C.belly, P.white, 0.25);
   const k = sp.face;
-  if (k === 'beak') {
-    wedge(b, mx - 1, my - 2, mx + Math.round(r * 1.1), my, mx - 1, my + 2, 'brass2', 'brass0');
-    bline(b, mx - 1, my, mx + Math.round(r * 0.9), my, 'brass0');
+  if (f.noSkull) {
+    // A FISH HAS NO SNOUT. The generic muzzle blob put a pale pad on the nose of every
+    // swimmer in the roster and a dark nostril in the middle of it, which reads as a
+    // bandage. On a teardrop the mouth line IS the face.
+    bline(b, mx - 2, my + 1, mx + Math.round(r * 0.8), my + 1, C.deep);
+  } else if (k === 'beak') {
+    // A BEAK IS SMALL AND IT IS SHARP. The pass before this one made it r * 1.5 long and
+    // six pixels deep in gold, on the theory that a beak is what tells you it is a bird:
+    // what came out was a gold traffic cone bigger than the skull it was bolted to, with
+    // the eye behind it. Three pixels of horn with an ink edge is a beak. A HOOK on it, and
+    // it is a raptor -- which is the actual difference between an eagle and a dove.
+    // AND IT IS HORN-COLOURED WHATEVER THE BIRD IS. A raven's bill really is black, and
+    // black on a black head is a bird with no face -- the same trap as the wing. Every beak
+    // in the game is warm bone with an ink edge, and a raptor's has a hook on it, which is
+    // the actual visible difference between an eagle and a dove.
+    // ROW BY ROW, not as a triangle. The version before this drew an ink triangle, a horn
+    // triangle two pixels tall inside it, and then a MOUTH LINE down the middle of the horn
+    // -- so what came out was an ink bar with a brown stripe in it, and a colour count of
+    // the baked head layer had no horn tone in it at all. Every bird in the game was
+    // wearing a black smudge. Drawn as explicit rows it is three pixels of horn tapering to
+    // one, and nothing drawn afterwards can quietly delete it.
+    const bl = Math.max(3, Math.round(r * 1.1));
+    const raptor = sp.tags.includes('predator');
+    const horn = raptor ? P.gold : mix(P.brass2, P.bone, 0.3);
+    for (let i = 0; i <= bl; i++) {
+      const half = i < bl * 0.45 ? 1 : 0;
+      brect(b, mx - 1 + i, my - half, 1, half * 2 + 1, horn);
+      bset(b, mx - 1 + i, my - half - 1, C.deep);
+      bset(b, mx - 1 + i, my + half + 1, C.deep);
+    }
+    bset(b, mx - 1, my, mix(horn, C.deep, 0.5));        // the gape, against the face
+    if (raptor) { bset(b, mx + bl, my + 1, horn); bset(b, mx + bl - 1, my + 2, C.deep); }
   } else if (k === 'trunk') {
     // A trunk is not a post. Three tapering segments curving forward and down, a curl at
     // the tip, and a pair of tusks either side of it -- without those it read as a cannon
     // bolted to the front of a grey dog.
+    // THICKER AT THE TOP AND IT REACHES THE GROUND. Drawn at radius two it came out as a
+    // grey wire down the front of the animal; a trunk is the heaviest single limb on it.
     let tx = mx, ty = my;
-    const drop = GROUND - 3 - my;
-    for (let i = 1; i <= 7; i++) {
-      const u = i / 7;
+    const drop = GROUND - 2 - my;
+    for (let i = 1; i <= 8; i++) {
+      const u = i / 8;
       const nx2 = mx + Math.round(Math.sin(u * 2.1) * 3.5);
       const ny2 = my + Math.round(drop * u);
-      limb(b, tx, ty, nx2, ny2, 2.0 - u * 1.0, 1.9 - u * 1.0, C, { near: true });
+      limb(b, tx, ty, nx2, ny2, 2.6 - u * 1.5, 2.5 - u * 1.5, H, { near: true });
       tx = nx2; ty = ny2;
     }
-    bset(b, tx + 1, ty, C.body); bset(b, tx + 2, ty - 1, C.shade);
+    // the wrinkles, three of them: a smooth trunk is a hose
+    for (let i = 1; i <= 3; i++) {
+      const ny2 = my + Math.round(drop * (i / 4));
+      bline(b, mx - 1, ny2, mx + 2, ny2, mix(H.shade, C.deep, 0.45));
+    }
+    bset(b, tx + 1, ty, H.body); bset(b, tx + 2, ty - 1, H.shade);
+    // and the tusks, in bone, long enough to be tusks
+    const TK = { body: P.white, shade: P.bone, deep: mix(P.bone, C.deep, 0.45), light: P.white };
     for (const sgn of [-1, 1]) {
-      limb(b, mx + 1, my + 2, mx + Math.round(r * 0.9), my + 4 + sgn, 1.0, 0.5,
-        { body: 'white', shade: 'bone', deep: 'grey1', light: 'white' }, { near: sgn > 0 });
+      limb(b, mx - 1, my + 2, mx + Math.round(r * 1.15), my + 5 + sgn * 2, 1.2, 0.5, TK,
+        { near: sgn > 0 });
     }
   } else if (k === 'snout' || k === 'muzzle' || k === 'whiskers') {
-    blob(b, mx, my, r * 0.62, r * 0.44, snout);
-    bset(b, mx + Math.round(r * 0.5), my - 1, C.deep);          // the nostril
+    blob(b, mx - (longFace ? 1 : 0), my, r * snoutLong, r * 0.44, snout);
+    // A NOSE, not a nostril: two dark pixels at the tip. One dark pixel in the middle of a
+    // pale muzzle reads as dirt -- and the lit pixel over it that was here reads as a chip
+    // out of the sprite, because on a cream animal it came out white on white.
+    brect(b, mx + Math.round(r * snoutLong * 0.66), my - 1, 2, 2, C.deep);
     if (k === 'whiskers') {
       for (let i = -1; i <= 1; i++) bline(b, mx, my + 1, mx + r + 2, my + 1 + i * 2, C.deep);
     }
@@ -702,17 +1009,59 @@ function headLayer(b, sp, C, mood) {
   else bline(b, mx - 1, my + 2, mx + 1, my + 2, C.deep);
 
   // --- ears and horns, on top of the skull and behind the eye
-  if (!f.noSkull) earsOf(b, cx, cy, r, sp, C);
+  if (!f.noSkull) earsOf(b, cx, cy, r, sp, H);
+  // ... except a narwhal's, which is the whole animal and whose head is its own body, so it
+  // never reached the branch that draws it.
+  else if (NOSE_HORN[sp.id]) {
+    const HN = { body: P.white, shade: P.bone, light: P.white, deep: mix(P.bone, C.deep, 0.5) };
+    limb(b, cx + r * 0.6, cy, cx + r * 3.2, cy - r * 0.5, 1.5, 0.5, HN, { near: true });
+  }
 
   // --- THE EYE. One eye, because this is a profile. Two art pixels across with a catch
   // light, which at 2x is a four-pixel highlight -- big enough to carry an expression and
   // small enough to still be a dot.
-  const ex = cx + Math.round(r * 0.42), ey = cy - Math.round(r * 0.18);
+  // A BEAKED HEAD KEEPS ITS EYE FURTHER BACK. On a bird the beak starts at the front of the
+  // skull, and an eye at r * 0.42 sits directly behind the base of it -- so the eye and the
+  // beak fought over the same four pixels and the beak lost.
+  const ex = cx + Math.round(r * (sp.face === 'beak' ? 0.06 : 0.42));
+  const ey = cy - Math.round(r * 0.18);
+  // AN EYE RING, AND A BROW OVER IT. This is the single change that made the whole roster
+  // read as animals rather than as shapes, and the reason is arithmetic: a dark pupil on a
+  // dark head is nothing at all, and a dark pupil on two PALE pixels is an eye from across
+  // the room. Real animals have it -- the bare skin round an eye is never the same value as
+  // the coat -- and it is the only thing that works when the eye itself is two pixels wide.
+  //
+  // The first attempt did the opposite and darkened the socket, which is what a painter
+  // would do and is exactly wrong here: it welded the eye to the shadow and a horse ended
+  // up with a hole in the side of its face.
+  //
+  // DARK RING, PALE SOCKET, DARK PUPIL, in that order and always all three. A pale socket
+  // on its own works on a black raven and vanishes on a white cow; the dark contour round
+  // it is what makes the same three pixels work at both ends of the palette. And it is
+  // sized off the SKULL, because a fixed five-pixel socket on a horse's long narrow head
+  // was most of the horse's face.
+  //
+  // AND IT IS DRAWN AS FOUR PIXELS BY FOUR, not as a blob with a contour. `blob` with an
+  // `edge` grows the shape by a pixel all the way round, so a socket wide enough to show a
+  // halo round a two-pixel eye came out as a SEVEN-pixel dark square in the middle of the
+  // face: it ate the beak off every bird in the game and put a hole in the horse's cheek.
+  // A halo is exactly one pixel wide. Say so.
+  // Three by three, with the eye in the bottom right of it: the halo shows as an L up the
+  // back and over the top, and the lower lid closes it underneath. Four by four was a pale
+  // square with a pupil in the middle -- readable, and on a small head it WAS the head.
+  if (mood !== 'blink') {
+    brect(b, ex - 1, ey - 1, 3, 3, mix(C.light, P.white, 0.5));
+    bline(b, ex - 1, ey - 2, ex + 2, ey - 2, C.deep);            // the brow over it
+  }
   if (mood === 'blink') {
     brect(b, ex, ey + 1, 2, 1, C.deep);
   } else {
     brect(b, ex, ey, 2, 2, C.eye);
-    bset(b, ex, ey, mix(P.white, P[C.eye] || C.eye, 0.2));
+    // ONE catch light, not half the eye. Eighty per cent white across a two-by-two eye is
+    // not a highlight, it is a googly eye, and every animal in the game had one.
+    bset(b, ex + 1, ey, mix(P[C.eye] || C.eye, P.white, 0.55));
+    // and a lower lid, so a pale eye on a pale ring still closes at the bottom
+    bline(b, ex, ey + 2, ex + 1, ey + 2, C.deep);
     const st = sp.eyeStyle;
     if (st === 'angry') bline(b, ex - 1, ey - 2, ex + 2, ey - 1, C.deep);
     if (st === 'sleepy') bline(b, ex - 1, ey - 1, ex + 2, ey - 1, C.deep);
@@ -723,6 +1072,10 @@ function headLayer(b, sp, C, mood) {
   if (mood === 'happy') bset(b, cx - 1, cy + Math.round(r * 0.5), mix(P.red1, C.body, 0.55));
 }
 
+// The three animals whose horn is on the nose rather than the crown. Everything else with
+// `ears: 'horn'` is a hoofed thing wearing a pair of them, which is a different drawing.
+const NOSE_HORN = { rhino: 1, narwhal: 1, unicorn: 1 };
+
 function earsOf(b, cx, cy, r, sp, C) {
   const k = sp.ears;
   const bx = cx - Math.round(r * 0.35);
@@ -731,12 +1084,44 @@ function earsOf(b, cx, cy, r, sp, C) {
   if (k === 'round' && sp.pachyderm) {
     // drawn in headLayer BEFORE the skull -- see fanEar. Nothing to do here, or the ear
     // lands on top of the face and the animal has no eye.
-  } else if (k === 'round') { disc(b, bx, by - 1, Math.max(2, Math.round(r * 0.42)), C, { edge: C.deep }); bset(b, bx, by - 1, in_); }
+  // BIGGER THAN THEY WERE. At r * 0.42 a round ear on a cow was a two-pixel nub: four
+  // screen pixels, the same size as the eye, and half of that was its own outline.
+  } else if (k === 'round') {
+    const er = Math.max(2, Math.round(r * 0.62));
+    disc(b, bx, by - 1, er, C, { edge: C.deep });
+    blob(b, bx, by - 1, er * 0.5, er * 0.6, in_);
+  }
   else if (k === 'tiny') { brect(b, bx, by, 2, 2, C.shade); }
-  else if (k === 'pointy') { wedge(b, bx - 1, by + 1, bx + 1, by - 4, bx + 2, by + 1, C.body, C.deep); bset(b, bx, by - 1, in_); }
+  else if (k === 'pointy') {
+    // WIDE AT THE BASE, NOT LONG. Seven pixels tall on a wolf's head came out as a hare.
+    wedge(b, bx - 2, by + 1, bx + 1, by - 4, bx + 3, by + 1, C.body, C.deep);
+    bset(b, bx, by - 1, in_); bset(b, bx + 1, by - 2, in_);
+  }
   else if (k === 'long') { limb(b, bx, by + 1, bx - 2, by - 7, 1.4, 1, C, { near: true }); bset(b, bx - 1, by - 4, in_); }
   else if (k === 'tuft') { for (let i = -1; i <= 1; i++) limb(b, bx + i, by, bx + i * 2, by - 4, 0.9, 0.5, C, { near: false }); }
-  else if (k === 'horn') { limb(b, bx + 1, by, bx + r + 1, by - 5, 1.3, 0.6, { body: C.belly, shade: C.belly, deep: C.deep }, { near: true }); }
+  // HORN IS BONE. This was drawn in the animal's own BELLY colour, which on a rhino is the
+  // same key as its body -- so the rhino's horn was a grey stick on a grey head and the most
+  // recognisable animal in the roster had nothing left to recognise. And there was one of
+  // them, on the crown, pointing forward: right for a unicorn and wrong for all nine others.
+  // Bone with a bone contour, and WHERE it goes comes off the animal.
+  else if (k === 'horn') {
+    const HN = {
+      body: P.bone, shade: mix(P.bone, C.deep, 0.3),
+      light: P.white, deep: mix(P.bone, C.deep, 0.5),
+    };
+    if (NOSE_HORN[sp.id]) {
+      // on the nose, forward and up, and starting CLEAR of the eye socket -- the socket is
+      // pale too, and a bone horn rooted next to it merges into one pale smudge.
+      const hx = cx + r * 1.05, hy = cy + r * 0.3;
+      limb(b, hx, hy, hx + r * 1.35, hy - r * 1.05, 1.6, 0.5, HN, { near: true });
+    } else {
+      // a curving pair on the crown, which is a goat, an ox, an ibex and a yak
+      for (const side of [-1, 1]) {
+        limb(b, cx + side, cy - r * 0.72, cx + side * 3 - 1.6, cy - r * 0.72 - 3.6, 1.1, 0.5,
+          HN, { near: side > 0 });
+      }
+    }
+  }
   else if (k === 'antler') {
     limb(b, bx, by, bx + 2, by - 7, 1.2, 0.6, { body: C.belly, shade: C.belly, deep: C.deep }, { near: true });
     limb(b, bx + 1, by - 4, bx + 5, by - 6, 0.9, 0.5, { body: C.belly, shade: C.belly, deep: C.deep }, { near: true });
@@ -749,6 +1134,23 @@ function earsOf(b, cx, cy, r, sp, C) {
     for (let i = -1; i <= 1; i++) bset(b, cx - r - 1, cy + i * 2, C.shade);
   } else if (k === 'spike') {
     for (let i = 0; i < 3; i++) limb(b, cx - 2 + i * 2, by, cx - 3 + i * 3, by - 6, 0.9, 0.4, C, { near: false });
+  }
+  // HORNS ON A BOVINE, whatever its ears say. `ears` is one word and a cow has both ears
+  // AND horns, so the horns cannot live in the recipe -- and without them a cow is a large
+  // dog with patches on it, which is precisely what the first pass of this looked like.
+  if (sp.bovine && k !== 'horn' && k !== 'antler') {
+    // SMALL, PALE, AND CLEAR OF THE SKULL. The first pair were drawn thick, with the body's
+    // own deep tone for a contour, straight across the crown -- so a cow got a black bar
+    // over its eyes and the horns read as the top of its head. A horn is bone: it takes a
+    // bone contour, it is two pixels thick, and it starts where the skull stops.
+    const HN = {
+      body: C.belly, shade: mix(C.belly, C.deep, 0.32),
+      light: P.white, deep: mix(C.belly, C.deep, 0.55),
+    };
+    const hy = cy - Math.round(r * 0.75);
+    for (const side of [-1, 1]) {
+      limb(b, cx + side, hy, cx + side * 3.4, hy - 3.4, 1.0, 0.5, HN, { near: side > 0 });
+    }
   }
 }
 
@@ -883,11 +1285,20 @@ export function drawAnimal(g, animal, sx, sy, opts = {}) {
   // the art's ground row is GROUND of AH, so anchor the FEET rather than the box
   const dy = Math.round((sy - (SZH * (GROUND + 1)) / AH) / 2) * 2;
 
+  // DOWN. A knocked-out animal has to LOOK knocked out, and there is no fourth bake for
+  // it: `slump` squashes the blit vertically and drops it so the feet stay where they were,
+  // which folds the legs, sinks the barrel and brings the head to the ground all at once.
+  // It is one number and it reads from across the room, which a whole lying-down pose
+  // would also do at forty times the cost. 0 is standing, 1 is flat out.
+  const sl = clamp(opts.slump || 0, 0, 1);
+  const hh = Math.round(SZH * (1 - sl * 0.46));
+  const drop = SZH - hh;
+
   const prevA = g.globalAlpha;
   if (opts.alpha !== undefined) g.globalAlpha = opts.alpha;
   g.save();
-  if (opts.flip) { g.translate(dx + SZ, dy); g.scale(-1, 1); } else { g.translate(dx, dy); }
-  const put = (c) => c && g.drawImage(c, 0, 0, SPRITE_SIZE, SPRITE_H, 0, 0, SZ, SZH);
+  if (opts.flip) { g.translate(dx + SZ, dy + drop); g.scale(-1, 1); } else { g.translate(dx, dy + drop); }
+  const put = (c) => c && g.drawImage(c, 0, 0, SPRITE_SIZE, SPRITE_H, 0, 0, SZ, hh);
   put(back); put(body); put(head);
   g.restore();
   g.globalAlpha = prevA;

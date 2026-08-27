@@ -20,7 +20,7 @@
 // The floor is baked once into a single canvas -- lawn, water, rocks, trees, the ark's hull
 // -- and blitted as one call. Everything that moves is a blit of something that was baked.
 
-import { W, H, rect, text, textW, wash, clamp, disc, ellipse, makeCanvas } from '../core/pixel.js';
+import { W, H, rect, text, textW, wrap, wash, clamp, disc, ellipse, makeCanvas } from '../core/pixel.js';
 import { P, mix } from '../core/palette.js';
 import { Input } from '../core/input.js';
 import { approach } from '../core/juice.js';
@@ -466,7 +466,12 @@ export function makeIslandScene() {
     for (const s of f.held) {
       const cx = cxOf(s.col), by = cyOf(s.row);
       drawAnimalShadow(g, cx, by, 1);
-      drawAnimal(g, s.a, cx, by, { scale: 1, mood: 'blink', flip: true, t });
+      // and LYING DOWN, which the comment above claimed for three passes while the sprite
+      // stood there with its eyes shut. `slump` folds it onto the grass.
+      drawAnimal(g, s.a, cx, by, {
+        scale: 1, mood: 'blink', flip: true, t,
+        slump: 0.8 + Math.sin(t * 1.5 + s.col) * 0.04,
+      });
       const pulse = 0.5 + 0.5 * Math.sin(t * 2 + s.col);
       for (let i = 0; i < 14; i++) {
         const ang = (i / 14) * Math.PI * 2 + t * 0.5;
@@ -716,8 +721,10 @@ export function makeIslandScene() {
     cardRects = [];
     tipCard = null;
 
-    const cw = 121, ch = 54, gap = 4;
-    const perRow = 6;
+    // EIGHT ACROSS, TWO DEEP. Six fitted eleven beasts; a run that calls two or three
+    // summons has fourteen, and a card you cannot see is a card you do not own.
+    const cw = 92, ch = 54, gap = 4;
+    const perRow = 8;
     for (let i = 0; i < f.hand.length && i < perRow * 2; i++) {
       const def = f.hand[i];
       const bx = 10 + (i % perRow) * cw;
@@ -729,14 +736,21 @@ export function makeIslandScene() {
       rect(g, r0.x, r0.y, r0.w, r0.h, on ? 'clay1' : able ? (hot ? 'wood2' : 'wood1') : 'wood0');
       UI.boxEdge(g, r0.x, r0.y, r0.w, r0.h, on ? 'clay4' : hot && able ? 'brass3' : 'wood0');
       // the animal it is made of, on a pale niche so it reads against dark wood
-      rect(g, r0.x + 4, r0.y + 4, 34, 34, able ? 'parch0' : 'shadow');
+      // THE NAME GETS THE WHOLE WIDTH, on its own line above everything else. Beside the
+      // icon it had forty-five pixels, which is nine characters: THUNDERBIRD came out as
+      // THUNDERBI and BULWARK BOAR wrapped into the cost. Cut to fit, and the plaque over
+      // the tray carries the full name and the rule anyway.
+      text(g, fit(def.name.toUpperCase(), cw - 14), r0.x + 6, r0.y + 5,
+        able ? 'cream' : 'grey1', { font: 3 });
+      rect(g, r0.x + 4, r0.y + 16, 32, 32, def.mythic ? 'purple0' : able ? 'parch0' : 'shadow');
       const a = ANIMAL_BY_ID[def.base];
-      if (a) drawAnimalIcon(g, a, r0.x + 21, r0.y + 21, { size: 32, alpha: able ? 1 : 0.4 });
-      text(g, def.name.toUpperCase(), r0.x + 42, r0.y + 6, able ? 'cream' : 'grey1', { font: 3 });
-      text(g, String(def.cost), r0.x + 42, r0.y + 18, able ? 'clay4' : 'red2', { font: 7 });
-      text(g, 'CLAY', r0.x + 42 + textW(String(def.cost), { font: 7 }) + 4, r0.y + 26,
-        able ? 'parch1' : 'red2', { font: 3 });
-      if (def.upgraded) text(g, 'IMPROVED', r0.x + 42, r0.y + 40, 'gold', { font: 3 });
+      if (a) drawAnimalIcon(g, a, r0.x + 20, r0.y + 32, { size: 30, alpha: able ? 1 : 0.4 });
+      text(g, String(def.cost), r0.x + 40, r0.y + 20, able ? 'clay4' : 'red2', { font: 7 });
+      text(g, 'CLAY', r0.x + 40, r0.y + 34, able ? 'parch1' : 'red2', { font: 3 });
+      if (def.mythic) {
+        rect(g, r0.x + 40, r0.y + 42, cw - 50, 8, 'purple0');
+        text(g, 'SUMMONED', r0.x + 42, r0.y + 42, 'brass3', { font: 3 });
+      } else if (def.upgraded) text(g, 'BETTER', r0.x + 40, r0.y + 42, 'gold', { font: 3 });
       if (i < 9) text(g, String(i + 1), r0.x + r0.w - 6, r0.y + 4, 'parch1', { font: 3, right: true });
       cardRects.push({ rect: r0, id: def.id });
       // the plaque follows the CURSOR, not the selection: while you are holding a beast
@@ -952,8 +966,12 @@ export function makeIslandScene() {
         put: (r, c) => actAt(f, r, c),
         at: (r, c) => ({ x: cxOf(c), y: cyOf(r) - 20 }),
         tileAt: (x, y) => tileAtPoint(x, y),
-        rects: {
-          cards: cardRects, apple: appleRect, cast: castRect, call: callRect, dolls: cardRects,
+        // GETTERS: every one of these is reassigned in draw(), so a plain property would
+        // hand a harness the rect from the frame the scene was built in.
+        get rects() {
+          return {
+            cards: cardRects, apple: appleRect, cast: castRect, call: callRect, dolls: cardRects,
+          };
         },
         motes: () => f.motes.map((m) => Object.assign({ mote: m }, moteAt2(m))),
         grab: (x, y) => grabAt(x, y),

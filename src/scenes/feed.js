@@ -20,7 +20,7 @@
 //     is 'IT GOES BACK TO THE WATER' -- not a penalty, not a red number.
 
 import {
-  W, H, rect, text, textW, wash, disc, ellipse, tri, clamp, lerp, makeCanvas,
+  W, H, rect, text, textW, wrap, wash, disc, ellipse, tri, clamp, lerp, makeCanvas,
 } from '../core/pixel.js';
 import { P, mix } from '../core/palette.js';
 import { Input } from '../core/input.js';
@@ -31,16 +31,22 @@ import * as UI from '../render/uikit.js';
 import { drawFolk } from '../render/folk.js';
 import { drawAnimal, drawAnimalShadow, drawAnimalIcon } from '../render/sprites.js';
 import { ANIMAL_BY_ID } from '../data/animals.js';
+import { BEAST_BY_ID as BEAST_LOOKUP } from '../data/beasts.js';
 import { feed, endFeeding } from '../game/lane.js';
 import { berthsFree } from '../game/voyage.js';
+import { checkSummons, nextSummon, progressFor } from '../data/summons.js';
 
 const BAR = 38;
 const GROUND = 430;             // the sand they are lying on
 const RAMP_X = 726;             // where the ramp starts
 const GOLEM_X = 250;
-const QUEUE_X = 316;           // the first animal in the queue
-const QUEUE_GAP = 80;          // six across, clear of the ramp at 726
-const QUEUE_ROW = 6;
+const QUEUE_X = 322;           // the first animal in the queue
+// FOUR ACROSS, NOT SIX. A sprite is eighty pixels wide and the gap was eighty, so with a
+// full boat the queue was eleven animals shoulder to shoulder in two rows with a ring of
+// brass around each of them -- one purple mush from the golem to the ramp. Four across at
+// a hundred and four leaves air between them and still lands clear of the ramp at 726.
+const QUEUE_GAP = 104;
+const QUEUE_ROW = 4;
 
 export function makeFeedScene() {
   let v = null, f = null, island = null, onDone = null;
@@ -55,6 +61,8 @@ export function makeFeedScene() {
   let note = '';
   let noteT = 0;
   let fedCount = 0;
+  let called = [];            // summons earned by this boatload, announced here
+  let plate = -1;             // >=0 while the summon card is up
 
   /* --------------------------------------------------------------- the backdrop */
 
@@ -128,7 +136,7 @@ export function makeFeedScene() {
     queue = (f.held || []).map((held, i) => ({
       held,
       x: QUEUE_X + (i % QUEUE_ROW) * QUEUE_GAP,
-      y: GROUND - 16 + Math.floor(i / QUEUE_ROW) * 36,
+      y: GROUND - 22 + Math.floor(i / QUEUE_ROW) * 42,
       k: 0,
       up: 0,
     }));
@@ -152,6 +160,13 @@ export function makeFeedScene() {
       Audio.sfx('error');
       return;
     }
+    // AND THE PENS ARE THE OTHER LIMIT, said out loud rather than as a silent refusal.
+    if (v && !berthsFree(v)) {
+      note = 'THE PENS ARE FULL — NOTHING ELSE FITS ABOARD';
+      noteT = 2.6;
+      Audio.sfx('error');
+      return;
+    }
     const res = feed(f, q.held);
     if (!res.ok) { Audio.sfx('error'); note = (res.why || '').toUpperCase(); noteT = 2; return; }
     q.k = 0.001;
@@ -164,6 +179,19 @@ export function makeFeedScene() {
     note = res.learned ? `${res.animal ? res.animal.toUpperCase() : 'IT'} TEACHES YOU SOMETHING NEW`
       : res.boarded ? 'ABOARD' : 'NO BERTH LEFT — IT STAYS ASHORE';
     noteT = 2.4;
+
+    // AND THIS IS WHERE A COLLECTION PAYS OFF. Every animal that comes aboard is checked
+    // against the summons, because this is the only screen where the roster changes and the
+    // player is looking at the roster.
+    const won = checkSummons(v);
+    if (won.length) {
+      called = called.concat(won);
+      plate = 0;
+      Audio.sfx('fanfare');
+      Juice.flash('white', 0.3, 0.6);
+      Juice.shake(4, 0.5);
+      parts.emit('star', W / 2, 200, { count: 40, speed: 140, color: 'gold', life: 1.6 });
+    }
   }
 
   function done() {
@@ -182,6 +210,7 @@ export function makeFeedScene() {
     if (noteT > 0) noteT -= dt;
     parts.update(dt);
 
+    if (plate >= 0) plate += dt;
     for (const q of queue) {
       if (q.k > 0 && q.k < 1) q.k = Math.min(1, q.k + dt * 1.6);
       else if (q.k >= 1 && q.up < 1) {
@@ -202,6 +231,7 @@ export function makeFeedScene() {
 
     const m = Input.mouse;
     hover = hitAt(m.x, m.y);
+    if (m.pressed && plate > 0.4) { plate = -1; called = called.slice(1); if (called.length) plate = 0; return; }
     if (m.pressed) {
       if (UI.hover(castRect, m)) { done(); return; }
       if (hover >= 0) { give(hover); return; }
@@ -236,13 +266,24 @@ export function makeFeedScene() {
     if (!fed) {
       // still corrupted, and lying down: the mood does the lying-down, the ring does the
       // "this one is yours"
-      drawAnimal(g, a, rx, ry, { scale: 1, flip: true, t, material: 'corrupt', mood: 'blink' });
-      const pulse = 0.5 + 0.5 * Math.sin(t * 2 + i);
-      const on = hover === i;
-      for (let k = 0; k < 14; k++) {
-        const ang = (k / 14) * Math.PI * 2 + t * 0.4;
-        rect(g, rx + Math.cos(ang) * (on ? 40 : 34) - 3, ry - 20 + Math.sin(ang) * 24 - 3, 6, 6,
-          on ? 'cream' : pulse > 0.7 ? 'brass3' : 'brass1');
+      // AND IT IS ACTUALLY LYING DOWN. The heading says ELEVEN STILL LYING THERE and for
+      // three passes they were all standing up, because 'lying down' was a closed eye.
+      // A breath in the slump, so a beach full of them is not a still life.
+      drawAnimal(g, a, rx, ry, {
+        scale: 1, flip: true, t, material: 'corrupt', mood: 'blink',
+        slump: 0.82 + Math.sin(t * 1.4 + i) * 0.04,
+      });
+      const on = hover === i && f.apples > 0 && (!v || berthsFree(v) > 0);
+      // THE RING IS ONLY ON THE ONE YOU ARE POINTING AT. It used to be on all eleven, and
+      // the reason it existed was that a corrupted animal used to be a black hole with a
+      // silhouette -- you needed the brass to know something was lying there. It is a
+      // bruise now: purple on sand says it by itself, and eleven rings said nothing.
+      if (on) {
+        for (let k = 0; k < 12; k++) {
+          const ang = (k / 12) * Math.PI * 2 + t * 0.4;
+          rect(g, rx + Math.cos(ang) * 38 - 3, ry - 20 + Math.sin(ang) * 23 - 3, 6, 6,
+            k % 2 ? 'cream' : 'brass3');
+        }
       }
       if (on) {
         const bob = Math.round(Math.sin(t * 5) * 4);
@@ -256,8 +297,10 @@ export function makeFeedScene() {
     }
     // FED. Its own colours come back over half a second, and then it gets up.
     if (kk < 1) {
+      // and it GETS UP as its colours come back, which is the whole reward in one number
       drawAnimal(g, a, rx, ry, {
         scale: 1, flip: true, t, material: kk < 0.5 ? 'corrupt' : null, mood: 'happy',
+        slump: 0.82 * (1 - Ease.outCubic(kk)),
       });
       const rr = 20 + kk * 90;
       for (let k = 0; k < 16; k++) {
@@ -321,6 +364,47 @@ export function makeFeedScene() {
     }
   }
 
+  /**
+   * THE CARD. The one moment in a run where a myth turns up, so it gets the whole screen
+   * dimmed and a plate with its culture printed on it -- these are real stories from real
+   * places and the game says whose they are.
+   */
+  function drawSummonPlate(g) {
+    if (plate < 0 || !called.length) return;
+    const s2 = called[0];
+    const k = Ease.outCubic(clamp(plate / 0.5, 0, 1));
+    wash(g, 0, 0, W, H, 'ink', 0.72 * k);
+    const pw = 620, ph = 240;
+    const px0 = (W - pw) / 2, py0 = 120 - (1 - k) * 40;
+    rect(g, px0 + 8, py0 + 8, pw, ph, 'ink');
+    rect(g, px0, py0, pw, ph, 'wood1');
+    rect(g, px0, py0, pw, 8, 'gold');
+    rect(g, px0, py0, 8, ph, 'brass2');
+    rect(g, px0, py0 + ph - 8, pw, 8, 'wood0');
+    text(g, 'A SUMMONING', px0 + pw / 2, py0 + 18, 'brass3', { font: 5, center: true });
+    text(g, s2.name, px0 + pw / 2, py0 + 44, 'gold', { font: 7, center: true, scale: 2 });
+    text(g, `OF ${s2.culture}`, px0 + pw / 2, py0 + 82, 'parch1', { font: 3, center: true });
+    // the animal it comes as, big, in the middle of the card
+    const a = ANIMAL_BY_ID[(BEAST_LOOKUP[s2.beast] || {}).base || ''];
+    if (a) {
+      drawAnimalShadow(g, px0 + 120, py0 + 190, 1);
+      drawAnimal(g, a, px0 + 120, py0 + 190, { scale: 1, t, blessed: true, mood: 'happy' });
+    }
+    wrap(s2.lore, pw - 260, { font: 5 }).slice(0, 3).forEach((l, i) => {
+      text(g, l, px0 + 210, py0 + 116 + i * 18, 'cream', { font: 5 });
+    });
+    const bd = BEAST_LOOKUP[s2.beast];
+    if (bd) {
+      text(g, `${bd.name.toUpperCase()} — ${bd.cost} CLAY`, px0 + 210, py0 + 176, 'brass3', { font: 5 });
+      wrap(bd.rule, pw - 260, { font: 3 }).slice(0, 2).forEach((l, i) => {
+        text(g, l, px0 + 210, py0 + 196 + i * 12, 'parch1', { font: 3 });
+      });
+    }
+    if (plate > 0.6 && Math.floor(t * 2) % 2 === 0) {
+      text(g, 'CLICK TO GO ON', px0 + pw - 20, py0 + ph - 26, 'wood2', { font: 3, right: true });
+    }
+  }
+
   function draw(g) {
     if (!bakeCv) bake();
     rect(g, 0, 0, W, H, 'ink');
@@ -365,14 +449,35 @@ export function makeFeedScene() {
 
     // and the berths, so a full ark is visible before you spend the apple
     const free = v ? berthsFree(v) : 0;
-    text(g, `${free} BERTHS LEFT`, 26, H - BAR - 30, free ? 'parch1' : 'red2', { font: 3 });
-    if (v) {
-      v.aboard.slice(0, 14).forEach((id, i) => {
+    text(g, `${free} BERTHS LEFT`, 26, H - BAR - 28, free ? 'parch1' : 'red2', { font: 3 });
+
+    // THE NEXT SUMMON, as a line you can read in one glance. This is the only place in the
+    // game that says "another kind of bird would be worth having", and it belongs here:
+    // the boat's contents are on the screen and you are choosing what goes on it.
+    const nx = v ? nextSummon(v) : null;
+    if (nx && nx.left > 0) {
+      const have = progressFor(v, nx.summon).length;
+      const label = `${nx.summon.name} · ${have}/${nx.summon.need} ${nx.summon.call}`;
+      const lw = textW(label, { font: 3 }) + 20;
+      rect(g, W - lw - 26, BAR + 74, lw, 22, 'ink');
+      rect(g, W - lw - 26, BAR + 74, 4, 22, 'purple1');
+      text(g, label, W - lw - 14, BAR + 80, 'parch1', { font: 3 });
+    }
+    // WHO IS ALREADY ON THE BOAT, on a plate. Bare on the sand, a row of twenty-two-pixel
+    // icons read as a line of very small animals standing at the water's edge, which is a
+    // thing this scene absolutely cannot afford to look like.
+    if (v && v.aboard.length) {
+      const n = Math.min(14, v.aboard.length);
+      const pw = 16 + n * 26;
+      rect(g, 20, H - BAR - 74, pw, 34, 'ink');
+      rect(g, 22, H - BAR - 72, pw - 4, 3, 'wood2');
+      v.aboard.slice(0, n).forEach((id, i) => {
         const a = ANIMAL_BY_ID[id];
-        if (a) drawAnimalIcon(g, a, 30 + i * 26, H - BAR - 58, { size: 22 });
+        if (a) drawAnimalIcon(g, a, 42 + i * 26, H - BAR - 57, { size: 22 });
       });
     }
 
+    drawSummonPlate(g);
     drawCaption(g);
     if (outT >= 0) wash(g, 0, 0, W, H, 'ink', Ease.inQuad(clamp(outT / 0.6, 0, 1)));
     else if (intro < 1) wash(g, 0, 0, W, H, 'ink', (1 - Ease.outCubic(clamp(intro, 0, 1))) * 0.9);
@@ -402,7 +507,11 @@ export function makeFeedScene() {
         get fed() { return fedCount; },
         queue: () => queue.map((q, i) => ({ i, x: q.x, y: q.y - 34, fed: q.k > 0 })),
         give: (i) => give(i),
-        rects: { cast: castRect },
+        // A GETTER, because castRect is REASSIGNED every draw: a plain property captured the
+        // zero rect the scene was constructed with, and every harness clicked (0,0) for ever.
+        get rects() { return { cast: castRect }; },
+        get called() { return called.map((x) => x.id); },
+        get plate() { return plate >= 0; },
         cast: () => done(),
       };
     },

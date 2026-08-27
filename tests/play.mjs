@@ -429,28 +429,39 @@ function playFeed() {
   const start = dbg();
   const apples0 = start.apples;
   const left0 = start.left;
+  const berths0 = V.berthsFree(start.voyage);
+  let dbgFed = 0;
   let guard = 0;
+  let stuck = 0;
   while (where() === 'feed' && guard++ < 80) {
     const d = dbg();
     const next = (d.queue() || []).find((q) => !q.fed);
-    if (next && d.apples > 0) {
+    // A CLICK THAT CHANGES NOTHING IS THE ARK BEING FULL, which is the game working: the
+    // pens are the real limit. Two of those and the rig stops feeding and casts off, rather
+    // than clicking the same refused animal eighty times.
+    if (next && d.apples > 0 && stuck < 2) {
+      const was = d.fed;
       paint();
       clickAt(Math.round(next.x), Math.round(next.y));
       tick(4);
+      if (dbg().fed === was) stuck++;
+      else dbgFed = dbg().fed;
       continue;
     }
     // nothing left to feed: cast off with a real click on the button
     paint();
     const cr = dbg().rects && dbg().rects.cast;
+    if (process.env.FEEDDBG) {
+      console.log('    FEED', JSON.stringify({ left: d.left, apples: d.apples, plate: d.plate, cr }));
+    }
     if (cr) { const [cx, cy] = centre(cr); clickAt(cx, cy); }
     tick(20);
   }
-  const after = dbg();
   if (where() === 'feed') errors.push('feed: never cast off');
   else {
-    const fed = Math.min(apples0, left0);
-    if (fed > 0 && start.fed === after.fed && after.fed === 0) {
-      errors.push('feed: clicking an animal fed nothing');
+    const fed = dbgFed;
+    if (apples0 > 0 && left0 > 0 && berths0 > 0 && fed === 0) {
+      errors.push('feed: with apples, animals and berths, nothing was fed');
     }
     fedTotal += fed;
   }

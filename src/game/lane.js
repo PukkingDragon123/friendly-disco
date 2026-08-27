@@ -229,7 +229,11 @@ export function newLane(v, island, tag) {
 export function handFor(v) {
   const known = (v.beasts && v.beasts.length) ? v.beasts : STARTER_BEASTS;
   const bought = v.beastUpgrades || [];
-  return known.map((id) => resolveBeast(id, bought)).filter(Boolean);
+  const out = known.map((id) => resolveBeast(id, bought)).filter(Boolean);
+  // SUMMONS GO LAST. The tray is read left to right in a hurry, and the cheap things you
+  // open every island with belong under the digit keys.
+  out.sort((a, b) => (a.mythic ? 1 : 0) - (b.mythic ? 1 : 0));
+  return out;
 }
 
 export function note(f, text, color) {

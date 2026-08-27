@@ -96,10 +96,69 @@ export const BEASTS = [
   },
 ];
 
+/* ------------------------------------------------------------------- the summons
+
+WHAT A BOATLOAD OF ORDINARY ANIMALS ADDS UP TO. One per myth (see data/summons.js), earned
+by having a COLLECTION rather than by taming any one thing, and every one of them is the
+best card in the deck at what it does. They are expensive on purpose: a summon should be a
+decision about a whole board, not a card you drop in a gap.
+
+They are built out of exactly the same seven kinds as everything else. A mythic beast that
+needed its own mechanic in the lane loop would be a second game bolted onto the first.
+*/
+export const MYTHIC = [
+  {
+    id: 'qilin_beast', name: 'Qilin', base: 'qilin', kind: 'gen', mythic: true,
+    cost: 200, hp: 220, rate: 6, amount: 95, tier: 4,
+    blurb: 'Where it stands, the ground gives.',
+    rule: '+95 clay every 6s. The best well there is.',
+  },
+  {
+    id: 'thunder_beast', name: 'Thunderbird', base: 'thunderbird', kind: 'shoot', mythic: true,
+    cost: 300, hp: 180, rate: 1.3, damage: 72, speed: 520, far: true, pierce: true, tier: 4,
+    blurb: 'The storm has wings, and it is looking down.',
+    rule: 'Hits the FURTHEST thing in its row for 72, through armour.',
+  },
+  {
+    id: 'bakunawa_beast', name: 'Bakunawa', base: 'kraken', kind: 'aoe', mythic: true,
+    cost: 325, hp: 260, rate: 2.1, damage: 46, radius: 2.4, knock: 1.7, tier: 4,
+    blurb: 'It swallowed six moons and gave one back.',
+    rule: 'Swallows everything within two and a half tiles and spits it backwards.',
+  },
+  {
+    id: 'anansi_beast', name: 'Anansi', base: 'scarab', kind: 'wall', mythic: true,
+    cost: 225, hp: 620, spike: 48, tier: 4,
+    blurb: 'Never the strongest thing in the story. Wins anyway.',
+    rule: 'A web nothing gets through, and it bites back hard.',
+  },
+  {
+    id: 'sleipnir_beast', name: 'Sleipnir', base: 'unicorn', kind: 'aoe', mythic: true,
+    cost: 275, hp: 340, rate: 2.6, damage: 24, radius: 1.7, knock: 2.4, tier: 4,
+    blurb: 'Eight legs, because four was not going to do it.',
+    rule: 'Kicks the whole row back down the field.',
+  },
+  {
+    id: 'simurgh_beast', name: 'Simurgh', base: 'phoenix', kind: 'spawn', mythic: true,
+    cost: 300, hp: 240, rate: 1.9, damage: 42, twin: true, tier: 4,
+    blurb: 'Has watched the world end three times.',
+    rule: 'Two burning feathers at a time, and they chase.',
+  },
+  {
+    id: 'kitsune_beast', name: 'Kitsune', base: 'fox', kind: 'slow', mythic: true,
+    cost: 250, hp: 200, rate: 1.4, slow: 0.18, tier: 4,
+    blurb: 'One tail a century, and it is not counting out loud.',
+    rule: 'Everything in its row nearly stops.',
+  },
+];
+
+// ONE INDEX FOR BOTH. The tray, resolveBeast and every test look a beast up by id and do
+// not care where it came from; a summon is just a card you cannot buy.
+export const ALL_BEASTS = BEASTS.concat(MYTHIC);
 export const BEAST_BY_ID = Object.freeze(
-  BEASTS.reduce((m, b) => { m[b.id] = b; return m; }, Object.create(null)),
+  ALL_BEASTS.reduce((m, b) => { m[b.id] = b; return m; }, Object.create(null)),
 );
 export const BEAST_IDS = BEASTS.map((b) => b.id);
+export const MYTHIC_IDS = MYTHIC.map((b) => b.id);
 
 /**
  * The four you always have.

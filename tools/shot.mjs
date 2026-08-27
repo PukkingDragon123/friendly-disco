@@ -96,8 +96,9 @@ switch (which) {
     scene = makeIslandScene();
     scene.enter({ voyage, island, onDone: () => {} }, app);
     // ALLB=1 shows the tray a late run actually has: eleven beasts, two rows of cards
+    const B = await import('../src/data/beasts.js');
     voyage.beasts = process.env.ALLB
-      ? (await import('../src/data/beasts.js')).BEAST_IDS.slice()
+      ? B.BEAST_IDS.concat(process.env.ALLB === '2' ? B.MYTHIC_IDS.slice(0, 4) : [])
       : ['well', 'reed', 'boar', 'thorn', 'ember', 'bell', 'owl'];
     scene.enter({ voyage, island, onDone: () => {} }, app);
     const d = scene.debug();

@@ -47,6 +47,7 @@ const M = {};
     ['gear', '../src/data/gear.js'], ['quests', '../src/data/quests.js'],
     ['npcs', '../src/data/npcs.js'], ['garden', '../src/game/garden.js'],
     ['choicedata', '../src/data/choices.js'], ['choices', '../src/game/choices.js'],
+    ['summons', '../src/data/summons.js'],
   ];
   const broken = [];
   for (const [k, p] of list) {
@@ -377,6 +378,98 @@ if (section('voyage') && M.voyage && M.islands && M.obstacles && M.abilities) {
       }
     } catch (e) { threw = e; }
     ok(!threw, 'every island and boat tier renders', threw && threw.message);
+  }
+}
+
+/* ----------------------------------------------------------------- the summons */
+
+if (section('summons') && M.summons && M.beasts && M.animals && M.voyage) {
+  const S = M.summons;
+  const { BEAST_BY_ID, MYTHIC } = M.beasts;
+  const { ANIMALS, ANIMAL_BY_ID } = M.animals;
+  const V = M.voyage;
+
+  ok(S.SUMMONS.length >= 5, 'there are several summons to work toward', String(S.SUMMONS.length));
+
+  const cultures = new Set();
+  for (const su of S.SUMMONS) {
+    ok(!!BEAST_BY_ID[su.beast], `${su.id} calls a real beast`, su.beast);
+    ok(BEAST_BY_ID[su.beast].mythic === true, `${su.id}'s beast is marked mythic`);
+    ok(!!ANIMAL_BY_ID[BEAST_BY_ID[su.beast].base],
+      `${su.id}'s beast is made of a real animal`, BEAST_BY_ID[su.beast].base);
+    ok(su.need >= 4, `${su.id} needs a real collection`, String(su.need));
+    ok(!!su.culture && !cultures.has(su.culture), `${su.id} names its own culture`, su.culture);
+    cultures.add(su.culture);
+    ok(!!su.lore && su.lore.length > 20, `${su.id} says what it is`);
+
+    // AND IT HAS TO BE EARNABLE. A summon wanting six kinds of a tag only four animals
+    // carry is a card nobody will ever see, and nothing in the game would say so.
+    const carriers = ANIMALS.filter((a) => a.tags && a.tags.indexOf(su.tag) >= 0);
+    ok(carriers.length >= su.need + 2,
+      `${su.id}: enough animals carry '${su.tag}' to earn it`, `${carriers.length} vs ${su.need}`);
+  }
+
+  // no mythic beast is ever handed out by taming: they are the one reward you collect for
+  for (const c of M.corrupted.CORRUPTED.concat(M.corrupted.CHAMPIONS)) {
+    ok(!MYTHIC.some((b) => b.id === c.gives), `${c.id} does not hand out a summon`, c.gives);
+  }
+
+  // --- progress counts DISTINCT species
+  {
+    const v = V.newVoyage('SUM1');
+    const su = S.SUMMONS.find((x) => x.tag === 'bird');
+    const birds = ANIMALS.filter((a) => a.tags.indexOf('bird') >= 0).map((a) => a.id);
+    v.aboard = [birds[0], birds[0], birds[0]];
+    ok(S.progressFor(v, su).length === 1, 'three of the same bird is one kind of bird',
+      String(S.progressFor(v, su).length));
+    v.aboard = birds.slice(0, su.need);
+    ok(S.progressFor(v, su).length === su.need, 'and five different ones is five');
+  }
+
+  // --- the garden counts too, because a rescue you banked is still a rescue
+  {
+    const v = V.newVoyage('SUM2');
+    const su = S.SUMMONS.find((x) => x.tag === 'bird');
+    const birds = ANIMALS.filter((a) => a.tags.indexOf('bird') >= 0).map((a) => a.id);
+    v.aboard = birds.slice(0, 2);
+    v.eden = birds.slice(2, su.need);
+    ok(S.progressFor(v, su).length === su.need, 'the boat and the garden are counted together');
+  }
+
+  // --- calling one, once
+  {
+    const v = V.newVoyage('SUM3');
+    const su = S.SUMMONS.find((x) => x.tag === 'bird');
+    const birds = ANIMALS.filter((a) => a.tags.indexOf('bird') >= 0).map((a) => a.id);
+    v.aboard = birds.slice(0, su.need);
+    const won = S.checkSummons(v);
+    ok(won.some((x) => x.id === su.id), 'a full collection calls its summon');
+    ok((v.beasts || []).indexOf(su.beast) >= 0, 'and the beast is in the roster now');
+    const again = S.checkSummons(v);
+    ok(!again.some((x) => x.id === su.id), 'and it is never called twice');
+    ok(S.isCalled(v, su), 'and the run remembers it');
+  }
+
+  // --- the next one up is the closest one
+  {
+    const v = V.newVoyage('SUM4');
+    const nx = S.nextSummon(v);
+    ok(nx && nx.left > 0, 'a fresh voyage has something to work toward');
+    ok(nx.left <= Math.max(...S.SUMMONS.map((x) => x.need)), 'and it is the nearest one');
+  }
+
+  // --- a summon is worth having: it beats the best ordinary card at its own job
+  {
+    const byKind = (k, list) => list.filter((b) => b.kind === k);
+    for (const m of MYTHIC) {
+      const rivals = byKind(m.kind, M.beasts.BEASTS);
+      if (!rivals.length) continue;
+      const score = (b) => (b.amount || 0) + (b.damage || 0) * 2 + (b.spike || 0) * 2
+        + (b.hp || 0) / 10 + (b.knock || 0) * 20 + (1 - (b.slow || 1)) * 40;
+      ok(score(m) > Math.max(...rivals.map(score)),
+        `${m.id} is better than any ordinary ${m.kind}`, score(m).toFixed(0));
+      ok(m.cost >= 200, `${m.id} costs what a summon should`, String(m.cost));
+    }
   }
 }
 

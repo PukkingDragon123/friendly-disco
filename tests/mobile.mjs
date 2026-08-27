@@ -15,6 +15,11 @@ async function sceneKind(page) {
   return page.evaluate(() => {
     const d = window.__ARK.app.scene.debug ? window.__ARK.app.scene.debug() : {};
     if (d.scriptId !== undefined) return 'cutscene';
+    if (d.film) return 'film';
+    if (d.basement) return 'cellar';
+    if (d.heaven) return 'heaven';
+    if (d.sights !== undefined) return 'walk';
+    if (d.queue) return 'feed';
     if (d.lane) return 'island';
     if (d.encounter) return 'choice';
     if (d.rects && d.rects.gates) return 'garden';
@@ -24,11 +29,29 @@ async function sceneKind(page) {
   });
 }
 
-/** Tap/skip through any dialogue until the map is up. */
+/**
+ * Get to the map.
+ *
+ * THIS IS A LAYOUT TEST, NOT A PLAYTHROUGH. browser.mjs plays the prologue with a real
+ * mouse -- builds the golem, throws the apple, walks the causeway -- and that is where the
+ * intro is checked. What this file is for is scale, touch and orientation on a phone, so it
+ * gets to the ocean the shortest honest way there is: each scene's own `skip`. Escape alone
+ * used to be enough and stopped being enough the moment the prologue became four scenes
+ * instead of one dialogue script, and the failure it gave was "never reached the map",
+ * which reads like a broken game rather than a stale harness.
+ */
 async function skipDialogue(page, tries = 60) {
   for (let i = 0; i < tries; i++) {
     const kind = await sceneKind(page);
     if (kind === 'ocean') return true;
+    if (kind === 'film' || kind === 'cellar' || kind === 'walk' || kind === 'heaven') {
+      await page.evaluate(() => {
+        const d = window.__ARK.app.scene.debug();
+        if (d.skip) d.skip();
+      });
+      await page.waitForTimeout(700);
+      continue;
+    }
     // Escape leaves a script outright; the Space is only for the frame where a line is
     // still typing. Both are checked against the CURRENT scene, so a press can never
     // land on the map behind the dialogue and choose a route for us.
@@ -83,7 +106,14 @@ async function run(label, viewport, isPortrait) {
   await page.touchscreen.tap(b.x, b.y);
   await page.waitForTimeout(900);
   await page.screenshot({ path: `shots/mobile-${label}-prologue.png` });
-  if (!await skipDialogue(page)) { errors.push(`${label}: never reached the map`); await ctx.close(); return; }
+  if (!await skipDialogue(page)) {
+    // AND SAY WHERE IT GOT STUCK. "never reached the map" was the whole message for two
+    // rounds of this and it reads like a broken game; the scene it is sitting in is the
+    // only fact that tells you whether the game or the harness is the thing that is stale.
+    errors.push(`${label}: never reached the map (stuck in "${await sceneKind(page)}")`);
+    await ctx.close();
+    return;
+  }
   await page.waitForTimeout(1400);
   await page.screenshot({ path: `shots/mobile-${label}-ocean.png` });
 

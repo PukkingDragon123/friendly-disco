@@ -627,7 +627,12 @@ export function makeWalkScene() {
         phase, heroX: Math.round(heroX), ix, seen: seen.length, sights: SIGHTS.length,
         lines: LINES.length, dead: deadT >= 0,
         walkTo(x) { heroX = clamp(x, 40, ARK_X + 10); },
-        skip() { phase = 'give'; deadT = 0; heroX = ARK_X - 80; },
+        // SKIP MEANS LEAVE. This used to set the phase and park the hero eighty pixels short
+        // of the ark -- and the scene exits at seventy-four, so anything that called skip()
+        // and did not then hold a key down walked nowhere and sat in the causeway for ever.
+        // The mobile harness did exactly that and reported it as "never reached the map",
+        // which is a broken-game message for a one-pixel arithmetic bug in a debug hook.
+        skip() { phase = 'give'; deadT = 0; heroX = ARK_X - 70; outT = 0; },
       talk() { heroX = NOAH_X - 152; phase = 'talk'; ix = 0; typed = 0; },
       };
     },

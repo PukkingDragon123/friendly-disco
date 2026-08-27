@@ -112,7 +112,9 @@ has to end up going AWAY from you, up the table, which is the hard direction. Si
 would make every shot a pocket shot and nothing would ever be a decision.
 */
 
-export const GATE_R = 11;
+// WIDE. A door two ball-radii across is a door you thread; three is a door you aim for, and
+// this game asks you to aim for it with something you are trying not to kill.
+export const GATE_R = 14;
 
 const GATE_POS = [
   { id: 'port', x: AW * 0.22, y: -1.5 },

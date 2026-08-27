@@ -207,33 +207,39 @@ you can watch travel toward you, and LIFE.
 */
 
 /**
- * Long rolling swells.
+ * THE SEA, IN BANDS.
  *
- * Drawn in four-pixel steps, which is both the look and the budget. A per-pixel sine
- * across a 960-wide sea is a thousand fillRects a swell; stepping four and drawing a
- * four-wide block is a quarter of that, and the result is chunky in exactly the way the
- * rest of the art is chunky.
+ * What was here was a per-row job: nine hundred and sixty pixels of dithered depth ramp
+ * per row, then 1px foam dashes scattered along it, then 1px glitter. On the four-pixel
+ * world grid every one of those single pixels became a four-pixel block and the whole
+ * ocean turned into a checkerboard with confetti on it -- the most expensive thing in the
+ * frame and the worst-looking.
+ *
+ * A bold ocean is not a texture, it is a STACK OF SHAPES. Five or six flat depth bands
+ * from the horizon down, each one's top edge a long travelling wave rather than a straight
+ * rule, a bright foam line along that edge and a dark lip under it. That is the whole sea:
+ * a couple of hundred rectangles, no dither, and it reads as water from across the room
+ * because the EDGES move and the fills do not.
  */
-function drawSwells(g, x, y, w, hy, waterH, t, keys, foamC, storm) {
-  const STEP = 4;
-  const n = storm > 0.4 ? 3 : 2;
-  for (let s = 0; s < n; s++) {
-    // each swell walks from the horizon to the viewer, easing out as it nears
-    const ph = ((t * (0.055 + s * 0.018) + s * 0.41) % 1);
-    const base = hy + Math.round(Math.pow(ph, 0.62) * waterH);
-    if (base < hy + 3 || base > hy + waterH - 3) continue;
-    const k = (base - hy) / waterH;
-    const amp = 1.5 + k * 6 + storm * 4;
-    const per = 90 + k * 200;
-    const th = 1 + Math.round(k * 3);
-    const crest = mix(P[foamC], P[keys[Math.min(keys.length - 1, 2)]], 0.45 - k * 0.3);
-    const trough = mix(P[keys[Math.min(keys.length - 1, Math.round(2 + k * 2))]], P.ink, 0.3);
-    for (let i = 0; i < w; i += STEP) {
-      const wy = base + Math.round(Math.sin((i / per) * Math.PI * 2 + t * 0.9 + s * 2.1) * amp);
-      if (wy < hy || wy > hy + waterH - 2) continue;
-      rect(g, x + i, wy, STEP, th, crest);
-      rect(g, x + i, wy + th, STEP, 1, trough);
-    }
+
+/** The wavy top edge of one depth band, as a function of x. */
+function bandEdge(x, base, t, seed, amp, per, drift) {
+  return base
+    + Math.sin((x / per) * Math.PI * 2 + t * drift + seed * 2.1) * amp
+    + Math.sin((x / (per * 0.41)) * Math.PI * 2 - t * drift * 0.7 + seed) * amp * 0.35;
+}
+
+/**
+ * One band: fill from its wavy edge down to the bottom of the sea, then the foam and the
+ * lip on the edge itself. Painted horizon-first, so each band buries the one before it.
+ */
+function drawBand(g, x, w, bottom, edgeY, t, seed, amp, per, drift, fill, foam, lip, step) {
+  for (let i = 0; i < w; i += step) {
+    const ey = Math.round(bandEdge(x + i, edgeY, t, seed, amp, per, drift));
+    if (ey >= bottom) continue;
+    rect(g, x + i, ey, step, bottom - ey, fill);
+    if (foam) rect(g, x + i, ey, step, 4, foam);
+    if (lip) rect(g, x + i, ey + 4, step, 4, lip);
   }
 }
 
@@ -426,16 +432,17 @@ export function createSeascape(seed, o = {}) {
     const skyKeys = stormv > 0.35 ? p.sky.map((k) => mix(k, P.deep, stormv * 0.6)) : p.sky;
     const waterKeys = stormv > 0.35 ? p.water.map((k) => mix(k, P.ink, stormv * 0.45)) : p.water;
 
-    if (hy > 0) vgrad(bg, 0, 0, w, hy, skyKeys, 3);
-
-    const waterH = Math.max(1, h - hy);
-    const n = waterKeys.length;
-    for (let i = 0; i < waterH; i++) {
-      const k = Math.pow(i / waterH, 0.78);
-      const fk = k * (n - 1);
-      const i0 = Math.min(n - 1, Math.floor(fk));
-      const i1 = Math.min(n - 1, i0 + 1);
-      dither(bg, 0, hy + i, w, 1, waterKeys[i0], waterKeys[i1], Math.round((fk - i0) * 16));
+    // THE SKY IN HARD BANDS. A dithered gradient at four pixels is a chequerboard the
+    // size of a bathroom floor; flat bands with one dithered seam between them is the same
+    // sky, read from further away, and it is what the rest of the art is doing.
+    if (hy > 0) {
+      const nb = skyKeys.length;
+      for (let b = 0; b < nb; b++) {
+        // bunched toward the horizon: most of a sky's colour change happens near the ground
+        const y0 = Math.round(Math.pow(b / nb, 1.5) * hy);
+        const y1 = Math.round(Math.pow((b + 1) / nb, 1.5) * hy);
+        rect(bg, 0, y0, w, Math.max(1, y1 - y0), skyKeys[b]);
+      }
     }
     rect(bg, 0, Math.max(0, hy - 1), w, 1, p.horizon);
 
@@ -613,88 +620,78 @@ export function createSeascape(seed, o = {}) {
       const waterH = Math.max(1, bottom - hy);
       const keys = storm > 0.35 ? p.water.map((k) => mix(k, P.ink, storm * 0.45)) : p.water;
       const foamC = storm > 0.5 ? 'white' : p.foam;
-
       const n = keys.length;
-      // the depth ramp comes from the bake; only the crests are live
-      const bake = ensureBake(opt);
-      if (bake.cv) {
-        const bh = Math.max(1, (opt.h || 360) - bake.hy);
-        g.drawImage(bake.cv, 0, bake.hy, w, bh, x, hy, w, waterH);
-      }
-      drawSwells(g, x, y, w, hy, waterH, t, keys, foamC, storm);
-      for (let i = 0; i < waterH; i++) {
-        const yy = hy + i;
-        // depth curve: rows bunch up near the horizon, which is what sells the recession
-        const k = Math.pow(i / waterH, 0.78);
-        const fk = k * (n - 1);
-        const i0 = Math.min(n - 1, Math.floor(fk));
-        const band = keys[i0];
-        if (!bake.cv) {
-          const i1 = Math.min(n - 1, i0 + 1);
-          dither(g, x, yy, w, 1, band, keys[i1], Math.round((fk - i0) * 16));
-        }
+      const step = opt.step || 12;
 
-        // foam crests: spacing, length and scroll speed all grow with depth
-        const spacing = Math.max(2, Math.round(2 + k * 10));
-        if ((i + Math.floor(t * (2 + k * 5))) % spacing === 0) {
-          const speed = 5 + k * k * 130;
-          const gap = Math.max(4, Math.round(7 + k * 20));
-          const amp = (1 + k * 3.5) * (1 + storm * 2);
-          const phase = t * speed + i * 9;
-          const crest = k > 0.5 ? foamC : mix(foamC, band, 0.5);
-          for (let cx2 = -gap; cx2 < w + gap; cx2 += gap) {
-            const wob = Math.sin((cx2 + phase) * 0.05 + i * 0.4) * amp;
-            const sx = Math.round(x + ((cx2 + phase * 0.6) % (w + gap * 2)) - gap + wob);
-            if (sx > x + w) continue;
-            // dash length varies per crest so the row is not a dotted rule
-            const dashLen = Math.max(2, Math.round((2 + k * 8) * (0.6 + 0.7 * Math.abs(Math.sin(cx2 * 0.37 + i)))));
-            rect(g, sx, yy, Math.min(dashLen, x + w - sx), 1, crest);
-            // a darker lip under the crest gives the wave thickness
-            if (k > 0.42 && yy + 1 < bottom) {
-              rect(g, sx + 1, yy + 1, Math.max(1, Math.min(dashLen - 1, x + w - sx - 1)), 1, mix(band, P.ink, 0.35));
-            }
-          }
+      // the flat ground of the sea: the palest water, right up to the horizon
+      rect(g, x, hy, w, waterH, keys[0]);
+
+      // then the bands, near-horizon first, each one darker and each one's edge bigger and
+      // slower. BANDS ARE BUNCHED TOWARD THE HORIZON (the 0.62 power) because that is what
+      // makes a flat plane read as receding.
+      const bands = 4;
+      for (let b = 1; b <= bands; b++) {
+        const k = Math.pow(b / bands, 0.62);
+        const edgeY = hy + Math.round(k * waterH * 0.92);
+        if (edgeY >= bottom - 2) break;
+        const fill = keys[Math.min(n - 1, Math.round(k * (n - 1)))];
+        const amp = (1 + k * 5) * (1 + storm * 1.2);
+        const per = 190 + k * 280;
+        const drift = 0.4 + k * 1.1;
+        // foam on the edge, and a dark lip only on the two nearest bands: a lip on every
+        // one of them turns the sea into a stack of dark rules.
+        const foam = mix(P[foamC], P[fill], 0.2 + k * 0.3);
+        const lip = k > 0.5 ? mix(P[fill], P.ink, 0.28) : null;
+        drawBand(g, x, w, bottom, edgeY, t, b, amp, per, drift, fill, foam, lip, step);
+      }
+
+      // A LONG SWELL crossing the whole sea, which is the one thing that says "this water
+      // is moving" rather than "this water has a pattern on it".
+      for (let sw = 0; sw < (storm > 0.4 ? 2 : 1); sw++) {
+        const ph = ((t * (0.05 + sw * 0.02) + sw * 0.43) % 1);
+        const base = hy + Math.round(Math.pow(ph, 0.62) * waterH);
+        if (base < hy + 6 || base > bottom - 8) continue;
+        const k = (base - hy) / waterH;
+        const amp = 3 + k * 10 + storm * 6;
+        for (let i = 0; i < w; i += step) {
+          const yy = Math.round(bandEdge(x + i, base, t, sw * 3, amp, 190 + k * 200, 0.9));
+          if (yy < hy + 4 || yy > bottom - 8) continue;
+          rect(g, x + i, yy, step, 4, mix(P[foamC], P[keys[Math.min(n - 1, 2)]], 0.4 - k * 0.3));
+          rect(g, x + i, yy + 4, step, 4, mix(P[keys[Math.min(n - 1, 3)]], P.ink, 0.35));
         }
       }
 
-      // specular glitter column under the sun/moon
+      // THE SUN COLUMN, in chunks. A one-pixel glitter field is invisible at this grid and
+      // was thousands of calls; eight blocks that jump about read as glare.
       const sunX = sea._sunX !== undefined ? sea._sunX : x + Math.round(w * 0.72);
       const glintC = p.night ? 'ice' : mix(p.glowC, P.white, 0.35);
-      for (let i = 0; i < waterH; i++) {
-        const yy = hy + i;
-        const k = Math.pow(i / waterH, 0.78);
-        // the fan widens sharply toward the viewer, the way a real sun column does
-        const spreadW = 3 + k * k * 150;
-        const count = 1 + Math.round(k * 6);
-        for (let j = 0; j < count; j++) {
-          const sv = i * 37 + j * 911;
-          if (Math.sin(t * (1.6 + (sv % 7) * 0.3) + sv * 0.77) < 0.62 - k * 0.25) continue;
-          const gx = Math.round(sunX + hashUnit(sv) * spreadW);
-          if (gx < x || gx >= x + w) continue;
-          rect(g, gx, yy, k > 0.55 ? 2 : 1, 1, glintC);
-        }
+      for (let i = 0; i < 14; i++) {
+        const k = (i + 1) / 14;
+        const yy = hy + Math.round(Math.pow(k, 0.8) * waterH);
+        if (yy > bottom - 6) break;
+        const spread = 8 + k * k * 170;
+        const bob = Math.sin(t * (1.4 + (i % 5) * 0.4) + i * 1.7);
+        if (bob < 0.35) continue;
+        const gx = Math.round(sunX + (hashUnit(i * 37) - 0.5) * spread);
+        rect(g, gx, yy, Math.round(8 + k * 20), 4, glintC);
       }
 
       if (opt.reflect) {
-        // a wobbling mirror of the sun disc, dissolving as it comes toward the viewer
-        for (let i = 0; i < Math.min(waterH, 34); i++) {
-          const yy = hy + i;
-          // keep the wobble small — a big one turns the reflection into a rope
-          const wob = Math.round(Math.sin(t * 2.2 + i * 0.6) * Math.min(2, 0.6 + i * 0.06));
-          const ww = Math.max(2, 9 - Math.round(i / 5));
-          dither(g, sunX - Math.round(ww / 2) + wob, yy, ww, 1,
-            mix(p.glowC, keys[Math.min(keys.length - 1, 1)], 0.3), 'rgba(0,0,0,0)', Math.round((i / 34) * 15));
+        for (let i = 0; i < Math.min(waterH, 40); i += 4) {
+          const wob = Math.round(Math.sin(t * 2.2 + i * 0.4) * Math.min(6, 2 + i * 0.14));
+          const ww = Math.max(4, 20 - i);
+          rect(g, sunX - Math.round(ww / 2) + wob, hy + i, ww, 4,
+            mix(p.glowC, P[keys[Math.min(n - 1, 1)]], 0.3 + i / 60));
         }
       }
 
       if (opt.life !== false) drawPod(g, pod, x, y, w, hy, waterH, t, foamC);
 
-      // live splashes
-      for (const s of splashes) {
-        const k = s.t / s.life;
-        const r = Math.round(3 + k * 14 * s.power);
-        ring(g, s.x, s.y, r, k > 0.6 ? mix(foamC, keys[2], 0.5) : foamC, 1);
-        if (k < 0.4) ring(g, s.x, s.y, Math.round(r * 0.5), foamC, 1);
+      for (const s2 of splashes) {
+        const k = s2.t / s2.life;
+        const r = Math.round(6 + k * 22 * s2.power);
+        ring(g, s2.x, s2.y, r, k > 0.6 ? mix(foamC, keys[2], 0.5) : foamC, 1);
+        if (k < 0.4) ring(g, s2.x, s2.y, Math.round(r * 0.5), foamC, 1);
       }
     },
 

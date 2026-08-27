@@ -83,21 +83,27 @@ function backdrop() {
   if (!mk) return null;
   const b = mk.g;
 
-  // A warm afternoon sky. Cream at the horizon so the islands have something bright to
-  // stand against, and the blue kept muted -- a saturated sky makes everything under it
-  // look like a screenshot of a different game.
-  vgrad(b, 0, 0, W, HORIZON, ['sky', 'ice', 'cream', 'sand'], 3);
+  // A warm afternoon sky in HARD BANDS, bunched toward the horizon. It was a dithered
+  // gradient, which on the world's four-pixel grid is a chequerboard the size of the sky:
+  // the single ugliest thing on the map and the most expensive to draw.
+  const sky = ['sky', 'ice', 'cream', 'sand'];
+  for (let i = 0; i < sky.length; i++) {
+    const y0 = Math.round(Math.pow(i / sky.length, 1.5) * HORIZON);
+    const y1 = Math.round(Math.pow((i + 1) / sky.length, 1.5) * HORIZON);
+    rect(b, 0, y0, W, Math.max(4, y1 - y0), sky[i]);
+  }
 
-  // sea: a depth ramp toward the viewer, dithered one row at a time
+  // and the sea as FLAT DEPTH BANDS. The moving part of the water -- the crest lines that
+  // travel up the bands -- is drawn live in drawSea; what is baked here is only the ground
+  // colour it travels over, which is four rectangles instead of a hundred thousand.
   const seaH = H - HORIZON;
   const ramp = ['water3', 'water2', 'water1', 'water0'];
-  for (let i = 0; i < seaH; i++) {
-    const k = Math.pow(i / seaH, 0.72) * (ramp.length - 1);
-    const i0 = Math.min(ramp.length - 1, Math.floor(k));
-    const i1 = Math.min(ramp.length - 1, i0 + 1);
-    dither(b, 0, HORIZON + i, W, 1, ramp[i0], ramp[i1], Math.round((k - i0) * 16));
+  for (let i = 0; i < ramp.length; i++) {
+    const y0 = HORIZON + Math.round(Math.pow(i / ramp.length, 0.72) * seaH);
+    const y1 = HORIZON + Math.round(Math.pow((i + 1) / ramp.length, 0.72) * seaH);
+    rect(b, 0, y0, W, Math.max(4, y1 - y0), ramp[i]);
   }
-  rect(b, 0, HORIZON - 1, W, 1, mix(P.cream, P.water3, 0.5));
+  rect(b, 0, HORIZON - 4, W, 4, mix(P.cream, P.water3, 0.5));
 
   // far headlands: three ranks, each paler and lower, which is the whole illusion of a
   // world that carries on past the three islands you are being offered.
@@ -267,47 +273,69 @@ export function makeOceanScene() {
     g.globalAlpha = 1;
   }
 
+  /**
+   * THE SEA, MOVING.
+   *
+   * Eight long crest lines, bunched toward the horizon, each one a travelling wave with a
+   * bright top and a dark lip under it. What was here was sixteen rows of one-pixel dashes
+   * and twenty-two one-pixel glints: at four pixels a piece that is confetti on a
+   * chequerboard, and it read as static rather than as water.
+   *
+   * The rule that makes it work: THE EDGES MOVE AND THE FILLS DO NOT. The bands under
+   * these lines are baked and never change; every bit of motion in the ocean is in the
+   * shape of a line crossing it.
+   */
   function drawSea(g) {
-    // crests: sparse dashes that get longer and further apart as they come at you
-    for (let row = 0; row < 16; row++) {
-      const f = row / 15;
-      const y = Math.round(HORIZON + 6 + Math.pow(f, 1.7) * (H - HORIZON - 10));
-      const step = 20 + f * 44;
-      const drift = (t * (6 + f * 26)) % step;
-      const len = 2 + Math.round(f * 7);
-      for (let x = -step; x < W + step; x += step) {
-        const wx = Math.round(x + drift + Math.sin(t * 0.8 + row) * 6);
-        rect(g, wx, y, len, 1, f < 0.4 ? 'water3' : 'foam');
-        if (f > 0.6) px(g, wx + len, y + 1, 'water3');
+    const seaH = H - HORIZON;
+    const step = 12;
+    for (let row = 0; row < 8; row++) {
+      const f = (row + 1) / 8;
+      const base = HORIZON + 8 + Math.pow(f, 1.55) * (seaH - 16);
+      const amp = 2 + f * 12;
+      const per = 170 + f * 260;
+      const drift = t * (0.35 + f * 1.1);
+      const foam = f < 0.35 ? mix(P.foam, P.water3, 0.45) : 'foam';
+      const lip = mix(P[f < 0.5 ? 'water2' : 'water0'], P.ink, 0.32);
+      for (let x = 0; x < W; x += step) {
+        const y = Math.round(base
+          + Math.sin((x / per) * Math.PI * 2 + drift) * amp
+          + Math.sin((x / (per * 0.37)) * Math.PI * 2 - drift * 0.8) * amp * 0.4);
+        if (y < HORIZON + 4 || y > H - 8) continue;
+        rect(g, x, y, step, 4, foam);
+        if (f > 0.3) rect(g, x, y + 4, step, 4, lip);
       }
     }
-    // the sun's glitter path, which is the one thing that makes flat water look wet
-    for (let i = 0; i < 22; i++) {
-      const f = i / 21;
-      const y = Math.round(HORIZON + 4 + Math.pow(f, 1.8) * (H - HORIZON - 8));
-      const spread = 6 + f * 60;
-      const jx = Math.sin(t * 2.1 + i * 2.3) * spread;
-      rect(g, Math.round(SUN_X + jx), y, 1 + Math.round(f * 3), 1, i % 3 ? 'foam' : 'white');
+
+    // the sun's glare: a handful of chunks that jump about under the sun, widening as the
+    // water comes at you. This is the only thing that makes flat water look wet.
+    for (let i = 0; i < 16; i++) {
+      const f = (i + 1) / 16;
+      const y = Math.round(HORIZON + 6 + Math.pow(f, 1.7) * (seaH - 12));
+      if (Math.sin(t * (1.5 + (i % 4) * 0.5) + i * 2.1) < 0.1) continue;
+      const spread = 10 + f * f * 150;
+      const jx = Math.round(SUN_X + (hash(i * 17) - 0.5) * spread);
+      rect(g, jx, y, Math.round(8 + f * 24), 4, i % 3 ? 'foam' : 'white');
     }
+
     // flotsam: somebody's roof, somebody's barrel. The world is drowning offscreen and
     // this is the only place the map says so without words.
     for (const fl of flotsam) {
       const fx = ((fl.x + t * fl.sp) % (W + 120)) - 60;
-      const fy = fl.y + Math.round(Math.sin(t * 1.6 + fl.ph) * 1.4);
+      const fy = fl.y + Math.round(Math.sin(t * 1.6 + fl.ph) * 2);
       if (fl.kind === 0) {                       // a plank
-        rect(g, fx, fy, 14, 2, 'wood2');
-        rect(g, fx, fy, 14, 1, 'wood3');
-        px(g, fx + 4, fy - 1, 'wood1');
-      } else if (fl.kind === 1) {                // a barrel, rolling
-        rect(g, fx, fy - 3, 8, 6, 'wood2');
-        rect(g, fx, fy - 3, 8, 1, 'wood3');
-        rect(g, fx + 3, fy - 3, 1, 6, 'brass1');
+        rect(g, fx, fy, 20, 4, 'wood2');
+        rect(g, fx, fy, 20, 4, 'wood3');
+        rect(g, fx, fy + 4, 20, 4, 'ink');
+      } else if (fl.kind === 1) {                // a barrel
+        rect(g, fx, fy - 4, 12, 8, 'wood2');
+        rect(g, fx, fy - 4, 12, 4, 'wood3');
+        rect(g, fx, fy + 4, 12, 4, 'ink');
       } else {                                   // a crate corner, mostly under
-        rect(g, fx, fy - 4, 9, 5, 'wood1');
-        rect(g, fx, fy - 4, 9, 1, 'wood3');
-        rect(g, fx + 1, fy - 2, 7, 1, 'wood0');
+        rect(g, fx, fy - 4, 12, 8, 'wood1');
+        rect(g, fx, fy - 4, 12, 4, 'wood3');
+        rect(g, fx, fy + 4, 12, 4, 'ink');
       }
-      rect(g, fx - 2, fy + 2, 14, 1, 'foam');
+      rect(g, fx - 4, fy + 8, 20, 4, 'foam');
     }
   }
 
@@ -504,15 +532,22 @@ export function makeOceanScene() {
       if (!v.choices[i]) continue;
       const hot = hover === i || (state === 'sail' && picked === i);
       const tx = ISLE_X[i], ty = ISLE_BASE + 24;
-      const n = 26;
-      for (let j = 2; j < n; j++) {
+      const n = 13;
+      for (let j = 1; j < n; j++) {
         const f = j / n;
         const cx2 = lerp(bx, tx, f);
         const cy2 = lerp(by, ty, f) - Math.sin(f * Math.PI) * 26;
         if ((j + Math.floor(t * (hot ? 8 : 3))) % 3 === 0) continue;
-        const sz = hot ? 5 : 3;
-        rect(g, cx2 - 1, cy2 - 1, sz + 2, sz + 2, 'ink');
-        rect(g, cx2, cy2, sz, sz, hot ? 'gold' : 'water3');
+        // THE COURSE YOU ARE POINTING AT IS THE LOUD ONE. Every course drawn in ink at
+        // this grid put three chains of black beads across the whole map and buried the
+        // sea under them: the one you are choosing gets the ink, the others get a quiet
+        // dot in the water's own colour.
+        if (hot) {
+          rect(g, cx2 - 4, cy2 - 4, 16, 16, 'ink');
+          rect(g, cx2, cy2, 8, 8, 'gold');
+        } else {
+          rect(g, cx2, cy2, 4, 4, 'foam');
+        }
       }
     }
   }

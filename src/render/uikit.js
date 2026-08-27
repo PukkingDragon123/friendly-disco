@@ -1,4 +1,17 @@
-// The chrome. Dark varnished timber, brass brackets, enamel plates, engraved labels.
+// The chrome. Flat warm boards, hard black outlines, and nothing that pretends to be lit.
+//
+// THE THICK BLACK LINE. Every surface in the game is drawn the same way now: a flat fill,
+// one lighter band along the top, one darker along the bottom, and a FOUR-PIXEL INK
+// CONTOUR round the whole thing. What used to be here was a carpenter's idea of a panel --
+// a border band, a bevel on four sides, corner studs, rivets, a drop shadow in three
+// alphas -- eleven tones stacked up to imply a lit surface. On a four-pixel grid that
+// stack has nowhere to go: every hairline bevel becomes a four-pixel stripe, and the panel
+// reads as mud.
+//
+// One line does the work of the whole stack. It separates the panel from whatever is
+// behind it at any size, it survives being scaled, and it is the same language the props,
+// the ruins and the animals are drawn in, which is what makes the screen look like one
+// drawing rather than a UI sitting on top of a game.
 //
 // Everything here is span-based pixel art from src/core/pixel.js — no gradients, no AA.
 // Widgets take the 640x360 context first and return their rect where that is useful, so
@@ -7,7 +20,7 @@
 import { P, col, mix, alpha } from '../core/palette.js';
 import {
   rect, frame, box, boxFrame, px, line, tri,
-  text, textW, wrap, wash, clip, clamp, makeCanvas,
+  text, textW, wrap, wash, clip, clamp, makeCanvas, GRID,
 } from '../core/pixel.js';
 import { Juice } from '../core/juice.js';
 import { W as SCREEN_W, H as SCREEN_H } from '../core/pixel.js';
@@ -37,6 +50,8 @@ export function hover(r, m) {
  */
 const STYLES = {
   wood: { fill: 'wood2', top: 'wood4', mid: 'wood3', bot: 'wood1', edge: 'wood0', band: 'wood1', lip: 'wood3', ink: 'cream', trim: 'brass1', bright: 'brass2' },
+  // (the ramp keys above are what the widgets read; `edge` is no longer the contour --
+  //  every panel is contoured in INK, and `edge` is now the inner rim under it.)
   brass: { fill: 'brass1', top: 'brass3', mid: 'brass2', bot: 'brass0', edge: 'wood0', band: 'brass0', lip: 'brass3', ink: 'wood0', trim: 'brass3', bright: 'cream' },
   slate: { fill: 'deep', top: 'shadow', mid: 'wood0', bot: 'ink', edge: 'ink', band: 'wood0', lip: 'wood2', ink: 'parch1', trim: 'wood2', bright: 'wood3' },
   paper: { fill: 'parch', top: 'cream', mid: 'wood3', bot: 'parch0', edge: 'wood0', band: 'wood2', lip: 'cream', ink: 'wood0', trim: 'brass2', bright: 'brass3' },
@@ -91,14 +106,26 @@ export function panelCacheSize() { return panelCache.size; }
  * Blits a baked panel. Everything that actually draws lives in paintPanel below.
  */
 /**
- * A two-pixel frame. The commonest thing in the game's chrome now that every line is two
- * pixels thick: a one-pixel border beside two-pixel art reads as a hairline crack.
+ * ONE MACRO PIXEL OF CONTOUR, whatever the grid is worth today.
+ *
+ * The commonest thing in the chrome. It was hard-coded to two pixels; on the four-pixel
+ * world grid that drew a two-pixel line that the primitives then rounded up anyway, which
+ * is how you get a border that is thick on one side and thin on the other.
  */
 export function boxEdge(g, x, y, w, h, c) {
-  rect(g, x, y, w, 2, c);
-  rect(g, x, y + h - 2, w, 2, c);
-  rect(g, x, y, 2, h, c);
-  rect(g, x + w - 2, y, 2, h, c);
+  rect(g, x, y, w, GRID, c);
+  rect(g, x, y + h - GRID, w, GRID, c);
+  rect(g, x, y, GRID, h, c);
+  rect(g, x + w - GRID, y, GRID, h, c);
+}
+
+/** The thick black line itself: two macro pixels of ink, for anything that must separate. */
+export function inkEdge(g, x, y, w, h, c) {
+  const t = GRID * 2;
+  rect(g, x, y, w, t, c || 'ink');
+  rect(g, x, y + h - t, w, t, c || 'ink');
+  rect(g, x, y, t, h, c || 'ink');
+  rect(g, x + w - t, y, t, h, c || 'ink');
 }
 
 export function panel(g, x, y, w, h, o = {}) {
@@ -106,7 +133,10 @@ export function panel(g, x, y, w, h, o = {}) {
   if (w < 4 || h < 4) return rectOf(x, y, w, h);
   const b = bakedPanel(w, h, o);
   if (b) {
-    g.drawImage(b.canvas, Math.round((x - b.pad) / 2) * 2, Math.round((y - b.pad) / 2) * 2);
+    // ON THE GRID, or the whole baked panel lands half a macro pixel out of step with the
+    // scene it is sitting in and every one of its edges frays.
+    g.drawImage(b.canvas,
+      Math.round((x - b.pad) / GRID) * GRID, Math.round((y - b.pad) / GRID) * GRID);
     return rectOf(x, y, w, h);
   }
   paintPanel(g, x, y, w, h, o);          // no offscreen support: draw it live
@@ -114,109 +144,83 @@ export function panel(g, x, y, w, h, o = {}) {
 }
 
 /**
- * A STARDEW BOX.
+ * A BOARD WITH A BLACK LINE ROUND IT.
  *
- * The old panel stacked six textures onto one rectangle: speckle, wood grain, plank
- * seams, a deckle edge, a second carved frame, rivets -- every one of them a single
- * pixel wide against art drawn at two. Zoomed out that is not texture, it is DIRT, and
- * the box the player reads the most was the dirtiest thing on the screen.
+ * Three passes and no more:
  *
- * What a cozy farming game actually draws is a THICK FLAT BORDER and nothing else:
+ *   1  a HARD shadow -- solid ink, offset one macro pixel down and right. Not three
+ *      alphas of soft edge: a poster's shadow, which is a shape.
+ *   2  the FILL, flat, with one lighter band along the top and one darker along the
+ *      bottom. That is the entire suggestion of light, and at this scale it is enough.
+ *   3  the CONTOUR: two macro pixels of ink all the way round.
  *
- *   2px  s.edge   the outline. Near-black timber, so the box has a hard silhouette.
- *   3px  s.band   a solid ring of mid-tone. This is the frame; it is what makes the
- *                 border read as a carved board rather than as a stroke.
- *   1px  s.lip    a light line where the band meets the fill, dark on the bottom-right,
- *                 which is the whole of the bevel.
- *   fill s.fill   completely flat. Nothing inside it. Ever.
- *
- * Four solid corner studs are the only ornament, and they are 3x3 blocks of brass, not
- * one-pixel brackets: hardware you can see at 1x.
+ * What was here before -- a mid-tone border band, a one-pixel lip on four sides, corner
+ * studs, rivets, a soft shadow in two alphas -- was eleven tones describing a lit carved
+ * board. Every one of those one-pixel details became a four-pixel stripe on the world
+ * grid, and the box the player reads the most turned to mud. The `corners` and `rivets`
+ * flags are still accepted so no caller has to change; they draw nothing now, because the
+ * line is the ornament.
  */
 function paintPanel(g, x, y, w, h, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
+  const t = GRID;                      // the band weight
+  const ink = o.ink || 'ink';
 
-  if (o.shadow) {
-    wash(g, x + 3, y + h, w, 3, 'ink', 0.45);
-    wash(g, x + w, y + 3, 3, h - 3, 'ink', 0.35);
-  }
+  if (o.shadow) rect(g, x + t, y + t, w, h, ink);
 
   if (s.fill) rect(g, x, y, w, h, s.fill);
   else wash(g, x, y, w, h, 'water0', 0.6);      // glass: the scene stays visible through it
 
   if (o.inset) {
-    // A sunken plate. Icons and readouts sit ON these, so they get two tones and stop:
-    // the dark rim, then the surface's own shadow along the top and left.
-    if (w > 8 && h > 8) {
-      rect(g, x + 2, y + 2, w - 4, 2, s.bot);
-      rect(g, x + 2, y + 2, 2, h - 4, s.bot);
-      rect(g, x + 2, y + h - 3, w - 4, 1, s.lip);
-      rect(g, x + w - 3, y + 3, 1, h - 5, s.lip);
+    // A SUNKEN PLATE reads by having its light on the WRONG side: dark along the top and
+    // left, light along the bottom and right, which is the same trick at any resolution.
+    if (w > t * 4 && h > t * 4) {
+      rect(g, x + t, y + t, w - t * 2, t, s.bot);
+      rect(g, x + t, y + t, t, h - t * 2, s.bot);
+      rect(g, x + t, y + h - t * 2, w - t * 2, t, s.lip);
+      rect(g, x + w - t * 2, y + t, t, h - t * 2, s.lip);
     }
-    boxEdge(g, x, y, w, h, s.edge);
+    inkEdge(g, x, y, w, h, ink);
     if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor, style: o.style, font: o.font });
     return;
   }
 
-  if (w > 18 && h > 16) {
-    frame(g, x + 2, y + 2, w - 4, h - 4, s.band, 3);
-    rect(g, x + 2, y + 2, w - 4, 1, s.mid);                 // lit top of the board itself
-    rect(g, x + 5, y + 5, w - 10, 1, s.lip);                // the bevel, four sides
-    rect(g, x + 5, y + 5, 1, h - 10, s.lip);
-    rect(g, x + 5, y + h - 6, w - 10, 1, s.bot);
-    rect(g, x + w - 6, y + 6, 1, h - 12, s.bot);
+  if (w > t * 6 && h > t * 5) {
+    rect(g, x + t, y + t, w - t * 2, t, s.top);                 // the lit top band
+    rect(g, x + t, y + h - t * 2, w - t * 2, t, s.bot);         // and the shaded bottom
+    rect(g, x + t, y + t, t, h - t * 2, mix(col(s.fill || 'wood2'), P.white, 0.12));
+    rect(g, x + w - t * 2, y + t, t, h - t * 2, mix(col(s.fill || 'wood2'), P.ink, 0.18));
   }
-  boxEdge(g, x, y, w, h, s.edge);
-
-  if (o.corners !== false && w > 34 && h > 26) {
-    for (const [cx, cy] of [
-      [x + 3, y + 3], [x + w - 6, y + 3], [x + 3, y + h - 6], [x + w - 6, y + h - 6],
-    ]) {
-      rect(g, cx, cy, 3, 3, s.edge);
-      rect(g, cx, cy, 2, 2, s.trim);
-      px(g, cx, cy, s.bright);
-    }
-  }
-  if (o.rivets && w > 64 && h > 26) {
-    for (let rx = x + 18; rx < x + w - 18; rx += 24) {
-      rect(g, rx, y + 3, 2, 2, s.trim); px(g, rx, y + 3, s.bright);
-      rect(g, rx, y + h - 5, 2, 2, s.trim); px(g, rx, y + h - 5, s.bright);
-    }
-  }
+  inkEdge(g, x, y, w, h, ink);
   if (o.title) panelTitle(g, x, y, w, o.title, { color: o.titleColor, style: o.style, font: o.font });
 }
 
 const TITLE_ACCENT = { wood: 'brass3', brass: 'brass3', slate: 'parch1', paper: 'cream', glass: 'foam' };
 
 /**
- * A PLAQUE bolted to the top rail. Solid dark board, two-pixel outline, one lit line
- * along its top and a stud at either end.
+ * A PLAQUE straddling the top rail: flat dark board, ink contour, one lit line.
  *
- * The board is always dark whatever the panel is made of: a brass title on a brass panel
+ * The board is always dark whatever the panel is made of -- a brass title on a brass panel
  * is unreadable, and this is the one label the player must never squint at.
  */
 export function panelTitle(g, x, y, w, label, o = {}) {
   const s = STYLES[o.style] || STYLES.wood;
   const font = o.font || 7;
-  const tw = textW(label, { font }) + 16;
+  const tw = textW(label, { font }) + 24;
+  const th = font === 3 ? 16 : 24;
   const tx = Math.round(x + (w - tw) / 2);
-  const ty = y - 4;
-  rect(g, tx, ty, tw, 14, 'wood0');
-  rect(g, tx + 2, ty + 2, tw - 4, 10, 'shadow');
-  rect(g, tx + 2, ty + 2, tw - 4, 1, s.trim);
-  px(g, tx + 3, ty + 4, s.bright); px(g, tx + tw - 4, ty + 4, s.bright);
-  text(g, label, x + w / 2, ty + 4, o.color || TITLE_ACCENT[o.style] || 'cream',
-    { center: true, shadow: 'ink', font });
-  return rectOf(tx, ty, tw, 14);
+  const ty = y - Math.round(th / 2);
+  rect(g, tx, ty, tw, th, 'shadow');
+  rect(g, tx + GRID, ty + GRID, tw - GRID * 2, GRID, s.trim);
+  inkEdge(g, tx, ty, tw, th, 'ink');
+  text(g, label, x + w / 2, ty + Math.round((th - (font === 3 ? 5 : 7)) / 2),
+    o.color || TITLE_ACCENT[o.style] || 'cream', { center: true, shadow: 'ink', font });
+  return rectOf(tx, ty, tw, th);
 }
 
 export function divider(g, x, y, w, o = {}) {
-  rect(g, x, y, w, 1, o.color || 'wood0');
-  rect(g, x, y + 1, w, 1, o.light || 'wood3');
-  if (o.pip !== false) {
-    px(g, x + w / 2 - 2, y, o.color || 'brass2');
-    px(g, x + w / 2 + 2, y, o.color || 'brass2');
-  }
+  rect(g, x, y, w, GRID, o.color || 'ink');
+  rect(g, x, y + GRID, w, GRID, o.light || 'wood3');
 }
 
 export function nineSlice(g, x, y, w, h, o = {}) { return panel(g, x, y, w, h, o); }
@@ -225,109 +229,86 @@ export function nineSlice(g, x, y, w, h, o = {}) { return panel(g, x, y, w, h, o
 
 /** button(g, rect, label, {state, color, icon, sub, small}) -> rect */
 export function button(g, r, label, o = {}) {
-  const st = o.state || 'idle';
+  const st = o.state || (o.hot ? 'hover' : 'idle');
   const down = st === 'down';
   const dis = st === 'disabled';
   const hov = st === 'hover';
   const base = dis ? 'grey0' : (o.color || 'wood2');
-  const x = Math.round(r.x), y = Math.round(r.y) + (down ? 2 : 0);
-  const w = Math.round(r.w), h = Math.round(r.h) - (down ? 2 : 0);
+  const t = GRID;
+  const x = Math.round(r.x), w = Math.round(r.w);
+  // A BUTTON IS A BOARD THAT SITS ON A BLACK PLINTH and drops onto it when pressed.
+  const y = Math.round(r.y) + (down ? t : 0);
+  const h = Math.round(r.h) - t;
 
-  // the plinth the plate presses into
-  box(g, r.x, r.y + 2, w, r.h - 2, 'ink', 1);
-  // plate
-  box(g, x, y, w, h, base, 1);
-  rect(g, x + 1, y + 1, w - 2, 1, mix(col(base), P.white, hov ? 0.5 : 0.3));
-  rect(g, x + 1, y + h - 2, w - 2, 1, mix(col(base), P.ink, 0.4));
-  boxFrame(g, x, y, w, h, dis ? 'ink' : hov ? 'brass3' : 'wood0', 1);
-  if (hov) { px(g, x + 1, y + 1, 'white'); px(g, x + w - 2, y + 1, 'white'); }
+  rect(g, x, Math.round(r.y) + t, w, h, 'ink');                 // the plinth
+  rect(g, x, y, w, h, hov && !dis ? mix(col(base), P.white, 0.16) : base);
+  rect(g, x + t, y + t, w - t * 2, t, mix(col(base), P.white, hov ? 0.55 : 0.34));
+  rect(g, x + t, y + h - t * 2, w - t * 2, t, mix(col(base), P.ink, 0.42));
+  inkEdge(g, x, y, w, h, dis ? 'shadow' : 'ink');
 
-  const fg = dis ? 'grey1' : hov ? 'white' : 'bone';
-  // the heavier face on anything that is not a cramped micro-button
+  const fg = dis ? 'grey1' : hov ? 'white' : 'cream';
   const font = o.small ? 3 : (o.font || 7);
   let tx = x + w / 2;
   if (o.icon) {
-    icon(g, o.icon, x + 4, y + Math.round((h - 9) / 2), { color: dis ? 'grey1' : 'brass3' });
+    icon(g, o.icon, x + t * 2, y + Math.round((h - 9) / 2), { color: dis ? 'grey1' : 'brass3' });
     tx = x + 7 + w / 2 - 4;
   }
   const capH = font === 3 ? 5 : font === 7 ? 7 : 5;
   const ty = o.sub ? y + Math.round(h / 2) - capH - 1 : y + Math.round((h - capH) / 2);
   text(g, label, tx, ty, fg, { center: true, font, shadow: 'ink' });
-  if (o.sub) text(g, o.sub, tx, ty + (font === 3 ? 6 : 8), dis ? 'grey0' : 'brass2', { center: true, font: 3 });
+  if (o.sub) text(g, o.sub, tx, ty + (font === 3 ? 6 : 9), dis ? 'grey0' : 'brass3', { center: true, font: 3 });
   return r;
 }
-
-/* -------------------------------------------------------------------- bars */
-
-/** bar(g,x,y,w,h,t,{fill,bg,frame,ticks,glow,label,stripe}) */
 export function bar(g, x, y, w, h, t, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   const k = clamp(t || 0, 0, 1);
+  const q = GRID;
   rect(g, x, y, w, h, o.bg || 'ink');
-  const fw = Math.round((w - 2) * k);
+  const fw = Math.round((w - q * 2) * k);
   const f = o.fill || 'gold';
   if (fw > 0) {
-    rect(g, x + 1, y + 1, fw, h - 2, f);
-    rect(g, x + 1, y + 1, fw, 1, mix(col(f), P.white, 0.45));
-    rect(g, x + 1, y + h - 2, fw, 1, mix(col(f), P.ink, 0.35));
-    if (o.stripe) {
-      const ph = Math.floor(Juice.t * 26);
-      g.fillStyle = alpha(P.white, 0.25);
-      for (let i = 0; i < fw; i++) if (((i + ph) % 6) < 2) g.fillRect(x + 1 + i, y + 1, 1, h - 2);
-    }
+    rect(g, x + q, y + q, fw, h - q * 2, f);
+    rect(g, x + q, y + q, fw, q, mix(col(f), P.white, 0.45));
   }
   if (o.ticks) {
     for (let i = 1; i < o.ticks; i++) {
-      const tx = x + Math.round((w * i) / o.ticks);
-      rect(g, tx, y + 1, 1, h - 2, alpha(P.ink, 0.45));
+      rect(g, x + Math.round((w * i) / o.ticks), y + q, q, h - q * 2, alpha(P.ink, 0.5));
     }
   }
-  boxFrame(g, x, y, w, h, o.frame || 'wood0', 1);
-  if (o.glow) {
-    const pulse = (Math.sin(Juice.t * 7) + 1) / 2;
-    if (pulse > 0.4) boxFrame(g, x - 1, y - 1, w + 2, h + 2, f, 1);
+  inkEdge(g, x, y, w, h, o.frame || 'ink');
+  if (o.label) {
+    text(g, o.label, x + w / 2, y + Math.round((h - 5) / 2), 'white', { font: 3, center: true, shadow: 'ink' });
   }
-  if (o.label) text(g, o.label, x + w / 2, y + Math.round((h - 5) / 2), 'white', { font: 3, center: true, shadow: 'ink' });
   return rectOf(x, y, w, h);
 }
-
-/** Pip bar — shots, re-racks, charges. */
 export function segBar(g, x, y, w, h, n, filled, o = {}) {
   n = Math.max(1, Math.min(14, Math.round(n)));
-  const gap = 1;
-  const sw = Math.max(2, Math.floor((w - gap * (n - 1)) / n));
+  const gap = GRID;
+  const sw = Math.max(GRID * 2, Math.floor((w - gap * (n - 1)) / n));
   for (let i = 0; i < n; i++) {
     const sx = Math.round(x + i * (sw + gap));
     const on = i < filled;
-    rect(g, sx, y, sw, h, on ? (o.fill || 'sky') : (o.bg || 'ink'));
-    if (on) {
-      rect(g, sx, y, sw, 1, mix(col(o.fill || 'sky'), P.white, 0.5));
-      rect(g, sx, y + h - 1, sw, 1, mix(col(o.fill || 'sky'), P.ink, 0.4));
-    } else {
-      boxFrame(g, sx, y, sw, h, 'grey0', 0);
-    }
+    rect(g, sx, y, sw, h, 'ink');
+    rect(g, sx + GRID, y + GRID, sw - GRID * 2, h - GRID * 2,
+      on ? (o.fill || 'sky') : (o.bg || 'shadow'));
+    if (on) rect(g, sx + GRID, y + GRID, sw - GRID * 2, GRID, mix(col(o.fill || 'sky'), P.white, 0.5));
   }
   return rectOf(x, y, w, h);
 }
-
-/* ------------------------------------------------------------------- pills */
-
 function pill(g, x, y, label, value, cFill, cText, o = {}) {
-  const s = String(value);
-  const w = textW(s, { font: o.font || 5 }) + (o.icon ? 12 : 6) + 4;
-  const h = o.h || 11;
-  box(g, x, y, w, h, 'ink', 1);
-  rect(g, x + 1, y + 1, w - 2, 1, mix(col(cFill), P.white, 0.35));
-  rect(g, x + 1, y + 2, w - 2, h - 4, cFill);
-  rect(g, x + 1, y + h - 2, w - 2, 1, mix(col(cFill), P.ink, 0.4));
-  boxFrame(g, x, y, w, h, 'ink', 1);
-  let tx = x + 3;
-  if (o.icon) { icon(g, o.icon, x + 2, y + 1, { color: cText }); tx = x + 12; }
-  text(g, s, tx, y + Math.round((h - 7) / 2), cText, { font: o.font || 5, shadow: o.shadow || null });
+  const str = String(value);
+  const q = GRID;
+  const w = textW(str, { font: o.font || 5 }) + (o.icon ? 16 : 8) + q * 2;
+  const h = o.h || 20;
+  rect(g, x, y, w, h, cFill);
+  rect(g, x + q, y + q, w - q * 2, q, mix(col(cFill), P.white, 0.4));
+  inkEdge(g, x, y, w, h, 'ink');
+  let tx = x + q * 2;
+  if (o.icon) { icon(g, o.icon, x + q + 1, y + Math.round((h - 9) / 2), { color: cText }); tx = x + 16; }
+  text(g, str, tx, y + Math.round((h - 7) / 2), cText, { font: o.font || 5, shadow: o.shadow || null });
   void label;
   return rectOf(x, y, w, h);
 }
-
 export function chipPill(g, x, y, v, o = {}) { return pill(g, x, y, 'CHIPS', v, 'water1', 'ice', Object.assign({ icon: 'gem' }, o)); }
 export function multPill(g, x, y, v, o = {}) { return pill(g, x, y, 'MULT', '×' + v, 'red0', 'red2', Object.assign({ icon: 'flame' }, o)); }
 export function moneyPill(g, x, y, v, o = {}) { return pill(g, x, y, 'MONEY', '$' + v, 'brass0', 'brass3', Object.assign({ icon: 'coin' }, o)); }
@@ -353,81 +334,77 @@ export function starRow(g, x, y, n, o = {}) {
 /* ------------------------------------------------------------------- cards */
 
 /** card(g,x,y,w,h,{title,lines,rarity,icon,iconBg,price,owned,hover,tall,color}) */
+/**
+ * A CARD: a slate board with the rarity down one edge, an icon plate, a title, and the
+ * lines that say what it does. Laid out in macro pixels, so nothing lands between two.
+ */
 export function card(g, x, y, w, h, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  const q = GRID;
   const rc = o.color || RARITY_COLOR[o.rarity] || 'grey2';
-  if (o.hover) { wash(g, x - 1, y - 1, w + 2, h + 2, rc, 0.3); }
-  panel(g, x, y, w, h, { style: 'slate', shadow: true, corners: false });
+  if (o.hover) wash(g, x - q, y - q, w + q * 2, h + q * 2, rc, 0.3);
+  panel(g, x, y, w, h, { style: 'slate', shadow: true });
 
-  // rarity spine down the left edge
-  rect(g, x + 2, y + 2, 2, h - 4, rc);
-  rect(g, x + 2, y + 2, 2, 2, mix(col(rc), P.white, 0.5));
+  // the rarity spine, inside the contour
+  rect(g, x + q * 2, y + q * 2, q, h - q * 4, rc);
 
-  // icon plate
-  const ib = 22;
-  panel(g, x + 6, y + 6, ib, ib, { style: 'brass', inset: true, corners: false });
-  if (o.icon) icon(g, o.icon, x + 6 + Math.round((ib - 9) / 2), y + 6 + Math.round((ib - 9) / 2), { color: o.iconFg || 'wood0' });
-
-  // title, wrapped tightly
-  const tx = x + 32;
-  const tw = w - 38;
-  // A short card cannot afford the heavy face wrapping to two rows — it would push the
-  // rarity stars onto the price pill. Pick the face that fits the box.
-  const tf = h >= 62 && textW(o.title || '', { font: 7 }) <= tw ? 7 : 5;
-  const lh = tf === 7 ? 11 : 9;
-  const tl = wrap(o.title || '', tw, { font: tf });
-  tl.slice(0, 2).forEach((l, i) => text(g, l, tx, y + 5 + i * lh, 'white', { shadow: 'ink', font: tf }));
-  if (o.rarity && h >= 56) {
-    starRow(g, tx, y + 5 + Math.min(2, tl.length) * lh, RARITY_STARS[o.rarity] || 1, { color: rc });
+  // the icon plate, top left
+  const ib = q * 8;
+  const ix = x + q * 4, iy = y + q * 2;
+  rect(g, ix, iy, ib, ib, 'wood0');
+  inkEdge(g, ix, iy, ib, ib, 'ink');
+  if (o.icon) {
+    icon(g, o.icon, ix + Math.round((ib - 9) / 2), iy + Math.round((ib - 9) / 2),
+      { color: o.iconFg || 'brass3' });
   }
 
-  // body lines
-  let by = y + 32;
+  // the title, beside the plate
+  const tx = ix + ib + q * 2;
+  const tw = x + w - tx - q * 2;
+  const tf = textW(o.title || '', { font: 7 }) <= tw ? 7 : 5;
+  const lh = tf === 7 ? 12 : 10;
+  const tl = wrap(o.title || '', tw, { font: tf });
+  tl.slice(0, 2).forEach((l, i) => text(g, l, tx, y + q * 2 + i * lh, 'white', { shadow: 'ink', font: tf }));
+  if (o.rarity) starRow(g, tx, y + q * 2 + Math.min(2, tl.length) * lh, RARITY_STARS[o.rarity] || 1, { color: rc });
+
+  // the body, under both
+  let by = iy + ib + q * 2;
   for (const raw of (o.lines || [])) {
-    for (const l of wrap(String(raw), w - 12, { font: 3 })) {
-      if (by > y + h - 16) break;
-      text(g, l, x + 6, by, 'grey2', { font: 3 });
-      by += 6;
+    for (const l of wrap(String(raw), w - q * 4, { font: 3 })) {
+      if (by > y + h - q * 5) break;
+      text(g, l, x + q * 2, by, 'parch1', { font: 3 });
+      by += 8;
     }
   }
 
   if (o.price !== undefined && o.price !== null) {
-    const pr = moneyPill(g, x + 5, y + h - 15, o.price, { font: 5 });
-    if (o.owned) text(g, 'OWNED', x + w - 6, y + h - 12, 'green1', { font: 3, right: true });
-    void pr;
+    moneyPill(g, x + q * 2, y + h - q * 6, o.price, { font: 5 });
+    if (o.owned) text(g, 'OWNED', x + w - q * 2, y + h - q * 5, 'green1', { font: 3, right: true });
   }
-  boxFrame(g, x, y, w, h, o.hover ? rc : 'ink', 2);
+  if (o.hover) inkEdge(g, x, y, w, h, rc);
   return rectOf(x, y, w, h);
 }
-
-/* ----------------------------------------------------------------- tooltip */
-
-/** Always clamps itself inside the 640x360 frame. */
 export function tooltip(g, x, y, o = {}) {
   const lines = (o.lines || []).slice(0, 8);
-  const w = Math.min(230, Math.max(o.w || 120, textW(o.title || '', { font: 7 }) + 14));
-  const h = 8 + (o.title ? 12 : 0) + lines.length * 7;
+  const q = GRID;
+  const w = Math.min(240, Math.max(o.w || 130, textW(o.title || '', { font: 7 }) + q * 4));
+  const h = q * 3 + (o.title ? 14 : 0) + lines.length * 8;
   let px0 = Math.round(x), py0 = Math.round(y);
-  if (px0 + w > SCREEN_W - 2) px0 = SCREEN_W - 2 - w;
-  if (px0 < 2) px0 = 2;
-  if (py0 + h > SCREEN_H - 2) py0 = SCREEN_H - 2 - h;
-  if (py0 < 2) py0 = 2;
+  if (px0 + w > SCREEN_W - q) px0 = SCREEN_W - q - w;
+  if (px0 < q) px0 = q;
+  if (py0 + h > SCREEN_H - q) py0 = SCREEN_H - q - h;
+  if (py0 < q) py0 = q;
   const c = o.color || 'brass3';
 
-  wash(g, px0 + 2, py0 + 2, w, h, 'ink', 0.5);
-  rect(g, px0, py0, w, h, 'ink');
-  rect(g, px0 + 1, py0 + 1, w - 2, h - 2, 'shadow');
-  rect(g, px0 + 1, py0 + 1, w - 2, 1, c);
-  boxFrame(g, px0, py0, w, h, 'ink', 1);
-  let ty = py0 + 4;
-  if (o.title) { text(g, o.title, px0 + 4, ty, c, { shadow: 'ink', font: 7 }); ty += 12; }
-  for (const l of lines) { text(g, l, px0 + 4, ty, o.textColor || 'bone', { font: 3 }); ty += 7; }
+  rect(g, px0 + q, py0 + q, w, h, 'ink');
+  rect(g, px0, py0, w, h, 'shadow');
+  rect(g, px0 + q, py0 + q, w - q * 2, q, c);
+  inkEdge(g, px0, py0, w, h, 'ink');
+  let ty = py0 + q + 2;
+  if (o.title) { text(g, o.title, px0 + q * 2, ty, c, { shadow: 'ink', font: 7 }); ty += 14; }
+  for (const l of lines) { text(g, l, px0 + q * 2, ty, o.textColor || 'parch1', { font: 3 }); ty += 8; }
   return rectOf(px0, py0, w, h);
 }
-
-/* -------------------------------------------------------------- scroll list */
-
-/** items: [{label, sub, color, icon}] — returns the index under the mouse, or -1. */
 export function scrollList(g, x, y, w, h, items, o = {}) {
   const rowH = o.rowH || 12;
   const scroll = Math.max(0, Math.min(Math.max(0, items.length * rowH - h), Math.round(o.scroll || 0)));

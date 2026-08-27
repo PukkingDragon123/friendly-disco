@@ -245,7 +245,13 @@ function backdrop() {
   }
   rect(b, 0, RIV_Y + 22, W, 4, 'clay2');
   rect(b, 0, RIV_Y + 25, W, 1, 'clay1');
-  for (let i = 0; i < 160; i++) px(b, (i * 71) % W, RIV_Y + 3 + ((i * 13) % 17), 'foam');
+  // ripples ON the river, as short dashes rather than a scatter of single pixels: a
+  // hundred and sixty specks on the world grid is a hundred and sixty four-pixel blocks,
+  // which is not a river, it is a chequered tablecloth.
+  for (let i = 0; i < 26; i++) {
+    const ry = RIV_Y + 4 + ((i * 7) % 4) * 4;
+    rect(b, (i * 41) % W, ry, 16 + ((i * 13) % 3) * 8, 4, i % 3 ? 'foam' : 'white');
+  }
   // the bridge: three stones, a parapet either side
   rect(b, GATE_CX - 46, RIV_Y - 6, 92, 36, 'stone2');
   rect(b, GATE_CX - 46, RIV_Y - 6, 92, 4, 'stone3');

@@ -22,30 +22,35 @@ const R = Math.round;
 
 /* ----------------------------------------------------------- THE MACRO PIXEL
 
-ONE RESOLUTION FOR THE WHOLE GAME.
+TWO RESOLUTIONS, ON PURPOSE, AND NOT ONE MORE.
 
-The frame is 960x540, but the game is not drawn at 960x540: every asset in it is drawn
-on a TWO-PIXEL GRID, so the smallest thing anything can be is a 2x2 block. That is the
-single rule that makes a screen look like one game rather than three:
+The frame is 960x540 and nothing in the game is drawn at 960x540. There are exactly two
+scales and each one has a job:
 
-  the animals were authored at half size and blitted at 2x  -> 2px features
-  the tiles, the folk and the plants, likewise               -> 2px features
-  the boat, the weather, the set-pieces, the chrome          -> 1px features
+  THE WORLD    a FOUR-PIXEL grid -- skies, seas, ground, props, ruins, chrome, the
+               set-pieces, every panel and every button. Big flat shapes, thick black
+               contours, no fine detail anywhere. This is the poster the game is printed
+               on, and at four pixels a wave is a shape rather than a texture.
+  THE LIVING   a TWO-PIXEL grid -- the animals and the folk, authored at half size in
+               render/pixbuf buffers and blitted at 2x. They are the only things in the
+               frame with eyes in them, so they are the only things allowed the extra
+               resolution, and that difference is what makes them read as ALIVE against
+               a coarse world rather than as stickers on it.
 
-Mixed, the fine stuff reads as higher-resolution than the art it sits on, which is
-exactly what "some of this looks like a different game" means. Rather than hand-editing
-several thousand call sites, the grid lives HERE, in the primitives everything draws
-through: positions snap to even, sizes round up to even, and the round things step two
-rows at a time. A hairline becomes a two-pixel line, a one-pixel speckle becomes a
-two-pixel fleck, and a hundred small decisions about detail density come out consistent
-for free.
+It used to be one grid at two pixels everywhere, which was consistent and flat: the
+animals had nothing the ruins behind them did not have. Coarsening the world by one step
+and leaving the creatures alone costs nothing and does the whole job of a focal plane.
+
+The grid lives HERE, in the primitives everything draws through, rather than in several
+thousand call sites: positions snap, sizes round up, round things step a whole macro
+pixel at a time. A hairline becomes a four-pixel line and a speckle becomes a fleck, so a
+hundred small decisions about detail density come out consistent for free.
 
 Text is the one exception and stays on the fine grid: the fonts are authored shapes with
-their own stroke weights (FONT7's stems are already two pixels), and doubling them would
-double every label in the game. Only the ORIGIN of a string snaps, so text sits on the
-same grid as the box it is printed in.
+their own stroke weights, and quadrupling them would quadruple every label in the game.
+Only the ORIGIN of a string snaps, so text sits on the same grid as the box it is in.
 */
-export let GRID = 2;
+export let GRID = 4;
 const Q = (n) => Math.round(n / GRID) * GRID;                      // a position
 const QS = (n) => Math.max(GRID, Math.round(n / GRID) * GRID);     // a size, never zero
 const QN = (n) => Math.round(n / GRID);                            // in whole macro pixels
@@ -53,17 +58,32 @@ const QN = (n) => Math.round(n / GRID);                            // in whole m
 /**
  * THE ONE EXEMPTION, and it is not an exemption at all.
  *
- * Half the game's art is authored at HALF SIZE and blitted at 2x -- the animals, the
- * folk, the tiles, the plants. Inside one of those buffers a single pixel already IS a
- * macro pixel, so snapping again would make it four screen pixels wide.
+ * A lot of the game's art is authored at HALF SIZE and blitted at 2x. Inside one of those
+ * buffers a pixel is already worth two on the screen, so snapping to the screen grid
+ * again would double it a second time.
  *
- * fine() drops the grid for the duration of a bake that will be blitted at 2x. Anything
- * drawn straight to the screen, or baked and blitted at 1:1, stays on the grid. The rule
- * is not "some things are finer", it is "the macro pixel is measured in SCREEN pixels".
+ * fine() HALVES the grid for the duration of a bake that will be blitted at 2x, which
+ * lands the result back on the screen grid exactly. Anything drawn straight to the
+ * screen, or baked and blitted 1:1, stays as it is. The rule is not "some things are
+ * finer", it is "the macro pixel is measured in SCREEN pixels".
  */
 export function fine(fn) {
   const prev = GRID;
-  GRID = 1;
+  GRID = Math.max(1, Math.round(prev / 2));
+  try { return fn(); } finally { GRID = prev; }
+}
+
+/**
+ * And the other direction: LIVING THINGS keep the two-pixel grid.
+ *
+ * The animals and the folk are drawn through pixbuf, which is its own buffer of palette
+ * keys and never touches this grid at all -- but the few places that draw a creature's
+ * furniture straight onto the screen (a shadow, a glow, a held tool) have to match the
+ * sprite they are attached to rather than the ground it is standing on.
+ */
+export function living(fn) {
+  const prev = GRID;
+  GRID = 2;
   try { return fn(); } finally { GRID = prev; }
 }
 

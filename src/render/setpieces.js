@@ -21,7 +21,7 @@
 // for idle motion. No state, so a screenshot tool can ask for any instant directly.
 
 import { camKeys } from './cine.js';
-import { P, mix } from '../core/palette.js';
+import { P, col, mix } from '../core/palette.js';
 import {
   rect, px, line, disc, ellipse, ellipseFrame, tri, text, wash, clamp, lerp, W, H,
 } from '../core/pixel.js';
@@ -308,8 +308,15 @@ function taper(g, x0, y0, x1, y1, w0, w1, key, lit, dark) {
     const f = i / n;
     const cx = lerp(x0, x1, f), cy = lerp(y0, y1, f), w = lerp(w0, w1, f);
     rect(g, cx - w / 2, cy, w, 2, key);
-    if (lit) rect(g, cx - w / 2, cy, Math.max(2, w * 0.22), 2, lit);
-    if (dark) rect(g, cx + w / 2 - Math.max(2, w * 0.16), cy, Math.max(2, w * 0.16), 2, dark);
+    // A NARROWER EDGE LIGHT. At a fifth of the width it is a stripe of paint down the middle
+    // of the limb, and God's hand came out looking like a rubber glove: an eighth, mixed
+    // halfway back into the body colour, is a lit edge.
+    if (lit) {
+      rect(g, cx - w / 2, cy, Math.max(2, w * 0.12), 2, lit);
+      rect(g, cx - w / 2 + Math.max(2, w * 0.12), cy, Math.max(1, w * 0.08), 2,
+        mix(col(lit), col(key), 0.5));
+    }
+    if (dark) rect(g, cx + w / 2 - Math.max(2, w * 0.14), cy, Math.max(2, w * 0.14), 2, dark);
   }
 }
 
@@ -319,7 +326,9 @@ function wrathHand(g, u, t) {
   const cx = W / 2 + 10;
   const wrist = Math.round(lerp(-70, 120, drop));
   const cloudK = mix(P.night, P.purple0, 0.55);
-  const litK = mix(P.purple1, P.cream, 0.3);
+  // the edge light on it, and it is a HALF STEP rather than a highlight: cream mixed a third
+  // of the way in gave every finger a chalk stripe down it, which is a rubber glove
+  const litK = mix(P.purple0, P.purple1, 0.55);
   const darkK = 'ink';
 
   // the glow it carries with it. Ellipses, not rects: a stepped rectangle glow reads as
@@ -341,7 +350,7 @@ function wrathHand(g, u, t) {
       px0 = nx2; py0 = ny2; ang += spread * 0.34;   // curl, symmetric about the middle
     }
     disc(g, px0, py0, 19, cloudK);
-    rect(g, px0 - 15, py0 - 7, 15, 13, litK);      // a nail of light
+    rect(g, px0 - 11, py0 - 5, 10, 9, mix(col(litK), P.purple1, 0.35));   // a nail of light
   }
   // thumb, out to the side and towards camera
   taper(g, cx - 118, wrist + 54, cx - 208, wrist + 126, 72, 58, cloudK, litK, darkK);
@@ -373,17 +382,47 @@ function wrathHand(g, u, t) {
     }
   }
 
-  // the crowd, huge and close, because we are lying down among them
+  // THE CROWD, huge and close, because we are lying down among them -- and they are PEOPLE
+  // rather than pins. Two failures to learn from: a rectangle with a disc on top and two
+  // hairlines for arms is a bowling alley, and an arm drawn as a horizontal bar plus a line of
+  // dots does not JOIN, so the second version had sticks floating beside the bodies. One
+  // stepped path of blocks per limb, thick enough to be a limb, and a hem wider than the
+  // shoulders.
   const cy = H - 6;
-  for (let i = 0; i < 26; i++) {
-    const cxx = -20 + i * 40 + h(i) * 18;
-    const hh = 70 + h(i * 5) * 80;
-    const wd = 16 + h(i * 3) * 10;
-    rect(g, cxx, cy - hh, wd, hh, 'ink');
-    disc(g, cxx + wd / 2, cy - hh - 8, 9 + h(i) * 3, 'ink');
-    const sw = Math.sin(t * 1.6 + i) * 6;
-    line(g, cxx + 2, cy - hh + 10, cxx - 10 + sw, cy - hh - 26, 'ink');
-    line(g, cxx + wd - 2, cy - hh + 10, cxx + wd + 10 + sw, cy - hh - 26, 'ink');
+  const limb = (x0, y0, x1, y1, th) => {
+    const n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / (th * 0.5)));
+    for (let k = 0; k <= n; k++) {
+      rect(g, lerp(x0, x1, k / n) - th / 2, lerp(y0, y1, k / n) - th / 2, th, th, 'ink');
+    }
+  };
+  for (let i = 0; i < 22; i++) {
+    const cxx = 4 + i * 46 + h(i) * 20;
+    const hh = 76 + h(i * 5) * 84;
+    const wd = 24 + h(i * 3) * 14;
+    const topY = cy - hh;
+    const hipY = cy - hh * 0.44;
+    // legs: two columns with daylight between them
+    for (const sd of [-1, 1]) {
+      limb(cxx + sd * wd * 0.24, hipY, cxx + sd * wd * 0.3, cy - 2, wd * 0.3);
+    }
+    // the body: shoulders in, hem out
+    const bodyH = hipY - topY;
+    for (let k = 0; k < 24; k++) {
+      const f = k / 23;
+      const bw = wd * (0.74 + f * 0.5);
+      rect(g, cxx - bw / 2, topY + f * bodyH, bw, Math.ceil(bodyH / 23) + 1, 'ink');
+    }
+    // the head, and a neck under it so it is not a ball on a plank
+    limb(cxx, topY + 2, cxx, topY - 4, wd * 0.32);
+    disc(g, cxx, topY - 12 - h(i) * 3, 10 + h(i) * 3, 'ink');
+    // arms up, shoulder to elbow to hand, waving at their own rate
+    const sw = Math.sin(t * 1.6 + i) * 8;
+    for (const sd of [-1, 1]) {
+      const shx = cxx + sd * wd * 0.42, shy = topY + bodyH * 0.16;
+      const ex = shx + sd * wd * 0.5, ey = shy - bodyH * 0.2;
+      limb(shx, shy, ex, ey, wd * 0.24);
+      limb(ex, ey, ex + sd * wd * 0.3 + sw * 0.4, ey - bodyH * 0.3, wd * 0.2);
+    }
   }
 }
 

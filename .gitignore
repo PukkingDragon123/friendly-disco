@@ -8,4 +8,9 @@ shots/browser-*.png
 shots/mobile-*.png
 shots/scene-*.png
 shots/bigtext.png
+shots/bundle-*.png
 shots/sprites-probe.png
+
+# The one-file build is generated: `node tools/bundle.mjs`, and it is a megabyte of
+# duplicated source that would churn on every commit.
+dist/
